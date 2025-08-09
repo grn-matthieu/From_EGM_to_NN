@@ -1,6 +1,7 @@
 # From_EGM_to_NN
 **Master’s Thesis – Master in Economics, IP Paris**  
 Author: *Matthieu Grenier*
+
 Supervisor : *Pablo Winant*
 
 ---
@@ -17,10 +18,12 @@ This repository aims to document the results exposed in the thesis. The graphs, 
 The Jupyter notebooks in the repository are written using the Julia Programming Language 1.11.6
 
 External readers may feel free to use my work for personnal or educationnal purposes.
+
 ---
 ## References
 
 Maliar, L., Maliar, S., & Winant, P. (2021). Deep learning for solving dynamic economic models. Journal of Monetary Economics.
+
 Judd, K. L. (1998). Numerical Methods in Economics. MIT Press.
 
 ---
