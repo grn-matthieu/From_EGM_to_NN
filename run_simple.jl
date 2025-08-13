@@ -32,8 +32,20 @@ println("Median residual: ", median(resid))
 # Save results to CSV
 using CSV, DataFrames
 using Dates
+using Plots
+
 logdir = joinpath("runs", Dates.format(now(), "yyyymmdd_HHMMSS"))
 mkpath(logdir)
+# Plot max euler residual against Iterations
+plot(sol.agrid, 
+    resid,
+    yaxis = :log,
+    label="Max Euler Residual", 
+    xlabel="Iterations", 
+    ylabel="Residual", 
+    title="Max Euler Residual vs Iterations")
+
+savefig(joinpath(logdir, "max_euler_residual.png"))
 
 df = DataFrame(a = sol.agrid, c = sol.c, a_next = sol.a_next, residual = resid)
 CSV.write(joinpath(logdir, "simple_egm_results.csv"), df)
