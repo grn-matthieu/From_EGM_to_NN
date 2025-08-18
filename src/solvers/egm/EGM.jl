@@ -2,6 +2,7 @@ module EGMSolver
 export solve_simple_egm, SimpleSolution
 
 using ..SimpleModel
+using ..EGMResiduals: euler_residuals_simple
 
 # ─── Utilities ────────────────────────────────────────────────────────────────
 
@@ -14,13 +15,23 @@ using ..SimpleModel
         return y[end]
     else
         j = searchsortedfirst(xgrid, x)
-        # guard bounds in case of FP edge cases
-        j = j < 2 ? 2 : (j > N ? N : j)
-        x0 = xgrid[j-1]; x1 = xgrid[j]
-        y0 = y[j-1];     y1 = y[j]
+        j = j < 2 ? 2 : (j > N ? N : j) # guard
+        x0, x1 = xgrid[j-1], xgrid[j]
+        y0, y1 = y[j-1], y[j]
         t = (x - x0) / (x1 - x0)
         return (1 - t) * y0 + t * y1
     end
+end
+
+"""
+    envelope_condition(c_next, p)
+
+Euler condition mapping: 
+c_t = (β(1+r))^(-1/σ) * c_{t+1}.
+"""
+@inline function envelope_condition(c_next::Real, p)
+    γ = (p.β * (1 + p.r))^(1 / p.σ)
+    return c_next / γ
 end
 
 # ─── Types ───────────────────────────────────────────────────────────────────
@@ -31,6 +42,7 @@ Base.@kwdef struct SimpleSolution
     a_next::Vector{Float64}
     iters::Int
     converged::Bool
+    max_residual::Float64
 end
 
 # ─── Solver ──────────────────────────────────────────────────────────────────
@@ -38,70 +50,63 @@ end
 """
     solve_simple_egm(p, agrid; tol=1e-8, maxit=500, verbose=false)
 
-Fixed-point/Euler mapping for the simple (deterministic) savings model.
-Uses c_t(a) = [β(1+r)]^(1/σ) * c_{t+1}(a′) with linear interpolation at a′.
-Enforces feasibility and mild monotonicity; relaxation improves stability on coarse grids.
+EGM solver for the simple savings model. 
+Stops when Euler residuals are below tolerance (outside borrowing corner).
 """
 function solve_simple_egm(p, agrid; tol=1e-8, maxit=500, verbose=false)
     Na = length(agrid)
-    agrid = collect(agrid)  # ensure concrete Vector{Float64}
+    agrid = collect(agrid)
 
-    # Feasible initial guess (avoid zeros)
+    # Initial guess
     resources = p.y .+ (1 + p.r) .* agrid .- p.a_min
     c = clamp.(0.5 .* resources, 1e-10, resources)
 
     a_next = similar(c)
-    γ = (p.β * (1 + p.r))^(1 / p.σ)         # Euler factor
     c_floor = 1e-10
-    λ = 0.5                                  # relaxation
-
+    λ = 0.5
     converged = false
     iters = 0
+    max_resid = Inf
 
     for it in 1:maxit
         iters = it
         c_new = similar(c)
 
         @inbounds for i in eachindex(agrid)
-            # Next assets from previous policy
             a′ = SimpleModel.budget_next(agrid[i], p.y, p.r, c[i])
-
-            # Interpolate c_{t+1} at clamped a′
             a′q = clamp(a′, p.a_min, p.a_max)
             c_next = lininterp(agrid, c, a′q)
-
-            # Euler-implied current c
-            cti  = c_next / γ
+            cti = envelope_condition(c_next, p)
             cmax = p.y + (1 + p.r) * agrid[i] - p.a_min
             c_new[i] = clamp(cti, c_floor, cmax)
-
-            # record implied next assets (clamped)
-            a_next[i] = clamp(SimpleModel.budget_next(agrid[i], p.y, p.r, c_new[i]), p.a_min, p.a_max)
+            a_next[i] = clamp(SimpleModel.budget_next(agrid[i], p.y, p.r, c_new[i]),
+                              p.a_min, p.a_max)
         end
 
-        # Enforce monotonicity of c(a) to suppress wiggles on coarse grids
+        # Monotonicity
         @inbounds for i in 2:Na
             if c_new[i] < c_new[i-1]
                 c_new[i] = c_new[i-1] + 1e-12
             end
         end
 
-        # Convergence check BEFORE relaxation
-        maxdiff = maximum(abs.(c_new .- c))
-
-        # Relaxation update
+        # Relaxation
         c .= (1 - λ) .* c .+ λ .* c_new
 
+        # Residual-based convergence check
+        resids = euler_residuals_simple(p, agrid, c)
+        max_resid = maximum(resids[2:end])  # ignore borrowing corner (index 1)
+
         if verbose && (it % 10 == 0)
-            @info "iter=$it maxdiff=$(maxdiff)"
+            @info "iter=$it max_resid=$(max_resid)"
         end
-        if maxdiff < tol
+        if max_resid < tol
             converged = true
             break
         end
     end
 
-    return SimpleSolution(agrid, c, a_next, iters, converged)
+    return SimpleSolution(agrid, c, a_next, iters, converged, max_resid)
 end
 
 end # module

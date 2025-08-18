@@ -10,7 +10,7 @@ using .ThesisProject
 
 # ============= 1) Utility monotonicity =============
 @testset "Utility monotonicity" begin
-    # Testing on different levels of risk aversion
+    # Testing on different levels of risk aversion to ensure stability
     σs = (1.0, 2.0, 3.0)
     cs = [0.8, 1.0, 1.2, 1.5]
 
@@ -27,7 +27,7 @@ end
     p = default_simple_params()
 
     states = [(a = a, c = min(p.y + (1+p.r)*a - p.a_min, 0.9*(p.y + (1+p.r)*a - p.a_min)))
-              for a in range(p.a_min, p.a_max, length=5)]
+              for a in range(p.a_min, p.a_max, length=10)]
 
     for s in states
         a′ = budget_next(s.a, p.y, p.r, s.c)
@@ -38,7 +38,7 @@ end
 # ============= 3) Policy feasibility=============
 @testset "Policy feasibility: a' in [a_min, a_max], c ≥ 0" begin
     p = default_simple_params()
-    Na = 7
+    Na = 10
     agrid = collect(range(p.a_min, p.a_max, length=Na))
 
     sol = solve_simple_egm(p, agrid; tol=1e-8, maxit=300, verbose=false)
@@ -55,7 +55,7 @@ end
 # ============= 4) Euler residuals shape/finite (sanity) =============
 @testset "Euler residuals sanity" begin
     p = default_simple_params()
-    Na = 7
+    Na = 10
     agrid = collect(range(p.a_min, p.a_max, length=Na))
     sol = solve_simple_egm(p, agrid; tol=1e-8, maxit=300, verbose=false)
 

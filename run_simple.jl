@@ -36,16 +36,14 @@ using Plots
 
 logdir = joinpath("runs", Dates.format(now(), "yyyymmdd_HHMMSS"))
 mkpath(logdir)
-# Plot max euler residual against Iterations
-plot(sol.agrid, 
-    resid,
-    yaxis = :log,
-    label="Max Euler Residual", 
-    xlabel="Iterations", 
-    ylabel="Residual", 
-    title="Max Euler Residual vs Iterations")
 
-savefig(joinpath(logdir, "max_euler_residual.png"))
+runid = "baseline"  # or an experiment ID you generate elsewhere
+
+
+plot_policy(sol; runid)
+plot_value(sol, p; runid)
+plot_residuals(sol, p; runid)          
+plot_residuals(sol, p; runid, log10scale=false)
 
 df = DataFrame(a = sol.agrid, c = sol.c, a_next = sol.a_next, residual = resid)
 CSV.write(joinpath(logdir, "simple_egm_results.csv"), df)

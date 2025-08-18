@@ -8,13 +8,13 @@ model:
   r: 0.02
   y: 1.0
   a_min: 0.0
-  a_max: 20.0
+  a_max: 100.0
 
 grid:
-  Na: 40
-  a_max: 20.0
+  Na: 100
+  a_max: 100.0
 
 solver:
   tol: 1.0e-6
-  maxit: 500
+  maxit: 1000
   verbose: true
