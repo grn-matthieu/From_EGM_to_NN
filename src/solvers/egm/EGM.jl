@@ -4,37 +4,16 @@ export solve_simple_egm, SimpleSolution
 using ..SimpleModel
 using ..EGMResiduals: euler_residuals_simple
 
-# ─── Utilities ────────────────────────────────────────────────────────────────
-
-"Robust linear interpolation on a sorted grid; clamps out-of-bounds queries."
-@inline function lininterp(xgrid::AbstractVector{<:Real}, y::AbstractVector{<:Real}, x::Real)
-    N = length(xgrid)
-    if x <= xgrid[1]
-        return y[1]
-    elseif x >= xgrid[end]
-        return y[end]
-    else
-        j = searchsortedfirst(xgrid, x)
-        j = j < 2 ? 2 : (j > N ? N : j) # guard
-        x0, x1 = xgrid[j-1], xgrid[j]
-        y0, y1 = y[j-1], y[j]
-        t = (x - x0) / (x1 - x0)
-        return (1 - t) * y0 + t * y1
-    end
-end
-
-"""
-    envelope_condition(c_next, p)
-
-Euler condition mapping: 
-c_t = (β(1+r))^(-1/σ) * c_{t+1}.
-"""
-@inline function envelope_condition(c_next::Real, p)
-    γ = (p.β * (1 + p.r))^(1 / p.σ)
-    return c_next / γ
-end
 
 # ─── Types ───────────────────────────────────────────────────────────────────
+abstract type InterpKind end
+struct LinearInterp <: InterpKind end # Default interpolation
+struct MonotoneCubicInterp <: InterpKind end
+
+"""
+    SimpleModelParameters
+
+"""
 
 Base.@kwdef struct SimpleSolution
     agrid::Vector{Float64}
@@ -45,58 +24,159 @@ Base.@kwdef struct SimpleSolution
     max_residual::Float64
 end
 
+
+# ─── Vectorized interpolation helpers ────────────────────────────────────────────────────────────────
+
+function interp_linear!(out::AbstractVector(<:Real),
+                        x::AbstractVector(<:Real),
+                        y::AbstractVector(<:Real),
+                        xq::AbstractVector{<:Real})
+    """
+    Performs linear interpolation on the input vectors.
+    """
+    N = length(x)
+    @inbounds for k in eachindex(xq)
+        ξ = xq[k]
+        if ξ <= y[1]
+            out[k] = y[1]
+        elseif ξ >= x[end]
+            out[k] = y[end]
+        else
+            j = searchsortedfirst(x, ξ)
+            x0 = x[j-1]; x1 = x[j]
+            y0 = y[j-1]; y1 = y[j]
+            t = (ξ - x0) / (x1 - x0)
+            out[k] = (1 - t) * y0 + t * y1 # Straight line interpolation
+        end
+    end
+    return out
+end
+
+function pchip_slopes(x::AbstractVector{<:Real}, y::AbstractVector{<:Real})
+    """
+    Computes the slopes for piecewise cubic Hermite interpolation (PCHIP).
+    """
+    n = length(x)
+    d = similar(y, Float64)
+    Δ = similar(y, Float64); h = similar(y, Float64)
+    @inbounds for i in 1:n-1
+        h[i]  = x[i+1] - x[i]
+        Δ[i]  = (y[i+1] - y[i]) / h[i]
+    end
+    # interior slopes
+    d[1] = Δ[1]
+    d[n] = Δ[n-1]
+    @inbounds for i in 2:n-1
+        if (Δ[i-1] ≤ 0 && Δ[i] ≤ 0) || (Δ[i-1] ≥ 0 && Δ[i] ≥ 0) == false
+            d[i] = 0.0
+        else
+            w1 = 2h[i] + h[i-1]
+            w2 = h[i] + 2h[i-1]
+            d[i] = (w1 + w2) / (w1/Δ[i-1] + w2/Δ[i])
+        end
+    end
+    return d, h, Δ
+end
+
+
+# Monotone cubic (PCHIP) evaluation; vectorized over xq
+function interp_pchip!(out::AbstractVector{<:Real},
+                       x::AbstractVector{<:Real},
+                       y::AbstractVector{<:Real},
+                       xq::AbstractVector{<:Real})
+    """
+    Monotone cubic (PCHIP) interpolation.
+    """
+    n = length(x)
+    @assert all(diff(x) .> 0)
+    @assert all(diff(y) .≥ 0) "Monotone cubic requires non-decreasing data"
+    # Checks on conditions for PCHIP to avoid overshoot around kinks
+    d, h, _ = pchip_slopes(x, y)
+    @inbounds for k in eachindex(xq)
+        ξ = xq[k]
+        if ξ <= x[1]
+            out[k] = y[1]
+            continue
+        elseif ξ >= x[end]
+            out[k] = y[end]
+            continue
+        end
+        j = searchsortedfirst(x, ξ)
+        i = j-1
+        hi = h[i]
+        t  = (ξ - x[i]) / hi
+        t2 = t*t
+        t3 = t2*t
+        h00 =  2t3 - 3t2 + 1
+        h10 =    t3 - 2t2 + t
+        h01 = -2t3 + 3t2
+        h11 =    t3 -   t2
+        out[k] = h00*y[i] + h10*hi*d[i] + h01*y[i+1] + h11*hi*d[i+1]
+    end
+    return out
+end
+
 # ─── Solver ──────────────────────────────────────────────────────────────────
+function solve_simple_egm(p, agrid;
+        tol::Real=1e-8, maxit::Int=500, verbose::Bool=false,
+        interp_kind::InterpKind=LinearInterp(), relax::Real=0.5)
+    """
+    Vectorized EGM with residual-based stopping. No recurring income; borrowing limit at `p.a_min`.
+    """
 
-"""
-    solve_simple_egm(p, agrid; tol=1e-8, maxit=500, verbose=false)
+    a = collect(agrid)
+    Na = length(a)
 
-EGM solver for the simple savings model. 
-Stops when Euler residuals are below tolerance (outside borrowing corner).
-"""
-function solve_simple_egm(p, agrid; tol=1e-8, maxit=500, verbose=false)
-    Na = length(agrid)
-    agrid = collect(agrid)
+    γ = (p.β * (1 + p.r))^(1 / p.σ)
+    onepr = (1 + p.r)
+    cmin  = 1e-12
 
-    # Initial guess
-    resources = p.y .+ (1 + p.r) .* agrid .- p.a_min
-    c = clamp.(0.5 .* resources, 1e-10, resources)
+    # Initial guess for resources and consumption
+    resources = @. onepr * a - p.a_min
+    c = clamp.(0.5 .* resources, cmin, resources)
 
-    a_next = similar(c)
-    c_floor = 1e-10
-    λ = 0.5
+    # Buffer variables
+    a′ = similar(c)
+    cnext = similar(c)
+    cnew = similar(c)
+    anext = similar(c)
+
     converged = false
     iters = 0
     max_resid = Inf
 
     for it in 1:maxit
         iters = it
-        c_new = similar(c)
 
-        @inbounds for i in eachindex(agrid)
-            a′ = SimpleModel.budget_next(agrid[i], p.y, p.r, c[i])
-            a′q = clamp(a′, p.a_min, p.a_max)
-            c_next = lininterp(agrid, c, a′q)
-            cti = envelope_condition(c_next, p)
-            cmax = p.y + (1 + p.r) * agrid[i] - p.a_min
-            c_new[i] = clamp(cti, c_floor, cmax)
-            a_next[i] = clamp(SimpleModel.budget_next(agrid[i], p.y, p.r, c_new[i]),
-                              p.a_min, p.a_max)
+        @. a′ = onepr * a - c
+        @. a′ = clamp(a′, p.a_min, p.a_max)
+
+        if interp_kind isa LinearInterp
+            interp_linear!(cnext, a, c, a′)
+        else
+            interp_pchip!(cnext, a, c, a′)
         end
 
-        # Monotonicity
+        @. cnew = cnext / γ
+        cmax = @. onepr * a - p.a_min
+        @. cnew = clamp(cnew, cmin, cmax)
+
+        @. anext = onepr * a - cnew
+        @. anext = clamp(anext, p.a_min, p.a_max)
+        
+        # Check on monotonicity
         @inbounds for i in 2:Na
-            if c_new[i] < c_new[i-1]
-                c_new[i] = c_new[i-1] + 1e-12
+            if cnew[i] < cnew[i-1]
+                cnew[i] = cnew[i-1] + 1e-12
             end
         end
+        
+        # Relaxation to stabilize on coarse grids
+        c .= (1 - relax) .* c .+ relax .* cnew
 
-        # Relaxation
-        c .= (1 - λ) .* c .+ λ .* c_new
-
-        # Residual-based convergence check
-        resids = euler_residuals_simple(p, agrid, c)
-        max_resid = maximum(resids[2:end])  # ignore borrowing corner (index 1)
-
+        # Residual based stopping criteria : only stop when the max residual is below the tolerance
+        res = euler_residuals_simple(p, a, c)
+        max_resid = maximum(res[min(2, end):end])  # Ignore where the BC is binding so EE may hold as an inequality
         if verbose && (it % 10 == 0)
             @info "iter=$it max_resid=$(max_resid)"
         end
@@ -106,7 +186,11 @@ function solve_simple_egm(p, agrid; tol=1e-8, maxit=500, verbose=false)
         end
     end
 
-    return SimpleSolution(agrid, c, a_next, iters, converged, max_resid)
+    # Last a next consistent with c
+    @. anext = onepr * a - c
+    @. anext = clamp(anext, p.a_min, p.a_max)
+
+    return SimpleSolution(a, c, anext, iters, converged, max_resid)
 end
 
 end # module
