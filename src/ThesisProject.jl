@@ -20,12 +20,15 @@ include("utils/Logging.jl")
 include("utils/RandomTools.jl")
 include("utils/ValueFunction.jl")
 include("utils/PlotsUtils.jl")
+include("models/shared/Shocks.jl")
+
 
 using .UtilsConfig
 using .UtilsLogging
 using .UtilsRandom
 using .ValueFunction
 using .PlotsUtils
+using .Shocks
 
 # ─── Re-exports for convenience ─────────────────────
 # Models
@@ -33,10 +36,11 @@ export SimpleParams, default_simple_params
 export u, inv_uprime, budget_next
 
 # Solvers
-export solve_simple_egm, SimpleSolution
+export SimpleSolution
+export solve_simple_egm, solve_stochastic_egm
 
 # Diagnostics (Euler residuals)
-export euler_residuals_simple
+export euler_residuals_stochastic, euler_residuals_simple
 
 # Utils (config/logging/random)
 export UtilsConfig, UtilsLogging, UtilsRandom
@@ -44,5 +48,8 @@ export UtilsConfig, UtilsLogging, UtilsRandom
 # Value function + plotting utils
 export compute_value
 export save_plot, plot_policy, plot_value, plot_residuals
+
+# Shock discretization
+export discretize_ar1
 
 end # module

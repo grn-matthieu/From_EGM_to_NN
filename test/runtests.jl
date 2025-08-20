@@ -64,6 +64,25 @@ end
     @test all(isfinite.(resid))
 end
 
+# ============= 5) AR(1) discretization =============
+@testset "AR(1) discretization" begin
+    ρ, σ, Nz = 0.95, 0.10, 9
+    for method in ("tauchen", "rouwenhorst")
+        z, P = ThesisProject.discretize_ar1(method, ρ, σ, Nz; m=3.0)
+        @test size(P) == (Nz, Nz)
+        @test all(abs.(sum(P, dims=2) .- 1) .< 1e-12)  # row sums = 1
+        # stationary variance approx:
+        π = ones(Nz) ./ Nz
+        for _ in 1:500
+            π = (π' * P)'  # iterate to stationarity
+        end
+        μ = sum(π .* z)
+        v = sum(π .* (z .- μ).^2)
+        v_theory = σ^2 / (1 - ρ^2)
+        @test isfinite(v) && abs(v - v_theory) / v_theory < 0.10  # loose tolerance
+    end
+end
+
 
 green(text) = "\033[32m" * text * "\033[0m"
 println(green("\n✅ All tests passed successfully\n"))

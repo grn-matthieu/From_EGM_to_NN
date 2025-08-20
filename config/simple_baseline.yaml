@@ -16,5 +16,13 @@ grid:
 
 solver:
   tol: 1.0e-6
-  maxit: 1000
+  maxit: 10000
   verbose: true
+
+shocks:
+  active: true
+  method: "rouwenhorst"   # or "tauchen"
+  ρ_shock: 0.95
+  σ_shock: 0.10
+  Nz: 9
+  m: 3.0                  # only used by Tauchen

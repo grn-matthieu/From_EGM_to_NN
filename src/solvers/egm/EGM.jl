@@ -1,5 +1,5 @@
 module EGMSolver
-export solve_simple_egm, SimpleSolution
+export solve_simple_egm, SimpleSolution, solve_stochastic_egm
 
 using ..SimpleModel
 using ..EGMResiduals: euler_residuals_simple
@@ -8,7 +8,7 @@ using ..EGMResiduals: euler_residuals_simple
 # ─── Types ───────────────────────────────────────────────────────────────────
 abstract type InterpKind end
 struct LinearInterp <: InterpKind end # Default interpolation
-struct MonotoneCubicInterp <: InterpKind end
+struct MonotoneCubicInterp <: InterpKind end    
 
 """
     SimpleModelParameters
@@ -27,26 +27,28 @@ end
 
 # ─── Vectorized interpolation helpers ────────────────────────────────────────────────────────────────
 
-function interp_linear!(out::AbstractVector(<:Real),
-                        x::AbstractVector(<:Real),
-                        y::AbstractVector(<:Real),
-                        xq::AbstractVector{<:Real})
+function interp_linear!(out::AbstractArray,
+                        x::AbstractVector,
+                        y::AbstractVector,
+                        xq::AbstractVector)
     """
-    Performs linear interpolation on the input vectors.
+    Performs linear interpolation on (x,y) at query points xq.
+    Works with y as a vector or as a column view from a matrix.
     """
     N = length(x)
     @inbounds for k in eachindex(xq)
         ξ = xq[k]
-        if ξ <= y[1]
+        if ξ <= x[1]
             out[k] = y[1]
         elseif ξ >= x[end]
             out[k] = y[end]
         else
             j = searchsortedfirst(x, ξ)
+            j = clamp(j, 2, N)  # guard
             x0 = x[j-1]; x1 = x[j]
             y0 = y[j-1]; y1 = y[j]
             t = (ξ - x0) / (x1 - x0)
-            out[k] = (1 - t) * y0 + t * y1 # Straight line interpolation
+            out[k] = (1 - t) * y0 + t * y1
         end
     end
     return out
@@ -139,7 +141,7 @@ function solve_simple_egm(p, agrid;
     a′ = similar(c)
     cnext = similar(c)
     cnew = similar(c)
-    anext = similar(c)
+    a_next = similar(c)
 
     converged = false
     iters = 0
@@ -161,8 +163,8 @@ function solve_simple_egm(p, agrid;
         cmax = @. onepr * a - p.a_min
         @. cnew = clamp(cnew, cmin, cmax)
 
-        @. anext = onepr * a - cnew
-        @. anext = clamp(anext, p.a_min, p.a_max)
+        @. a_next = onepr * a - cnew
+        @. a_next = clamp(a_next, p.a_min, p.a_max)
         
         # Check on monotonicity
         @inbounds for i in 2:Na
@@ -187,10 +189,121 @@ function solve_simple_egm(p, agrid;
     end
 
     # Last a next consistent with c
-    @. anext = onepr * a - c
-    @. anext = clamp(anext, p.a_min, p.a_max)
+    @. a_next = onepr * a - c
+    @. a_next = clamp(a_next, p.a_min, p.a_max)
 
-    return SimpleSolution(a, c, anext, iters, converged, max_resid)
+    return SimpleSolution(a, c, a_next, iters, converged, max_resid)
 end
+
+
+function solve_stochastic_egm(p, agrid, zgrid, Pz;
+        tol::Real=1e-8, maxit::Int=500, verbose::Bool=false,
+        interp_kind::InterpKind=LinearInterp(), relax::Real=0.5,
+        ν::Real=1e-10, patience::Int=50)
+
+    """
+    Vectorized stochastic EGM with residual-based stopping.
+    Income follows discretized AR(1): log y = z, with (zgrid, Pz).
+    Stopping criteria: (i) residuals < tol, OR
+                       (ii) no progress > ν for `patience` iterations.
+    """
+
+    Na, Nz = length(agrid), length(zgrid)
+    a = collect(agrid)
+
+    onepr = (1 + p.r)
+    cmin  = 1e-12
+    converged = false
+    iters = 0
+    max_resid = Inf
+
+    # Initial guess: consume income
+    c = fill(1.0, Na, Nz)
+    a′    = similar(c)
+    cnext = similar(a)     # 1D buffer, same length as a
+    cnew  = similar(c)
+    a_next = similar(c)
+
+    # Stagnation tracking
+    best_resid = Inf
+    no_progress = 0
+
+    for it in 1:maxit
+        iters = it
+
+        # Loop over shock states
+        for (j,z) in enumerate(zgrid)
+            y = exp(z)
+
+            @. a′[:,j] = onepr * a + y - c[:,j]
+            @. a′[:,j] = clamp(a′[:,j], p.a_min, p.a_max)
+
+            # Expectation of u'(c')
+            EUprime = similar(a)
+            fill!(EUprime, 0.0)
+
+            for (jp,zp) in enumerate(zgrid)
+                if interp_kind isa LinearInterp
+                    interp_linear!(cnext, a, view(c,:,jp), view(a′,:,j))
+                else
+                    interp_pchip!(cnext, a, view(c,:,jp), view(a′,:,j))
+                end
+                @. EUprime += Pz[j,jp] * (cnext.^(-p.σ))
+            end
+
+            # Update consumption via inverse Euler equation
+            @. cnew[:,j] = ((p.β * onepr) * EUprime).^(-1/p.σ)
+            cmax = @. y + onepr * a - p.a_min
+            @. cnew[:,j] = clamp(cnew[:,j], cmin, cmax)
+
+            @. a_next[:,j] = onepr * a + y - cnew[:,j]
+            @. a_next[:,j] = clamp(a_next[:,j], p.a_min, p.a_max)
+
+            # Enforce monotonicity in assets
+            @inbounds for i in 2:Na
+                if cnew[i,j] < cnew[i-1,j]
+                    cnew[i,j] = cnew[i-1,j] + 1e-12
+                end
+            end
+        end
+
+        # Relaxation update
+        @. c = (1 - relax) * c + relax * cnew
+
+        # Convergence check: Euler residuals across all states
+        max_resid = -Inf
+        for j in 1:Nz
+            res = euler_residuals_simple(p, a, view(c,:,j))
+            max_resid = max(max_resid, maximum(res[min(2,end):end]))
+        end
+
+        if verbose && (it % 10 == 0)
+            @info "iter=$it max_resid=$(max_resid)"
+        end
+
+        # Check convergence
+        if max_resid < tol
+            converged = true
+            break
+        end
+        
+        # Stagnation check
+        if best_resid - max_resid < ν
+            no_progress += 1
+        else
+            no_progress = 0
+            best_resid = max_resid
+        end
+        if no_progress ≥ patience
+            @warn "Stopped early: no progress in Euler errors for $patience iterations"
+            break
+        end
+    end
+
+    return (agrid=a, zgrid=zgrid, c=c, a_next=a_next,
+            iters=iters, converged=converged, max_resid=max_resid)
+end
+
+
 
 end # module
