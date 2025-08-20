@@ -118,9 +118,11 @@ function interp_pchip!(out::AbstractVector{<:Real},
     return out
 end
 
+
+
 # ─── Solver ──────────────────────────────────────────────────────────────────
 function solve_simple_egm(p, agrid;
-        tol::Real=1e-8, maxit::Int=500, verbose::Bool=false,
+        tol::Real=1e-8, tol_pol::Real=1e-6, maxit::Int=500, verbose::Bool=false,
         interp_kind::InterpKind=LinearInterp(), relax::Real=0.5)
     """
     Vectorized EGM with residual-based stopping. No recurring income; borrowing limit at `p.a_min`.
@@ -146,6 +148,7 @@ function solve_simple_egm(p, agrid;
     converged = false
     iters = 0
     max_resid = Inf
+    max_Δ_pol = Inf
 
     for it in 1:maxit
         iters = it
@@ -179,10 +182,11 @@ function solve_simple_egm(p, agrid;
         # Residual based stopping criteria : only stop when the max residual is below the tolerance
         res = euler_residuals_simple(p, a, c)
         max_resid = maximum(res[min(2, end):end])  # Ignore where the BC is binding so EE may hold as an inequality
+        Δpol = maximum(abs.(c - cnew))
         if verbose && (it % 10 == 0)
-            @info "iter=$it max_resid=$(max_resid)"
+            @info "iter=$it max_resid=$(max_resid) max_Δ_pol=$(max_Δ_pol)"
         end
-        if max_resid < tol
+        if max_resid < tol && Δpol < tol_pol
             converged = true
             break
         end
@@ -197,7 +201,7 @@ end
 
 
 function solve_stochastic_egm(p, agrid, zgrid, Pz;
-        tol::Real=1e-8, maxit::Int=500, verbose::Bool=false,
+        tol::Real=1e-8, tol_pol::Real = 1e-6, maxit::Int=500, verbose::Bool=false,
         interp_kind::InterpKind=LinearInterp(), relax::Real=0.5,
         ν::Real=1e-10, patience::Int=50)
 
@@ -216,6 +220,7 @@ function solve_stochastic_egm(p, agrid, zgrid, Pz;
     converged = false
     iters = 0
     max_resid = Inf
+    max_Δ_pol = Inf
 
     # Initial guess: consume income
     c = fill(1.0, Na, Nz)
@@ -278,11 +283,13 @@ function solve_stochastic_egm(p, agrid, zgrid, Pz;
         end
 
         if verbose && (it % 10 == 0)
-            @info "iter=$it max_resid=$(max_resid)"
+            @info "iter=$it max_resid=$(max_resid) max_Δ_pol=$(max_Δ_pol)"
         end
 
+        max_Δ_pol = maximum(abs.(c - cnew))
+
         # Check convergence
-        if max_resid < tol
+        if max_resid < tol && max_Δ_pol < tol_pol
             converged = true
             break
         end
