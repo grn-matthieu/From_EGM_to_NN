@@ -1,5 +1,5 @@
 experiment:
-  name: "simple_egm_smoke"
+  name: "simple_baseline_egm"
   seed: 1234
 
 model:
@@ -7,22 +7,13 @@ model:
   sigma: 2.0
   r: 0.02
   y: 1.0
-  a_min: 0.0
-  a_max: 100.0
 
 grid:
-  Na: 100
-  a_max: 100.0
+  Na: 10000
+  a_min: 0.0
+  a_max: 20.0
 
 solver:
   tol: 1.0e-6
   maxit: 10000
   verbose: true
-
-shocks:
-  active: true
-  method: "rouwenhorst"   # or "tauchen"
-  ρ_shock: 0.95
-  σ_shock: 0.10
-  Nz: 9
-  m: 3.0                  # only used by Tauchen

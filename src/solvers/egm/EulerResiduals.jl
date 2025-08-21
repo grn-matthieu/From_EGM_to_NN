@@ -55,32 +55,25 @@ function euler_residuals_simple(p, agrid::AbstractVector{<:Real}, c::AbstractVec
     return resid
 end
 
-function euler_residuals_stochastic(p, agrid, zgrid, Pz, c::AbstractMatrix{<:Real})
+# Stochastic Euler residuals:
+# res[i,j] = 1 - β(1+r) * Σ_{j'} Π[j,j'] * (c'(a',j') / c(a,j))^{-σ}
+function euler_residuals_stochastic(p, agrid, zgrid, Π, c)
     Na, Nz = size(c)
-    resid = zeros(Na, Nz)
-    onepr = 1 + p.r
-    γβr = p.β * onepr
-
+    res = similar(c)
+    β = p.β; r = p.r; σ = p.σ
     @inbounds for j in 1:Nz
         y = exp(zgrid[j])
         for i in 1:Na
-            ct = max(c[i,j], 1e-12)
-            a′ = onepr * agrid[i] + y - ct
-            a′ = clamp(a′, agrid[1], agrid[end])
-
-            # Interpolate c_{t+1} at a′ for ALL future shock states at once
-            c_future = similar(agrid, Nz)
+            c_ij = c[i,j]
+            ap = (1 + r) * agrid[i] + y - c_ij
+            Emu = 0.0
             for jp in 1:Nz
-                c_future[jp] = max(lininterp(agrid, view(c,:,jp), a′), 1e-12)
+                cp = lininterp(agrid, view(c, :, jp), ap)
+                Emu += Π[j, jp] * (cp / c_ij)^(-σ)
             end
-
-            # Expected marginal utility = dot product of transition probs with u'(c_{t+1})
-            EUprime = dot(Pz[j, :], c_future.^(-p.σ))
-
-            resid[i,j] = abs(1 - γβr * (EUprime / ct^(-p.σ)))
+            res[i,j] = 1.0 - β * (1 + r) * Emu
         end
     end
-    return resid
+    return res
 end
-
 end # module

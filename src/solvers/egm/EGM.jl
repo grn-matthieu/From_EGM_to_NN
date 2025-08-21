@@ -2,7 +2,7 @@ module EGMSolver
 export solve_simple_egm, SimpleSolution, solve_stochastic_egm
 
 using ..SimpleModel
-using ..EGMResiduals: euler_residuals_simple
+using ..EGMResiduals: euler_residuals_simple, euler_residuals_stochastic
 
 
 # ─── Types ───────────────────────────────────────────────────────────────────
@@ -123,12 +123,14 @@ end
 # ─── Solver ──────────────────────────────────────────────────────────────────
 function solve_simple_egm(p, agrid;
         tol::Real=1e-8, tol_pol::Real=1e-6, maxit::Int=500, verbose::Bool=false,
-        interp_kind::InterpKind=LinearInterp(), relax::Real=0.5)
+        interp_kind::InterpKind=LinearInterp(), relax::Real=0.5, patience::Int=50, ν::Real=1e-10)
     """
     Vectorized EGM with residual-based stopping. No recurring income; borrowing limit at `p.a_min`.
     """
 
     a = collect(agrid)
+    a_min = minimum(a)
+    a_max = maximum(a)
     Na = length(a)
 
     γ = (p.β * (1 + p.r))^(1 / p.σ)
@@ -136,7 +138,7 @@ function solve_simple_egm(p, agrid;
     cmin  = 1e-12
 
     # Initial guess for resources and consumption
-    resources = @. onepr * a - p.a_min
+    resources = @. onepr * a - a_min + p.y
     c = clamp.(0.5 .* resources, cmin, resources)
 
     # Buffer variables
@@ -148,13 +150,15 @@ function solve_simple_egm(p, agrid;
     converged = false
     iters = 0
     max_resid = Inf
-    max_Δ_pol = Inf
+    Δpol = Inf
+    best_resid = Inf
+    no_progress = 0
 
     for it in 1:maxit
         iters = it
 
-        @. a′ = onepr * a - c
-        @. a′ = clamp(a′, p.a_min, p.a_max)
+        @. a′ = p.y + onepr * a - c
+        @. a′ = clamp(a′, a_min, a_max)
 
         if interp_kind isa LinearInterp
             interp_linear!(cnext, a, c, a′)
@@ -163,19 +167,20 @@ function solve_simple_egm(p, agrid;
         end
 
         @. cnew = cnext / γ
-        cmax = @. onepr * a - p.a_min
+        cmax = @. p.y + onepr * a - a_min
         @. cnew = clamp(cnew, cmin, cmax)
 
-        @. a_next = onepr * a - cnew
-        @. a_next = clamp(a_next, p.a_min, p.a_max)
-        
-        # Check on monotonicity
-        @inbounds for i in 2:Na
-            if cnew[i] < cnew[i-1]
-                cnew[i] = cnew[i-1] + 1e-12
+        @. a_next = onepr * a + p.y - cnew
+        @. a_next = clamp(a_next, a_min, a_max)
+
+        # Only enforce monotonicity if using PCHIP
+        if interp_kind isa MonotoneCubicInterp
+            @inbounds for i in 2:Na
+                if cnew[i] < cnew[i-1]
+                    cnew[i] = cnew[i-1] + 1e-12
+                end
             end
         end
-        
         # Relaxation to stabilize on coarse grids
         c .= (1 - relax) .* c .+ relax .* cnew
 
@@ -184,8 +189,23 @@ function solve_simple_egm(p, agrid;
         max_resid = maximum(res[min(2, end):end])  # Ignore where the BC is binding so EE may hold as an inequality
         Δpol = maximum(abs.(c - cnew))
         if verbose && (it % 10 == 0)
-            @info "iter=$it max_resid=$(max_resid) max_Δ_pol=$(max_Δ_pol)"
+            @info "iter=$it max_resid=$(max_resid) max_Δpol=$(Δpol)"
         end
+
+        # --- Stagnation check ---
+        if (best_resid - max_resid < ν) && (Δpol < ν)
+            no_progress += 1
+        else
+            no_progress = 0
+            best_resid = max_resid
+        end
+
+        if no_progress ≥ patience
+            @warn "Stopped early: no progress in Euler errors or policy for $patience iterations, iter : $iters"
+            break
+        end
+
+
         if max_resid < tol && Δpol < tol_pol
             converged = true
             break
@@ -193,8 +213,8 @@ function solve_simple_egm(p, agrid;
     end
 
     # Last a next consistent with c
-    @. a_next = onepr * a - c
-    @. a_next = clamp(a_next, p.a_min, p.a_max)
+    @. a_next = onepr * a + p.y - c
+    @. a_next = clamp(a_next, a_min, a_max)
 
     return SimpleSolution(a, c, a_next, iters, converged, max_resid)
 end
@@ -205,15 +225,9 @@ function solve_stochastic_egm(p, agrid, zgrid, Pz;
         interp_kind::InterpKind=LinearInterp(), relax::Real=0.5,
         ν::Real=1e-10, patience::Int=50)
 
-    """
-    Vectorized stochastic EGM with residual-based stopping.
-    Income follows discretized AR(1): log y = z, with (zgrid, Pz).
-    Stopping criteria: (i) residuals < tol, OR
-                       (ii) no progress > ν for `patience` iterations.
-    """
-
     Na, Nz = length(agrid), length(zgrid)
     a = collect(agrid)
+    a_min, a_max = minimum(a), maximum(a)
 
     onepr = (1 + p.r)
     cmin  = 1e-12
@@ -222,28 +236,24 @@ function solve_stochastic_egm(p, agrid, zgrid, Pz;
     max_resid = Inf
     max_Δ_pol = Inf
 
-    # Initial guess: consume income
     c = fill(1.0, Na, Nz)
     a′    = similar(c)
-    cnext = similar(a)     # 1D buffer, same length as a
+    cnext = similar(a)
     cnew  = similar(c)
     a_next = similar(c)
 
-    # Stagnation tracking
     best_resid = Inf
     no_progress = 0
 
     for it in 1:maxit
         iters = it
 
-        # Loop over shock states
         for (j,z) in enumerate(zgrid)
             y = exp(z)
 
             @. a′[:,j] = onepr * a + y - c[:,j]
-            @. a′[:,j] = clamp(a′[:,j], p.a_min, p.a_max)
+            @. a′[:,j] = clamp(a′[:,j], a_min, a_max)
 
-            # Expectation of u'(c')
             EUprime = similar(a)
             fill!(EUprime, 0.0)
 
@@ -256,51 +266,46 @@ function solve_stochastic_egm(p, agrid, zgrid, Pz;
                 @. EUprime += Pz[j,jp] * (cnext.^(-p.σ))
             end
 
-            # Update consumption via inverse Euler equation
             @. cnew[:,j] = ((p.β * onepr) * EUprime).^(-1/p.σ)
-            cmax = @. y + onepr * a - p.a_min
+            cmax = @. y + onepr * a - a_min
             @. cnew[:,j] = clamp(cnew[:,j], cmin, cmax)
 
             @. a_next[:,j] = onepr * a + y - cnew[:,j]
-            @. a_next[:,j] = clamp(a_next[:,j], p.a_min, p.a_max)
+            @. a_next[:,j] = clamp(a_next[:,j], a_min, a_max)
 
-            # Enforce monotonicity in assets
-            @inbounds for i in 2:Na
-                if cnew[i,j] < cnew[i-1,j]
-                    cnew[i,j] = cnew[i-1,j] + 1e-12
+            if interp_kind isa MonotoneCubicInterp
+                @inbounds for i in 2:Na
+                    if cnew[i,j] < cnew[i-1,j]
+                        cnew[i,j] = cnew[i-1,j] + 1e-12
+                    end
                 end
             end
         end
 
-        # Relaxation update
+        max_Δ_pol = maximum(abs.(c - cnew))
+
         @. c = (1 - relax) * c + relax * cnew
 
-        # Convergence check: Euler residuals across all states
         max_resid = -Inf
-        for j in 1:Nz
-            res = euler_residuals_simple(p, a, view(c,:,j))
-            max_resid = max(max_resid, maximum(res[min(2,end):end]))
-        end
+        res = euler_residuals_stochastic(p, a, zgrid, Pz, c)
+        max_resid = maximum(res[min(2,end):end, :])
 
         if verbose && (it % 10 == 0)
             @info "iter=$it max_resid=$(max_resid) max_Δ_pol=$(max_Δ_pol)"
         end
 
-        max_Δ_pol = maximum(abs.(c - cnew))
-
-        # Check convergence
         if max_resid < tol && max_Δ_pol < tol_pol
             converged = true
             break
         end
-        
-        # Stagnation check
+
         if best_resid - max_resid < ν
             no_progress += 1
         else
             no_progress = 0
             best_resid = max_resid
         end
+
         if no_progress ≥ patience
             @warn "Stopped early: no progress in Euler errors for $patience iterations"
             break
@@ -312,5 +317,4 @@ function solve_stochastic_egm(p, agrid, zgrid, Pz;
 end
 
 
-
-end # module
+end #module
