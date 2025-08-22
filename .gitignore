@@ -1,0 +1,24 @@
+# Ignore all outputs from robustness and other runs
+runs/
+*.png
+*.csv
+
+# Ignore Julia compiled files and environments
+*.jl.cov
+*.jl.*
+/Manifest.toml
+/.julia/
+.julia/
+.jl_history
+.jl_compiled/
+
+# Ignore VS Code settings and workspace files
+.vscode/
+*.code-workspace
+
+# Ignore OS-specific files
+.DS_Store
+Thumbs.db
+
+# Ignore Jupyter notebook checkpoints
+.ipynb_checkpoints/

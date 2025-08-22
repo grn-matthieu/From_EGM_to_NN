@@ -3,12 +3,13 @@ export solve_simple_egm, SimpleSolution, solve_stochastic_egm
 
 using ..SimpleModel
 using ..EGMResiduals: euler_residuals_simple, euler_residuals_stochastic
+using ..SimpleCalibration
 
 
 # ─── Types ───────────────────────────────────────────────────────────────────
 abstract type InterpKind end
 struct LinearInterp <: InterpKind end # Default interpolation
-struct MonotoneCubicInterp <: InterpKind end    
+struct MonotoneCubicInterp <: InterpKind end
 
 """
     SimpleModelParameters
@@ -22,6 +23,7 @@ Base.@kwdef struct SimpleSolution
     iters::Int
     converged::Bool
     max_residual::Float64
+    p::SimpleParams
 end
 
 
@@ -123,7 +125,8 @@ end
 # ─── Solver ──────────────────────────────────────────────────────────────────
 function solve_simple_egm(p, agrid;
         tol::Real=1e-8, tol_pol::Real=1e-6, maxit::Int=500, verbose::Bool=false,
-        interp_kind::InterpKind=LinearInterp(), relax::Real=0.5, patience::Int=50, ν::Real=1e-10)
+        interp_kind::InterpKind=LinearInterp(), relax::Real=0.5, patience::Int=50, ν::Real=1e-10,
+        c_init=nothing)
     """
     Vectorized EGM with residual-based stopping. No recurring income; borrowing limit at `p.a_min`.
     """
@@ -139,7 +142,7 @@ function solve_simple_egm(p, agrid;
 
     # Initial guess for resources and consumption
     resources = @. onepr * a - a_min + p.y
-    c = clamp.(0.5 .* resources, cmin, resources)
+    c = c_init === nothing ? clamp.(0.5 .* resources, cmin, resources) : copy(c_init)
 
     # Buffer variables
     a′ = similar(c)
@@ -200,7 +203,7 @@ function solve_simple_egm(p, agrid;
             best_resid = max_resid
         end
 
-        if no_progress ≥ patience
+        if no_progress ≥ patience && verbose
             @warn "Stopped early: no progress in Euler errors or policy for $patience iterations, iter : $iters"
             break
         end
@@ -216,14 +219,14 @@ function solve_simple_egm(p, agrid;
     @. a_next = onepr * a + p.y - c
     @. a_next = clamp(a_next, a_min, a_max)
 
-    return SimpleSolution(a, c, a_next, iters, converged, max_resid)
+    return SimpleSolution(a, c, a_next, iters, converged, max_resid, p)
 end
 
 
 function solve_stochastic_egm(p, agrid, zgrid, Pz;
         tol::Real=1e-8, tol_pol::Real = 1e-6, maxit::Int=500, verbose::Bool=false,
         interp_kind::InterpKind=LinearInterp(), relax::Real=0.5,
-        ν::Real=1e-10, patience::Int=50)
+        ν::Real=1e-10, patience::Int=50, c_init=nothing)
 
     Na, Nz = length(agrid), length(zgrid)
     a = collect(agrid)
@@ -236,7 +239,7 @@ function solve_stochastic_egm(p, agrid, zgrid, Pz;
     max_resid = Inf
     max_Δ_pol = Inf
 
-    c = fill(1.0, Na, Nz)
+    c = c_init === nothing ? fill(1.0, Na, Nz) : copy(c_init)
     a′    = similar(c)
     cnext = similar(a)
     cnew  = similar(c)
@@ -313,7 +316,7 @@ function solve_stochastic_egm(p, agrid, zgrid, Pz;
     end
 
     return (agrid=a, zgrid=zgrid, c=c, a_next=a_next,
-            iters=iters, converged=converged, max_resid=max_resid)
+            iters=iters, converged=converged, max_resid=max_resid, p=p)
 end
 
 

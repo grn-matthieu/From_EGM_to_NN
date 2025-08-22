@@ -9,14 +9,17 @@ using Plots
 using ..EGMSolver: SimpleSolution
 using ..EGMResiduals: euler_residuals_simple, euler_residuals_stochastic
 using ..ValueFunction: compute_value
+using ..SimpleCalibration: SimpleParams
 
 "Save a plot `plt` under runs/<runid>/<name>.png; creates dirs as needed."
-function save_plot(plt, name; runid::AbstractString="default")
+function save_plot(plt, name; runid::AbstractString="default", verbose::Bool=true)
     outdir = joinpath("runs", runid)
     isdir(outdir) || mkpath(outdir)
     outfile = joinpath(outdir, string(name, ".png"))
     png(plt, outfile)
-    @info "Saved plot to $outfile"
+    if verbose
+        @info "Saved plot to $outfile"
+    end
     return outfile
 end
 
@@ -24,16 +27,23 @@ end
 # Deterministic: SimpleSolution
 # ---------------------------
 
-function plot_policy(sol::SimpleSolution; runid::AbstractString="default")
+function plot_policy(sol::SimpleSolution, p::SimpleParams; runid::AbstractString="default", verbose::Bool=true)
     plt1 = plot(sol.agrid, sol.c,
         xlabel="Assets a", ylabel="Consumption c(a)",
         label="c(a)", title="Consumption Policy")
-    save_plot(plt1, "policy_consumption"; runid)
+    # Add the true policy Function
+    # To be corrected later
+    # true_pol = similar(sol.c)
+#=     R = 1 + p.r
+    γ = (p.β*R)^(1/p.σ)
+    @. true_pol = min((1 - γ/R)*(sol.agrid + p.y/p.r), p.y + R*sol.agrid - sol.agrid[1])
+    plot!(sol.agrid, true_pol, label="True c(a)", linestyle=:dash) =#
+    save_plot(plt1, "policy_consumption"; runid, verbose)
 
     plt2 = plot(sol.agrid, sol.a_next,
         xlabel="Assets a", ylabel="Next-period assets a'(a)",
         label="a'(a)", title="Asset Policy")
-    save_plot(plt2, "policy_assets"; runid)
+    save_plot(plt2, "policy_assets"; runid, verbose)
 
     return plt1, plt2
 end
@@ -47,7 +57,7 @@ function plot_value(sol::SimpleSolution, p; runid::AbstractString="default")
     return plt
 end
 
-function plot_residuals(sol::SimpleSolution, p; runid::AbstractString="default", log10scale::Bool=true)
+function plot_residuals(sol::SimpleSolution, p; runid::AbstractString="default", log10scale::Bool=true, verbose::Bool=true)
     raw = euler_residuals_simple(p, sol.agrid, sol.c)
     idx = 2:length(sol.agrid)
     xvals = sol.agrid[idx]
@@ -58,7 +68,7 @@ function plot_residuals(sol::SimpleSolution, p; runid::AbstractString="default",
 
     plt = plot(xvals, vals, xlabel="Assets a", ylabel=ylabel,
                label=false, title="Euler Residuals")
-    save_plot(plt, fname; runid)
+    save_plot(plt, fname; runid, verbose)
     return plt, vals
 end
 
