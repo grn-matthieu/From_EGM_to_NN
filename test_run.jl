@@ -8,8 +8,7 @@ using .ThesisProject
 using Statistics
 
 # Load config
-include("src/utils/Config.jl")
-cfg = ThesisProject.UtilsConfig.load_config("config/simple_baseline.yaml")
+cfg = UtilsConfig.load_config("config/simple_baseline.yaml")
 
 
 # Prepare parameters and grids
