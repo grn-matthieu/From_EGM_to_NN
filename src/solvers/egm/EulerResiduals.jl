@@ -19,6 +19,7 @@ function lininterp(x::AbstractVector{<:Real}, y::AbstractVector{<:Real}, ξ::Rea
         return y[end]
     else
         j = searchsortedfirst(x, ξ)
+        j = clamp(j, 2, n)
         x0, x1 = x[j-1], x[j]
         y0, y1 = y[j-1], y[j]
         t = (ξ - x0) / (x1 - x0)
@@ -45,9 +46,9 @@ function euler_residuals_simple(p, agrid::AbstractVector{<:Real}, c::AbstractVec
     for i in eachindex(agrid)
         ct = c[i]
         a_next = SimpleModel.budget_next(agrid[i], p.y, p.r, ct)
-        # nearest index (no fancy interpolation yet)
-        j = clamp(searchsortedfirst(agrid, a_next), 1, Na)
-        ct1 = c[j]
+
+        # Linear interpolation for the "simple" residuals
+        ct1 = lininterp(agrid, c, a_next)
         upr_t  = ct^(-p.σ)
         upr_t1 = ct1^(-p.σ)
         resid[i] = abs(1 - p.β*(1+p.r) * (upr_t1 / upr_t))

@@ -6,6 +6,8 @@ include(joinpath(@__DIR__, "..", "src", "ThesisProject.jl"))
 using .ThesisProject
 using .ThesisProject: UtilsConfig, EGMSolver, PlotsUtils
 using CSV, DataFrames
+using Statistics, StatsBase
+using Plots
 
  
 # --- Config / params

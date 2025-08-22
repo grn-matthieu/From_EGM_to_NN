@@ -1,5 +1,5 @@
 module EGMSolver
-export solve_simple_egm, SimpleSolution, solve_stochastic_egm
+export solve_simple_egm, SimpleSolution, solve_stochastic_egm, asset_simulation
 
 using ..SimpleModel
 using ..EGMResiduals: euler_residuals_simple, euler_residuals_stochastic
@@ -120,6 +120,28 @@ function interp_pchip!(out::AbstractVector{<:Real},
     return out
 end
 
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+
+
+# ────── Asset Simulation ─────────────────────────────────────────────────────
+
+function simulate_assets(agrid, a_next; T=length(agrid), a0=agrid[1])
+    a_sim = similar(agrid, T)
+    a_sim[1] = a0
+    for t in 2:T
+        idx = searchsortedfirst(agrid, a_sim[t-1])
+        idx = clamp(idx, 1, length(agrid))
+        a_sim[t] = a_next[idx]
+    end
+    return a_sim
+end
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+
 
 
 # ─── Solver ──────────────────────────────────────────────────────────────────
@@ -136,7 +158,7 @@ function solve_simple_egm(p, agrid;
     a_max = maximum(a)
     Na = length(a)
 
-    γ = (p.β * (1 + p.r))^(1 / p.σ)
+    γ = p.β * (1 + p.r)
     onepr = (1 + p.r)
     cmin  = 1e-12
 
@@ -169,7 +191,7 @@ function solve_simple_egm(p, agrid;
             interp_pchip!(cnext, a, c, a′)
         end
 
-        @. cnew = cnext / γ
+        @. cnew = inv_uprime(γ * cnext.^(-p.σ), p.σ)
         cmax = @. p.y + onepr * a - a_min
         @. cnew = clamp(cnew, cmin, cmax)
 

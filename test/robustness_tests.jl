@@ -44,14 +44,14 @@ for β in betas, σ in sigmas
         resid = euler_residuals_simple(p, sol.agrid, sol.c)
         push!(results, (β, σ, sol.converged, sol.max_residual, sol.iters))
 
-        # Save policy plot
+#=         # Save policy plot
         plt1, plt2 = PlotsUtils.plot_policy(sol, p; runid=runid, verbose=false)
         savefig(plt1, joinpath(outdir, "policy_β$(round(β, digits=3))_σ$(round(σ, digits=2)).png"))
         savefig(plt2, joinpath(outdir, "assets_β$(round(β, digits=3))_σ$(round(σ, digits=2)).png"))
 
         # Save residuals plot
         pltR, _ = PlotsUtils.plot_residuals(sol, p; runid=runid, verbose=false)
-        savefig(pltR, joinpath(outdir, "residuals_β$(round(β, digits=3))_σ$(round(σ, digits=2)).png"))
+        savefig(pltR, joinpath(outdir, "residuals_β$(round(β, digits=3))_σ$(round(σ, digits=2)).png")) =#
     catch err
         msg = sprint(showerror, err)
         @warn "Failure at β=$β, σ=$σ: $msg"

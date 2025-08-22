@@ -9,7 +9,7 @@ model:
   y: 1.0
 
 grid:
-  Na: 10000
+  Na: 100
   a_min: 0.0
   a_max: 20.0
 

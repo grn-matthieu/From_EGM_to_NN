@@ -20,7 +20,7 @@ sol = EGMSolver.solve_simple_egm(p, agrid; tol=1e-10, maxit=5000, verbose=true, 
 resid = euler_residuals_simple(p, sol.agrid, sol.c)
 
 # --- Plots
-PlotsUtils.plot_policy(sol; runid=runid)
+PlotsUtils.plot_policy(sol, p; runid=runid)
 pltR, _ = PlotsUtils.plot_residuals(sol, p; runid=runid)
 
 # --- CSV
