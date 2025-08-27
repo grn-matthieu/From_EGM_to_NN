@@ -25,7 +25,7 @@ if haskey(cfg, "shocks") && cfg["shocks"]["active"] == true
     m = get(cfg["shocks"], "m", 3.0)
 
     # Discretize AR(1) for log income
-    zgrid, Pz = discretize_ar1(method, ρ_shock, σ_shock, Nz; m=m)
+    zgrid, Pz = discretize(ρ_shock, σ_shock; Nz=Nz, method=method, m=m, validate=true)
 
     # Solve stochastic EGM
     sol = solve_stochastic_egm(p, agrid, zgrid, Pz; tol=1e-8, maxit=1000, verbose=true)

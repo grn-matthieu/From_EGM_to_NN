@@ -50,6 +50,6 @@ export compute_value
 export save_plot, plot_policy, plot_value, plot_residuals
 
 # Shock discretization
-export discretize_ar1
+export discretize, ShockOutput
 
 end # module

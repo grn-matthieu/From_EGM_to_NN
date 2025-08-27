@@ -1,9 +1,17 @@
 module Shocks
-export discretize_ar1
+export discretize, ShockOutput
 
 using Statistics, LinearAlgebra, SpecialFunctions
 
+struct ShockOutput
+    z::Vector{Float64}
+    Π::Matrix{Float64}
+    π::Vector{Float64}
+    diagnostics::Vector{Float64}
+end
+
 @inline Φ(x) = 0.5 * (1 + erf(x / sqrt(2)))
+
 
 function tauchen(ρ::Real, σ_shocks::Real, Nz::Int; m::Real=3.0)
     σ_shocks_y = σ_shocks / sqrt(1 - ρ^2 + eps())
@@ -29,6 +37,7 @@ function tauchen(ρ::Real, σ_shocks::Real, Nz::Int; m::Real=3.0)
     return zgrid, P
 end
 
+
 function rouwenhorst(ρ::Real, σ_shocks::Real, Nz::Int)
     p = (1 + ρ) / 2
     q = p
@@ -47,18 +56,57 @@ function rouwenhorst(ρ::Real, σ_shocks::Real, Nz::Int)
     return zgrid, P
 end
 
-function discretize_ar1(method::AbstractString, ρ::Real, σ_shocks::Real, Nz::Int; m::Real=3.0)
-    if σ_shocks == 0 || Nz == 1
-        return [0.0], reshape([1.0], 1, 1)
+function find_invariant(Π::AbstractMatrix{<:Real}; tol=1e-12, maxit=1_000)
+    # Power iteration method to find the invariant distribution
+    π = fill(1.0 / size(Π, 1), size(Π, 1))
+    for _ in 1:maxit
+        π_new = π' * Π
+        π_new ./= sum(π_new)
+        if maximum(abs.(π_new .- π')) < tol
+            return vec(π_new)
+        end
+        π .= vec(π_new)
     end
-    mth = lowercase(method)
-    if mth == "tauchen"
-        return tauchen(ρ, σ_shocks, Nz; m=m)
-    elseif mth == "rouwenhorst"
-        return rouwenhorst(ρ, σ_shocks, Nz)
+    error("Power iteration did not converge")
+end
+
+function discretize(method::AbstractString, ρ::Real, σ_shocks::Real, Nz::Int; m::Real=3.0, validate::Bool=false)
+    if σ_shocks == 0 || Nz == 1 # Handles the degenerate case
+        zgrid = [0.0]
+        Π = reshape([1.0], 1, 1)
+        π = [1.0]
+        diagnostics = [0.0, 0.0, 1.0]
+        return ShockOutput(zgrid, Π, π, diagnostics)
+    end
+
+    mth_str = lowercase(method)
+    if mth_str == "tauchen"
+        zgrid, Π = tauchen(ρ, σ_shocks, Nz; m=m)
+    elseif mth_str == "rouwenhorst"
+        zgrid, Π = rouwenhorst(ρ, σ_shocks, Nz)
     else
         error("Unknown discretization method: $method (use 'tauchen' or 'rouwenhorst')")
     end
+
+    # Ensure symmetry and ordering
+    zgrid = reverse(zgrid)
+    Π = reverse(Π, dims=1)
+
+    π = find_invariant(Π)
+
+    # Compute additional moments for diagnostics
+    diagnostics = Float64[μ_hat = mean(zgrid), σ_sq_hat = std(zgrid)^2, ρ_hat = cor(zgrid, zgrid)]
+
+    out = ShockOutput(zgrid, Π, π, diagnostics)
+
+    if validate
+        using .TestDiscretization
+        TestDiscretization.test_shock_discretization(out, σ_shocks^2, ρ) # Test the results vs true parameters
+        println("Discretization validation passed.")
+    end
+    return out
 end
+
+
 
 end # module

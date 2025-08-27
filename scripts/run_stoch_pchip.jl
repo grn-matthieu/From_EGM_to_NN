@@ -22,7 +22,7 @@ m = get(scfg, "m", 3.0)
 runid = get(cfg, "runid", "stochastic_egm_pchip")
 
 # --- Discretize income AR(1)
-zgrid, Pz = discretize_ar1(method, ρ_shock, σ_shock, Nz; m=m)
+zgrid, Pz = discretize(ρ_shock, σ_shock; Nz=Nz, method=method, m=m, validate=true)
 
 # --- Solve
 sol = EGMSolver.solve_stochastic_egm(p, agrid, zgrid, Pz;

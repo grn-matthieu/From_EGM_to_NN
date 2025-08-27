@@ -159,11 +159,11 @@ function solve_simple_egm(p, agrid;
     Na = length(a)
 
     γ = p.β * (1 + p.r)
-    onepr = (1 + p.r)
+    R = (1 + p.r)
     cmin  = 1e-12
 
     # Initial guess for resources and consumption
-    resources = @. onepr * a - a_min + p.y
+    resources = @. R * a - a_min + p.y
     c = c_init === nothing ? clamp.(0.5 .* resources, cmin, resources) : copy(c_init)
 
     # Buffer variables
@@ -182,7 +182,7 @@ function solve_simple_egm(p, agrid;
     for it in 1:maxit
         iters = it
 
-        @. a′ = p.y + onepr * a - c
+        @. a′ = p.y + R * a - c
         @. a′ = clamp(a′, a_min, a_max)
 
         if interp_kind isa LinearInterp
@@ -192,10 +192,10 @@ function solve_simple_egm(p, agrid;
         end
 
         @. cnew = inv_uprime(γ * cnext.^(-p.σ), p.σ)
-        cmax = @. p.y + onepr * a - a_min
+        cmax = @. p.y + R * a - a_min
         @. cnew = clamp(cnew, cmin, cmax)
 
-        @. a_next = onepr * a + p.y - cnew
+        @. a_next = R * a + p.y - cnew
         @. a_next = clamp(a_next, a_min, a_max)
 
         # Only enforce monotonicity if using PCHIP
@@ -238,7 +238,7 @@ function solve_simple_egm(p, agrid;
     end
 
     # Last a next consistent with c
-    @. a_next = onepr * a + p.y - c
+    @. a_next = R * a + p.y - c
     @. a_next = clamp(a_next, a_min, a_max)
 
     return SimpleSolution(a, c, a_next, iters, converged, max_resid, p)
@@ -254,7 +254,7 @@ function solve_stochastic_egm(p, agrid, zgrid, Pz;
     a = collect(agrid)
     a_min, a_max = minimum(a), maximum(a)
 
-    onepr = (1 + p.r)
+    R = (1 + p.r)
     cmin  = 1e-12
     converged = false
     iters = 0
@@ -263,7 +263,7 @@ function solve_stochastic_egm(p, agrid, zgrid, Pz;
 
     c = c_init === nothing ? fill(1.0, Na, Nz) : copy(c_init)
     a′    = similar(c)
-    cnext = similar(a)
+    cnext = similar(a)w
     cnew  = similar(c)
     a_next = similar(c)
 
@@ -276,7 +276,7 @@ function solve_stochastic_egm(p, agrid, zgrid, Pz;
         for (j,z) in enumerate(zgrid)
             y = exp(z)
 
-            @. a′[:,j] = onepr * a + y - c[:,j]
+            @. a′[:,j] = R * a + y - c[:,j]
             @. a′[:,j] = clamp(a′[:,j], a_min, a_max)
 
             EUprime = similar(a)
@@ -291,11 +291,11 @@ function solve_stochastic_egm(p, agrid, zgrid, Pz;
                 @. EUprime += Pz[j,jp] * (cnext.^(-p.σ))
             end
 
-            @. cnew[:,j] = ((p.β * onepr) * EUprime).^(-1/p.σ)
-            cmax = @. y + onepr * a - a_min
+            @. cnew[:,j] = ((p.β * R) * EUprime).^(-1/p.σ)
+            cmax = @. y + R * a - a_min
             @. cnew[:,j] = clamp(cnew[:,j], cmin, cmax)
 
-            @. a_next[:,j] = onepr * a + y - cnew[:,j]
+            @. a_next[:,j] = R * a + y - cnew[:,j]
             @. a_next[:,j] = clamp(a_next[:,j], a_min, a_max)
 
             if interp_kind isa MonotoneCubicInterp

@@ -15,13 +15,13 @@ grid:
 
 solver:
   tol: 1.0e-6
-  maxit: 10000
+  maxit: 10000  # Temporary, update when algs are stabilized
   verbose: true
 
 shocks:
   active: true
   method: "rouwenhorst"   # or "tauchen"
-  ρ_shock: 0.95
+  ρ_shock: 0.9
   σ_shock: 0.10
-  Nz: 100
-  m: 3.0                  # only used by Tauchen
+  Nz: 11
+  m: 3.0            # m is only used with tauchen's method
