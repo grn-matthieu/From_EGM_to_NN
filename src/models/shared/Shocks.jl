@@ -1,7 +1,8 @@
 module Shocks
 export discretize, ShockOutput
 
-using Statistics, LinearAlgebra, SpecialFunctions
+using Statistics, LinearAlgebra, SpecialFunctions, StatsBase
+using Test
 
 struct ShockOutput
     z::Vector{Float64}
@@ -11,6 +12,14 @@ struct ShockOutput
 end
 
 @inline Φ(x) = 0.5 * (1 + erf(x / sqrt(2)))
+
+function markov_autocorr(zgrid, Π, π)
+    μ = sum(π .* zgrid)
+    σ2 = sum(π .* (zgrid .- μ).^2)
+    Ezzt1 = sum((π .* zgrid) .* (Π * zgrid))
+    cov1 = Ezzt1 - μ^2
+    return cov1 / σ2
+end
 
 
 function tauchen(ρ::Real, σ_shocks::Real, Nz::Int; m::Real=3.0)
@@ -52,7 +61,7 @@ function rouwenhorst(ρ::Real, σ_shocks::Real, Nz::Int)
         P[2:end-1, :] .*= 0.5
     end
     σ_shocks_y = σ_shocks / sqrt(1 - ρ^2 + eps())
-    zgrid = collect(range(-σ_shocks_y, σ_shocks_y; length=Nz))
+    zgrid = collect(range(-σ_shocks_y*sqrt(Nz-1), σ_shocks_y*sqrt(Nz-1); length=Nz))
     return zgrid, P
 end
 
@@ -69,6 +78,29 @@ function find_invariant(Π::AbstractMatrix{<:Real}; tol=1e-12, maxit=1_000)
     end
     error("Power iteration did not converge")
 end
+
+function test_shock_discretization(shock::ShockOutput, σ_ϵ_sq, ρ)
+    Π, π, diagnostics = shock.Π, shock.π, shock.diagnostics
+
+    # Sanity checks on the invariant distribution
+    @test all(π .>= 0)
+    @test isapprox(sum(π), 1.0)
+    @test isapprox(π' * Π, π'; atol=1e-8)
+
+    μ_stat, σ_ϵ_sq_stat, ρ_stat = diagnostics
+
+    # Checks on the moments : this should match an AR(1) distribution
+    @test isapprox(μ_stat, 0.0; atol=1e-8)
+    println("σ_ϵ_sq_stat: $σ_ϵ_sq_stat, σ_ϵ²: $σ_ϵ_sq, ρ_stat: $ρ_stat, ρ: $ρ\n")
+
+    # For the variance testing, we allow a 5% tolerance
+    # The sample size is between 7 and 11 points, so this should be reasonable
+    σ2_theory = σ_ϵ_sq / (1 - ρ^2)
+    @test isapprox(σ_ϵ_sq_stat, σ2_theory; atol=0.05 * σ2_theory)
+
+    @test isapprox((ρ_stat - ρ), 0.0; atol=1e-8)
+end
+
 
 function discretize(method::AbstractString, ρ::Real, σ_shocks::Real, Nz::Int; m::Real=3.0, validate::Bool=false)
     if σ_shocks == 0 || Nz == 1 # Handles the degenerate case
@@ -88,20 +120,18 @@ function discretize(method::AbstractString, ρ::Real, σ_shocks::Real, Nz::Int; 
         error("Unknown discretization method: $method (use 'tauchen' or 'rouwenhorst')")
     end
 
-    # Ensure symmetry and ordering
-    zgrid = reverse(zgrid)
-    Π = reverse(Π, dims=1)
-
     π = find_invariant(Π)
 
     # Compute additional moments for diagnostics
-    diagnostics = Float64[μ_hat = mean(zgrid), σ_sq_hat = std(zgrid)^2, ρ_hat = cor(zgrid, zgrid)]
+    μ_stat = sum(π .* zgrid)
+    σ2_stat = sum(π .* (zgrid .- μ_stat).^2)
+    ρ_stat = markov_autocorr(zgrid, Π, π)
+    diagnostics = Float64[μ_stat, σ2_stat, ρ_stat]
 
     out = ShockOutput(zgrid, Π, π, diagnostics)
 
     if validate
-        using .TestDiscretization
-        TestDiscretization.test_shock_discretization(out, σ_shocks^2, ρ) # Test the results vs true parameters
+        test_shock_discretization(out, σ_shocks^2, ρ) # Test the results vs true parameters
         println("Discretization validation passed.")
     end
     return out

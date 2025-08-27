@@ -263,7 +263,7 @@ function solve_stochastic_egm(p, agrid, zgrid, Pz;
 
     c = c_init === nothing ? fill(1.0, Na, Nz) : copy(c_init)
     a′    = similar(c)
-    cnext = similar(a)w
+    cnext = similar(a)
     cnew  = similar(c)
     a_next = similar(c)
 

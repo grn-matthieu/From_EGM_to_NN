@@ -4,10 +4,9 @@ Pkg.activate(joinpath(@__DIR__, ".."))
 
 include(joinpath(@__DIR__, "..", "src", "ThesisProject.jl"))
 using .ThesisProject
-using .ThesisProject: UtilsConfig, EGMSolver, PlotsUtils, discretize_ar1
 using CSV, DataFrames
 
-cfg = UtilsConfig.load_config(joinpath(@__DIR__,"..", "config","simple_stochastic.yaml"))
+cfg = load_config(joinpath(@__DIR__,"..", "config","simple_stochastic.yaml"))
 p = default_simple_params()
 
 Na = cfg["grid"]["Na"]
@@ -22,18 +21,18 @@ m = get(scfg, "m", 3.0)
 runid = get(cfg, "runid", "stochastic_egm")
 
 # --- Discretize income AR(1)
-zgrid, Pz = discretize(ρ_shock, σ_shock; Nz=Nz, method=method, m=m, validate=true)
+shock = discretize(method, ρ_shock, σ_shock, Nz; m=m, validate=true)
 
 # --- Solve
-sol = EGMSolver.solve_stochastic_egm(p, agrid, zgrid, Pz;
+sol = solve_stochastic_egm(p, agrid, shock.z, shock.Π;
     tol=1e-10, maxit=8000, verbose=true, relax=0.3, ν=1e-12, patience=200)
 
-resid = euler_residuals_stochastic(p, sol.agrid, zgrid, Pz, sol.c)
+resid = euler_residuals_stochastic(p, sol.agrid, shock.z, shock.Π, sol.c)
 
 # --- Plots (policy surfaces + residual heatmaps)
-PlotsUtils.plot_policy(sol; runid=runid)
-PlotsUtils.plot_residuals(sol, p, Pz; runid=runid)
-PlotsUtils.plot_residuals(sol, p, Pz; runid=runid, log10scale=false)
+plot_policy(sol; runid=runid)
+plot_residuals(sol, p, shock.Π; runid=runid)
+plot_residuals(sol, p, shock.Π; runid=runid, log10scale=false)
 
 # --- Save CSV (panel)
 df = DataFrame(
