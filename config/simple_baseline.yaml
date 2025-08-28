@@ -1,0 +1,19 @@
+experiment:
+  name: "simple_baseline_egm"
+  seed: 1234
+
+model:
+  beta: 0.96
+  sigma: 2.0
+  r: 0.02
+  y: 1.0
+
+grid:
+  Na: 100
+  a_min: 0.0
+  a_max: 20.0
+
+solver:
+  tol: 1.0e-6
+  maxit: 10000
+  verbose: true
