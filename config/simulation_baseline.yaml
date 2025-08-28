@@ -28,4 +28,3 @@ simulation:
   N: 100
   T: 1000
   a_0 : 0.0
-  seed : 4242

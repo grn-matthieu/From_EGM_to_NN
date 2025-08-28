@@ -45,7 +45,7 @@ export solve_simple_egm, solve_stochastic_egm
 export euler_residuals_stochastic, euler_residuals_simple
 
 # Utils (config/logging/random)
-export UtilsConfig, UtilsLogging, UtilsRandom, load_config
+export UtilsConfig, UtilsLogging, UtilsRandom, load_config, set_global_seed
 
 # Value function + plotting utils
 export compute_value

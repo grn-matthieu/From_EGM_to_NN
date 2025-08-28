@@ -1,9 +1,9 @@
 module UtilsRandom
 export set_global_seed
-using Random
+using StableRNGs
 
 function set_global_seed(seed::Integer)
-    Random.seed!(seed)
+    return StableRNG(seed)
 end
 
 end

@@ -8,6 +8,7 @@ using ..Shocks: discretize, simulate_shocks, ShockOutput
 using ..EGMSolver: solve_stochastic_egm
 using ..SimpleCalibration: default_simple_params
 using ProgressMeter
+using Random, StableRNGs
 
 
 function simulate_panel_agent(sol, shocks::Vector{Float64}, cfg::Dict{Any, Any})
@@ -54,7 +55,7 @@ function simulate_panel_agent(sol, shocks::Vector{Float64}, cfg::Dict{Any, Any})
     return assets, consumption
 end
 
-function simulate_panel(cfg::Dict{Any, Any}; solver=nothing)
+function simulate_panel(cfg::Dict{Any, Any}, master_rng::AbstractRNG; solver=nothing)
     """
     Simulate a panel of representative agents with a given solver.
     Returns :
@@ -75,9 +76,20 @@ function simulate_panel(cfg::Dict{Any, Any}; solver=nothing)
     Nz = cfg["shocks"]["Nz"]
     shocks_cfg = discretize(method, ρ_shock, σ_shock, Nz; m=3, validate=true)
 
-    panel_shocks = Matrix{Float64}(undef, N, T) 
+
+    panel_shocks = Matrix{Float64}(undef, N, T)
+    rng_list = Vector{StableRNGs.LehmerRNG}(undef, N)
+    seed_list = Vector{UInt}(undef, N)
+
     for n in 1:N
-        panel_shocks[n, :] = simulate_shocks(T, shocks_cfg, cfg["simulation"]["seed"] + n) # Update the seed at each iteration for the shocks to be independent
+        # Each agent's RNG is derived as: agent_seed = hash((master_seed, agent_id))
+        # The master RNG MUST be set at the start of each script
+        # This ensures reproducibility and independence across agents.
+        agent_seed = hash((master_rng, n))
+        agent_rng = StableRNG(agent_seed)
+        rng_list[n] = agent_rng
+        seed_list[n] = agent_seed
+        panel_shocks[n, :] = simulate_shocks(T, shocks_cfg, agent_rng)
     end
     @info "Shocks simulated."
 
@@ -96,11 +108,11 @@ function simulate_panel(cfg::Dict{Any, Any}; solver=nothing)
     @info "Panel simulation completed."
 
     # Compute summary statistics
-    #stats[:seed] = cfg[:seed]
+    #stats[:seed] = cfg["experiment"]["seed"]
     #stats[:burn_in] = cfg[:burn_in]
     #stats[:acceptance_flags] = cfg[:acceptance_flags]
 
-    return (assets, consumption, panel_shocks, stats)
+    return (assets, consumption, panel_shocks, rng_list, seed_list)
 end
 
 

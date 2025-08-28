@@ -138,13 +138,11 @@ function discretize(method::AbstractString, ρ::Real, σ_shocks::Real, Nz::Int; 
     return out
 end
 
-function simulate_shocks(T, shock_cfg::ShockOutput, seed)
+function simulate_shocks(T, shock_cfg::ShockOutput, rng::AbstractRNG)
     """
     Simulates T periods of shocks given a ShockOutput config.
     Outputs the time series for ONE agent (actual shock values, not indices).
     """
-    Random.seed!(seed) # Ensure reproducibility
-
     zgrid = shock_cfg.zgrid
     Π = shock_cfg.Π
     π = shock_cfg.π
@@ -155,7 +153,7 @@ function simulate_shocks(T, shock_cfg::ShockOutput, seed)
 
     for t in 1:T
         shocks[t] = zgrid[idx]
-        idx = sample(1:Nz, Weights(Π[idx, :]))  # Next state index
+        idx = sample(rng, 1:Nz, Weights(Π[idx, :]))  # Next state index
     end
 
     return shocks
