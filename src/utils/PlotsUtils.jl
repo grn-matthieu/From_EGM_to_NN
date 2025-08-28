@@ -3,7 +3,8 @@ module PlotsUtils
 export save_plot,
        plot_policy,            # dispatches: deterministic OR stochastic
        plot_value,             # deterministic only
-       plot_residuals          # deterministic OR stochastic
+       plot_residuals,          # deterministic OR stochastic
+       plot_simulation_paths    # simulation only
 
 using Plots
 using ..EGMSolver: SimpleSolution
@@ -108,6 +109,21 @@ function plot_residuals(sol::NamedTuple, p, Pz; runid::AbstractString="default",
     idxa = 2:length(A)
     max_over_z = [maximum(R[i, :]) for i in idxa]
     return plt, max_over_z
+end
+
+# Simulation plot utils
+
+# Plot the consumption paths of simulated agents on the same plot
+function plot_simulation_paths(consumption; runid::AbstractString="default")
+    N, T  = size(consumption)
+    plt = plot()
+    for n in 1:N
+        plot!(plt, 1:T, consumption[n, :], legend=false, alpha=0.3)
+    end
+    xlabel!("Time")
+    ylabel!("Consumption")
+    title!("Consumption Paths")
+    save_plot(plt, "simulation_consumption_paths"; runid)
 end
 
 end # module

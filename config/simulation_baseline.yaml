@@ -1,0 +1,31 @@
+experiment:
+  name: "simulation_baseline"
+  seed: 1234
+
+model:
+  beta: 0.96
+  sigma: 2.0
+  r: 0.02
+  y: 1.0
+
+grid:
+  Na: 100
+  a_min: 0.0
+  a_max: 20.0
+
+solver:
+  tol: 1.0e-6
+  maxit: 10000
+  verbose: false
+
+shocks:
+  method: "rouwenhorst"   # or "tauchen"
+  ρ_shock: 0.9
+  σ_shock: 0.10
+  Nz: 11
+
+simulation:
+  N: 100
+  T: 1000
+  a_0 : 0.0
+  seed : 4242

@@ -24,10 +24,10 @@ runid = get(cfg, "runid", "stochastic_egm")
 shock = discretize(method, ρ_shock, σ_shock, Nz; m=m, validate=true)
 
 # --- Solve
-sol = solve_stochastic_egm(p, agrid, shock.z, shock.Π;
+sol = solve_stochastic_egm(p, agrid, shock.zgrid, shock.Π;
     tol=1e-10, maxit=8000, verbose=true, relax=0.3, ν=1e-12, patience=200)
 
-resid = euler_residuals_stochastic(p, sol.agrid, shock.z, shock.Π, sol.c)
+resid = euler_residuals_stochastic(p, sol.agrid, shock.zgrid, shock.Π, sol.c)
 
 # --- Plots (policy surfaces + residual heatmaps)
 plot_policy(sol; runid=runid)

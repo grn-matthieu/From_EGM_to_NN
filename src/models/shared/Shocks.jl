@@ -1,11 +1,12 @@
 module Shocks
-export discretize, ShockOutput
+export discretize, ShockOutput, simulate_shocks
 
-using Statistics, LinearAlgebra, SpecialFunctions, StatsBase
+using Statistics, LinearAlgebra, SpecialFunctions, StatsBase, Random
 using Test
+using Distributions
 
 struct ShockOutput
-    z::Vector{Float64}
+    zgrid::Vector{Float64}
     Π::Matrix{Float64}
     π::Vector{Float64}
     diagnostics::Vector{Float64}
@@ -135,6 +136,29 @@ function discretize(method::AbstractString, ρ::Real, σ_shocks::Real, Nz::Int; 
         println("Discretization validation passed.")
     end
     return out
+end
+
+function simulate_shocks(T, shock_cfg::ShockOutput, seed)
+    """
+    Simulates T periods of shocks given a ShockOutput config.
+    Outputs the time series for ONE agent (actual shock values, not indices).
+    """
+    Random.seed!(seed) # Ensure reproducibility
+
+    zgrid = shock_cfg.zgrid
+    Π = shock_cfg.Π
+    π = shock_cfg.π
+
+    Nz = length(zgrid)
+    shocks = zeros(T)
+    idx = sample(1:Nz, Weights(π))
+
+    for t in 1:T
+        shocks[t] = zgrid[idx]
+        idx = sample(1:Nz, Weights(Π[idx, :]))  # Next state index
+    end
+
+    return shocks
 end
 
 

@@ -21,6 +21,7 @@ include("utils/RandomTools.jl")
 include("utils/ValueFunction.jl")
 include("utils/PlotsUtils.jl")
 include("models/shared/Shocks.jl")
+include("utils/PanelSim.jl")
 
 
 using .UtilsConfig
@@ -29,6 +30,7 @@ using .UtilsRandom
 using .ValueFunction
 using .PlotsUtils
 using .Shocks
+using .PanelSim
 
 # ─── Re-exports for convenience ─────────────────────
 # Models
@@ -47,9 +49,12 @@ export UtilsConfig, UtilsLogging, UtilsRandom, load_config
 
 # Value function + plotting utils
 export compute_value
-export save_plot, plot_policy, plot_value, plot_residuals
+export save_plot, plot_policy, plot_value, plot_residuals, plot_simulation_paths
 
 # Shock discretization
 export discretize, ShockOutput
+
+#Simulation
+export simulate_panel, simulate_panel_agent
 
 end # module
