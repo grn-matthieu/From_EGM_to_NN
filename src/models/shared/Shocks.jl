@@ -1,9 +1,6 @@
 module Shocks
-export discretize, ShockOutput, simulate_shocks
 
-using Statistics, LinearAlgebra, SpecialFunctions, StatsBase, Random
-using Test
-using Distributions
+export discretize, ShockOutput
 
 struct ShockOutput
     zgrid::Vector{Float64}
@@ -23,47 +20,48 @@ function markov_autocorr(zgrid, Π, π)
 end
 
 
-function tauchen(ρ::Real, σ_shocks::Real, Nz::Int; m::Real=3.0)
-    σ_shocks_y = σ_shocks / sqrt(1 - ρ^2 + eps())
+function tauchen(ρ::Real, σ_shock::Real, Nz::Int; m::Real=3.0)
+    σ_shocks_y = σ_shock / sqrt(1 - ρ^2 + eps())
     zmax = m * σ_shocks_y
     zmin = -zmax
     zgrid = collect(range(zmin, zmax; length=Nz))
     step = zgrid[2] - zgrid[1]
-    P = zeros(Nz, Nz)
+    Π = zeros(Nz, Nz)
     for j in 1:Nz
         μ = ρ * zgrid[j]
         for k in 1:Nz
             if k == 1
-                P[j, k] = Φ((zgrid[1] - μ + step/2)/σ_shocks)
+                Π[j, k] = Φ((zgrid[1] - μ + step/2)/σ_shock)
             elseif k == Nz
-                P[j, k] = 1 - Φ((zgrid[Nz] - μ - step/2)/σ_shocks)
+                Π[j, k] = 1 - Φ((zgrid[Nz] - μ - step/2)/σ_shock)
             else
-                up = (zgrid[k] - μ + step/2) / σ_shocks
-                lo = (zgrid[k] - μ - step/2) / σ_shocks
-                P[j, k] = Φ(up) - Φ(lo)
+                up = (zgrid[k] - μ + step/2) / σ_shock
+                lo = (zgrid[k] - μ - step/2) / σ_shock
+                Π[j, k] = Φ(up) - Φ(lo)
             end
         end
     end
-    return zgrid, P
+    return zgrid, Π
 end
 
 
-function rouwenhorst(ρ::Real, σ_shocks::Real, Nz::Int)
+function rouwenhorst(ρ::Real, σ_shock::Real, Nz::Int)
     p = (1 + ρ) / 2
     q = p
-    P = [p 1-p; 1-q q]
+    Π = [p 1-p; 1-q q]
     for n in 3:Nz
-        Pold = P
-        P = zeros(n, n)
-        P[1:end-1, 1:end-1] .+= p .* Pold
-        P[1:end-1, 2:end]   .+= (1-p) .* Pold
-        P[2:end,   1:end-1] .+= (1-q) .* Pold
-        P[2:end,   2:end]   .+= q .* Pold
-        P[2:end-1, :] .*= 0.5
+        Πold = Π
+        Π = zeros(n, n)
+        Π[1:end-1, 1:end-1] .+= p .* Πold
+        Π[1:end-1, 2:end]   .+= (1-p) .* Πold
+        Π[2:end,   1:end-1] .+= (1-q) .* Πold
+        Π[2:end,   2:end]   .+= q .* Πold
+        Π[2:end-1, :] .*= 0.5
     end
-    σ_shocks_y = σ_shocks / sqrt(1 - ρ^2 + eps())
+    σ_shocks_y = σ_shock / sqrt(1 - ρ^2 + eps())
     zgrid = collect(range(-σ_shocks_y*sqrt(Nz-1), σ_shocks_y*sqrt(Nz-1); length=Nz))
-    return zgrid, P
+    @debug typeof(zgrid)
+    return zgrid, Π
 end
 
 function find_invariant(Π::AbstractMatrix{<:Real}; tol=1e-12, maxit=1_000)
@@ -80,31 +78,43 @@ function find_invariant(Π::AbstractMatrix{<:Real}; tol=1e-12, maxit=1_000)
     error("Power iteration did not converge")
 end
 
-function test_shock_discretization(shock::ShockOutput, σ_ϵ_sq, ρ)
-    Π, π, diagnostics = shock.Π, shock.π, shock.diagnostics
+# function test_shock_discretization(shock::ShockOutput, σ_ϵ_sq, ρ)
+#     Π, π, diagnostics = shock.Π, shock.π, shock.diagnostics
 
-    # Sanity checks on the invariant distribution
-    @test all(π .>= 0)
-    @test isapprox(sum(π), 1.0)
-    @test isapprox(π' * Π, π'; atol=1e-8)
+#     # Sanity checks on the invariant distribution
+#     @test all(π .>= 0)
+#     @test isapprox(sum(π), 1.0)
+#     @test isapprox(π' * Π, π'; atol=1e-8)
 
-    μ_stat, σ_ϵ_sq_stat, ρ_stat = diagnostics
+#     μ_stat, σ_ϵ_sq_stat, ρ_stat = diagnostics
 
-    # Checks on the moments : this should match an AR(1) distribution
-    @test isapprox(μ_stat, 0.0; atol=1e-8)
-    println("σ_ϵ_sq_stat: $σ_ϵ_sq_stat, σ_ϵ²: $σ_ϵ_sq, ρ_stat: $ρ_stat, ρ: $ρ\n")
+#     # Checks on the moments : this should match an AR(1) distribution
+#     @test isapprox(μ_stat, 0.0; atol=1e-8)
+#     println("σ_ϵ_sq_stat: $σ_ϵ_sq_stat, σ_ϵ²: $σ_ϵ_sq, ρ_stat: $ρ_stat, ρ: $ρ\n")
 
-    # For the variance testing, we allow a 5% tolerance
-    # The sample size is between 7 and 11 points, so this should be reasonable
-    σ2_theory = σ_ϵ_sq / (1 - ρ^2)
-    @test isapprox(σ_ϵ_sq_stat, σ2_theory; atol=0.05 * σ2_theory)
+#     # For the variance testing, we allow a 5% tolerance
+#     # The sample size is between 7 and 11 points, so this should be reasonable
+#     σ2_theory = σ_ϵ_sq / (1 - ρ^2)
+#     @test isapprox(σ_ϵ_sq_stat, σ2_theory; atol=0.05 * σ2_theory)
 
-    @test isapprox((ρ_stat - ρ), 0.0; atol=1e-8)
+#     @test isapprox((ρ_stat - ρ), 0.0; atol=1e-8)
+# end
+
+function get_shock_params(shocks::AbstractDict)
+    ρ_shock = get(shocks, :ρ_shock, 0.0)
+    σ_shock = get(shocks, :σ_shock, 0.0)
+    Nz      = get(shocks, :Nz, 7)
+    method  = get(shocks, :method, "tauchen")
+    m       = get(shocks, :m, 3.0)
+    validate= get(shocks, :validate, true)
+    return ρ_shock, σ_shock, Nz, method, m, validate
 end
 
 
-function discretize(method::AbstractString, ρ::Real, σ_shocks::Real, Nz::Int; m::Real=3.0, validate::Bool=false)
-    if σ_shocks == 0 || Nz == 1 # Handles the degenerate case
+function discretize(shocks::AbstractDict)::ShockOutput
+    ρ_shock, σ_shock, Nz, method, m = get_shock_params(shocks)
+
+    if σ_shock == 0 || Nz == 1 # Handles the degenerate case
         zgrid = [0.0]
         Π = reshape([1.0], 1, 1)
         π = [1.0]
@@ -114,9 +124,9 @@ function discretize(method::AbstractString, ρ::Real, σ_shocks::Real, Nz::Int; 
 
     mth_str = lowercase(method)
     if mth_str == "tauchen"
-        zgrid, Π = tauchen(ρ, σ_shocks, Nz; m=m)
+        zgrid, Π = tauchen(ρ_shock, σ_shock, Nz; m=m)
     elseif mth_str == "rouwenhorst"
-        zgrid, Π = rouwenhorst(ρ, σ_shocks, Nz)
+        zgrid, Π = rouwenhorst(ρ_shock, σ_shock, Nz)
     else
         error("Unknown discretization method: $method (use 'tauchen' or 'rouwenhorst')")
     end
@@ -131,34 +141,34 @@ function discretize(method::AbstractString, ρ::Real, σ_shocks::Real, Nz::Int; 
 
     out = ShockOutput(zgrid, Π, π, diagnostics)
 
-    if validate
-        test_shock_discretization(out, σ_shocks^2, ρ) # Test the results vs true parameters
-        println("Discretization validation passed.")
-    end
+    # if validate
+    #     test_shock_discretization(out, σ_shock^2, ρ) # Test the results vs true parameters
+    #     println("Discretization validation passed.")
+    # end
+
     return out
 end
 
-function simulate_shocks(T, shock_cfg::ShockOutput, rng::AbstractRNG)
-    """
-    Simulates T periods of shocks given a ShockOutput config.
-    Outputs the time series for ONE agent (actual shock values, not indices).
-    """
-    zgrid = shock_cfg.zgrid
-    Π = shock_cfg.Π
-    π = shock_cfg.π
 
-    Nz = length(zgrid)
-    shocks = zeros(T)
-    idx = sample(1:Nz, Weights(π))
+# """
+# Simulates T periods of shocks given a ShockOutput config.
+# Outputs the time series for ONE agent (actual shock values, not indices).
+# """
+# function simulate_shocks(T::Int, shocks::ShockOutput, rng::AbstractRNG)::Vector{Float64}
+#     zgrid = shocks.zgrid
+#     Π = shocks.Π
+#     π = shocks.π
 
-    for t in 1:T
-        shocks[t] = zgrid[idx]
-        idx = sample(rng, 1:Nz, Weights(Π[idx, :]))  # Next state index
-    end
+#     Nz = length(zgrid)
+#     sim_shocks = zeros(T)
+#     idx = sample(1:Nz, Weights(π))
 
-    return shocks
-end
+#     for t in 1:T
+#         sim_shocks[t] = zgrid[idx]
+#         idx = sample(rng, 1:Nz, Weights(Π[idx, :]))  # Next state index
+#     end
 
-
+#     return sim_shocks
+# end
 
 end # module

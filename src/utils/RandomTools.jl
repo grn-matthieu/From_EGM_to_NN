@@ -1,8 +1,15 @@
 module UtilsRandom
-export set_global_seed
+
+export make_rng
+
 using StableRNGs
 
-function set_global_seed(seed::Integer)
+"""
+    make_rng(seed::Integer) -> StableRNG
+
+Creates and returns a StableRNG seeded with `seed`.
+"""
+function make_rng(seed::Integer)
     return StableRNG(seed)
 end
 

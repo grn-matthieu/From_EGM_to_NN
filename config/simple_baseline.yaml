@@ -1,19 +1,36 @@
-experiment:
-  name: "simple_baseline_egm"
-  seed: 1234
-
 model:
-  beta: 0.96
-  sigma: 2.0
+  name: cs
+
+params:
+  β: 0.96
+  σ: 2.0
   r: 0.02
   y: 1.0
+  ρ_shock: 0.95
+  σ_shock: 0.10
 
-grid:
+grids:
   Na: 100
   a_min: 0.0
   a_max: 20.0
 
+shocks:
+  active: true
+  ρ_shock: 0.95
+  σ_shock: 0.10
+  Nz : 11
+  method : rouwenhorst
+  m : 3.0
+
+utility:
+  u_type: CRRA
+
 solver:
+  method: EGM
   tol: 1.0e-6
   maxit: 10000
   verbose: true
+  interp_kind: linear
+
+random:
+  seed: 1234
