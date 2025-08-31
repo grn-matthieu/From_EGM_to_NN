@@ -58,7 +58,6 @@ end
 get_params(model::ConsumerSavingModel) = model.params
 get_grids(model::ConsumerSavingModel) = model.grids
 get_shocks(model::ConsumerSavingModel) = model.shocks
-get_constraints(model::ConsumerSavingModel) = model.constraints
 get_utility(model::ConsumerSavingModel) = model.utility
 
 end # module

@@ -44,13 +44,17 @@ function solve(model::AbstractModel, method::EGMMethod, cfg::AbstractDict; rng=n
     tol = method.opts[:tol]
     maxit = method.opts[:maxit]
 
-    # Minimal EGM kernel (dummy, replace with real implementation)
+    # Minimal EGM kernel (dummy, to be replaced with real implementation)
     c = a .+ 1.0           # Dummy consumption policy
     ap = a .+ 0.5          # Dummy next-period assets
 
     # Diagnostics and metadata
     diagnostics = (; iters=1, tol=tol, ee_max=0.0, runtime=0.0)
-    metadata = Dict(:seed => isnothing(rng) ? nothing : rand(rng), :rng_type => string(typeof(rng)))
+    
+    metadata = Dict{Symbol,Any}(
+        :seed => get(get(cfg, :random, Dict()), :seed, nothing), # Check if :random is missing, as well as :seed
+        :rng_type => isnothing(rng) ? "nothing" : string(typeof(rng)) # Has the user inputed a seed ?
+    )
 
     # Return Solution
     return Solution((; c, ap), nothing, diagnostics, metadata, model, method)
