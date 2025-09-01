@@ -26,6 +26,7 @@ function build_cs_model(cfg::AbstractDict)
     else
         error("Config must contain either (:params, :grids) or (:model, :grid)")
     end
+    params[Symbol(:γ)] = params[:β] * (1 + params[:r])  # Add γ to params
 
     # 2. Build asset grid
     a_min = grids[:a_min]
@@ -42,8 +43,17 @@ function build_cs_model(cfg::AbstractDict)
 
     # 4. Build utility closure
     σ = params[:σ]
-    u = σ ≈ 1 ? (c -> log(c)) : (c -> (c^(1-σ) - 1) / (1-σ))
-    utility = (; u, σ)
+    # utility and marginal utility for CRRA (log limit at σ ≈ 1)
+    if isapprox(σ, 1.0; atol=1e-8)
+        u = (c -> log(c))
+        u_prime = (c -> 1.0 ./ c)
+        u_prime_inv = (up -> 1.0 ./ up)
+    else
+        u = (c -> (c.^(1-σ) .- 1.0) ./ (1.0 - σ))
+        u_prime = (c -> c .^ (-σ))
+        u_prime_inv = (up -> up .^ (-1.0/σ))
+    end
+    utility = (; u, u_prime, u_prime_inv, σ)
 
     # 6. Return model
     return ConsumerSavingModel(

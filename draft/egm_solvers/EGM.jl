@@ -29,7 +29,7 @@ end
 
 # ─── Vectorized interpolation helpers ────────────────────────────────────────────────────────────────
 
-function interp_linear!(out::AbstractArray,
+function interp_linear(out::AbstractArray,
                         x::AbstractVector,
                         y::AbstractVector,
                         xq::AbstractVector)
