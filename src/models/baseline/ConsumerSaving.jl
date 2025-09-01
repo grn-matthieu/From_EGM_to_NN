@@ -58,7 +58,7 @@ function build_cs_model(cfg::AbstractDict)
     # 6. Return model
     return ConsumerSavingModel(
         (;params...),
-        (; a=agrid),
+        (; a_grid=agrid, a_min = a_min, a_max = a_max, Na=Na),
         shocks,
         utility
     )

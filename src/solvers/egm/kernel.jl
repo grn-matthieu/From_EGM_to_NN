@@ -1,6 +1,6 @@
 module EGMKernel
 
-using ..EGMInterp: interp_linear!, interp_pchip!, InterpKind, LinearInterp, MonotoneCubicInterp
+using ..CommonInterp: interp_linear!, interp_pchip!, InterpKind, LinearInterp, MonotoneCubicInterp
 using ..EGMResiduals: euler_resid_det
 
 export solve_egm_det
@@ -23,17 +23,17 @@ function solve_egm_det(model_params, model_grids, model_utility;
     runtime = 0.0
     start_time = time_ns()
 
-    a = model_grids.a
-    a_min = minimum(a)
-    a_max = maximum(a)
-    Na = length(a)
+    a_grid = model_grids.a_grid
+    a_min  = model_grids.a_min
+    a_max  = model_grids.a_max
+    Na     = model_grids.Na
 
     γ = model_params.β * (1 + model_params.r)
     R = (1 + model_params.r)
     cmin  = 1e-12
 
     # Initial guess for resources and consumption
-    resources = @. R * a - a_min + model_params.y
+    resources = @. R * a_grid - a_min + model_params.y
 
     # Initial guess for consumption : if not provided, consider half the resources
     c = c_init === nothing ? clamp.(0.5 .* resources, cmin, resources) : copy(c_init)
@@ -52,25 +52,25 @@ function solve_egm_det(model_params, model_grids, model_utility;
     no_progress = 0
 
     for it in 1:maxit
-        # Store the current iteration in a buffer for the metadata
+        # Store the current iteration in a_grid buffer for the metadata
         iters = it
 
-        @. a_next = model_params.y + R * a - c
+        @. a_next = model_params.y + R * a_grid - c
         @. a_next = clamp(a_next, a_min, a_max)
 
         if interp_kind isa LinearInterp
-            interp_linear!(cnext, a, c, a_next)
+            interp_linear!(cnext, a_grid, c, a_next)
         elseif interp_kind isa MonotoneCubicInterp
-            interp_pchip!(cnext, a, c, a_next)
+            interp_pchip!(cnext, a_grid, c, a_next)
         else
             @error "Unknown interpolation kind: $interp_kind"
         end
 
         @. cnew = model_utility.u_prime_inv(γ * cnext.^(-model_params.σ))
-        cmax = @. model_params.y + R * a - a_min
+        cmax = @. model_params.y + R * a_grid - a_min
         @. cnew = clamp(cnew, cmin, cmax)
 
-        @. a_next = R * a + model_params.y - cnew
+        @. a_next = R * a_grid + model_params.y - cnew
         @. a_next = clamp(a_next, a_min, a_max)
 
         # Only enforce monotonicity if using PCHIP
@@ -113,11 +113,11 @@ function solve_egm_det(model_params, model_grids, model_utility;
     # Metadata
     opts = (;tol=tol, tol_pol=tol_pol, maxit=maxit, interp_kind=interp_kind, relax=relax, patience=patience, ν=ν, seed=nothing, runtime=runtime)
 
-    # Last a next consistent with c
-    @. a_next = R * a + model_params.y - c
+    # Last a_grid next consistent with c
+    @. a_next = R * a_grid + model_params.y - c
     @. a_next = clamp(a_next, a_min, a_max)
 
-    return (;a, c, a_next, iters, converged, max_resid, model_params, opts)
+    return (;a_grid, c, a_next, iters, converged, max_resid, model_params, opts)
 end
 
 

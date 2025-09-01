@@ -1,4 +1,4 @@
-module EGMInterp
+module CommonInterp
 
 export interp_linear!, interp_pchip!, InterpKind, LinearInterp, MonotoneCubicInterp
 

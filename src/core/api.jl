@@ -16,7 +16,7 @@ Holds the results of a model solution, including policies and diagnostics.
 """
 Base.@kwdef struct Solution{M<:AbstractModel, K<:AbstractMethod}
     policy::NamedTuple
-    value::Union{Nothing,Float64}
+    value::Union{Nothing,AbstractArray{Float64}} # Value function
     diagnostics::NamedTuple  # EE stats, iterations, runtime
     metadata::Dict{Symbol,Any} # Model id, method, seed, timestamps
     model::M
