@@ -52,7 +52,7 @@ function solve(model::AbstractModel, method::EGMMethod, cfg::AbstractDict; rng=n
     end
 
     # --- Processing ---
-    policy = (;c_pol = sol.c, a_pol = sol.a_next)
+    policy = (;c_pol = sol.c, a_pol = sol.a_next, a_grid=g.a_grid)
     value = compute_value(p, g, S, U, policy)
     metadata = Dict{Symbol,Any}(
         :iters => sol.iters,

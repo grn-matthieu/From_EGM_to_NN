@@ -29,3 +29,9 @@ StableRNGs = "1.0.3"
 StatsBase = "0.34.6"
 Test = "1.11.0"
 julia = "=1.11.6"
+
+[weakdeps]
+Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
+
+[extensions]
+ThesisProjectPlotsExt = ["Plots"]

@@ -42,4 +42,8 @@ using .EGM: build_method, solve
 
 export load_config, build_model, build_method, solve
 
+# --- Extensions ---
+include("viz/api.jl")      # stubs only
+export plot_policy         # users call ThesisProject.plot_policy(...)
+
 end # module
