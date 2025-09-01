@@ -2,6 +2,8 @@ module EGM
 
 using ..API
 using ..ModelContract
+using ..EGMKernel:solve_egm_det
+using ..Determinism: canonicalize_cfg, hash_hex
 
 export EGMMethod, build_method, solve
 
@@ -34,30 +36,48 @@ end
 Entry point for the EGM solver. Extracts contract fields, runs a minimal EGM loop, and returns a Solution.
 """
 function solve(model::AbstractModel, method::EGMMethod, cfg::AbstractDict; rng=nothing)::Solution
-    # Extract contract fields
+    # --- Extraction ---
     p = get_params(model)
     g = get_grids(model)
     S = get_shocks(model)
     U = get_utility(model)
 
-    a = g[:a]
-    tol = method.opts[:tol]
-    maxit = method.opts[:maxit]
+    # --- Solution ---
+    # Check if S has an active key, if yes and active is true, then dispatch to the stoch solver
+    if haskey(cfg, :active) && cfg[:active]
+        #sol = solve_egm_stoch(P, g, S, U)
+    else
+        sol = solve_egm_det(p, g, U)
+    end
 
-    # Minimal EGM kernel (dummy, to be replaced with real implementation)
-    c = a .+ 1.0           # Dummy consumption policy
-    ap = a .+ 0.5          # Dummy next-period assets
-
-    # Diagnostics and metadata
-    diagnostics = (; iters=1, tol=tol, ee_max=0.0, runtime=0.0)
-    
+    # --- Processing ---
+    policy = (;c_pol = sol.c, a_pol = sol.a_next)
+    value = -Inf
     metadata = Dict{Symbol,Any}(
-        :seed => get(get(cfg, :random, Dict()), :seed, nothing), # Check if :random is missing, as well as :seed
-        :rng_type => isnothing(rng) ? "nothing" : string(typeof(rng)) # Has the user inputed a seed ?
+        :iters => sol.iters,
+        :max_it => sol.opts.maxit,
+        :converged => sol.converged,
+        :max_resid => sol.max_resid,
+        :tol => sol.opts.tol,
+        :tol_pol => sol.opts.tol_pol,
+        :relax => sol.opts.relax,
+        :patience => sol.opts.patience,
+        :ν => sol.opts.ν,
+        :interp_kind => string(sol.opts.interp_kind),
+        :julia_version => string(VERSION)
     )
 
-    # Return Solution
-    return Solution((; c, ap), nothing, diagnostics, metadata, model, method)
+    # Model ID
+    model_id = hash_hex(canonicalize_cfg(cfg))
+
+    diagnostics = (; 
+        model_id = model_id, 
+        method = method.opts.name, 
+        seed = sol.opts.seed,
+        runtime = sol.opts.runtime
+    )
+
+    return Solution(policy, value, diagnostics, metadata, model, method)
 end
 
 end #

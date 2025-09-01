@@ -8,7 +8,7 @@ include("core/model_contract.jl")
 # 2) utilities
 include("utils/Config.jl")
 # include("utils/Schema.jl")
-# include("utils/Determinism.jl")
+include("utils/Determinism.jl")
 
 # 3) shared + models + model builder
 include("models/shared/Shocks.jl")
@@ -34,6 +34,7 @@ using .UtilsConfig: load_config
 using .ModelFactory: build_model
 using .EGM: build_method, solve
 using .EGMKernel: solve_egm_det
+using .Determinism: canonicalize_cfg, hash_hex
 
 # --- Exports ---
 

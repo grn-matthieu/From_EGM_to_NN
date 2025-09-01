@@ -20,6 +20,8 @@ function solve_egm_det(model_params, model_grids, model_utility;
         tol::Real=1e-8, tol_pol::Real=1e-6, maxit::Int=500,
         interp_kind::InterpKind=LinearInterp(), relax::Real=0.5, patience::Int=50, ν::Real=1e-10,
         c_init=nothing)::NamedTuple
+    runtime = 0.0
+    start_time = time_ns()
 
     a = model_grids.a
     a_min = minimum(a)
@@ -105,9 +107,11 @@ function solve_egm_det(model_params, model_grids, model_utility;
             break
         end
     end
+    stop_time = time_ns()
+    runtime = (stop_time - start_time) / 1e9
 
     # Metadata
-    opts = (;tol=tol, tol_pol=tol_pol, maxit=maxit, interp_kind=interp_kind, relax=relax, patience=patience, ν=ν)
+    opts = (;tol=tol, tol_pol=tol_pol, maxit=maxit, interp_kind=interp_kind, relax=relax, patience=patience, ν=ν, seed=nothing, runtime=runtime)
 
     # Last a next consistent with c
     @. a_next = R * a + model_params.y - c
