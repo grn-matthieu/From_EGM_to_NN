@@ -3,6 +3,7 @@ module EGM
 using ..API
 using ..ModelContract
 using ..EGMKernel:solve_egm_det
+using ..ValueFunction: compute_value
 using ..Determinism: canonicalize_cfg, hash_hex
 
 export EGMMethod, build_method, solve
@@ -52,7 +53,7 @@ function solve(model::AbstractModel, method::EGMMethod, cfg::AbstractDict; rng=n
 
     # --- Processing ---
     policy = (;c_pol = sol.c, a_pol = sol.a_next)
-    value = -Inf
+    value = compute_value(p, g, S, U, policy)
     metadata = Dict{Symbol,Any}(
         :iters => sol.iters,
         :max_it => sol.opts.maxit,

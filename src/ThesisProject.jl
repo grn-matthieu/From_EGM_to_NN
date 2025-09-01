@@ -16,7 +16,11 @@ include("models/baseline/ConsumerSaving.jl")
 include("core/model_factory.jl")
 
 # 4) solvers (pure kernels)
-include("solvers/egm/interp.jl")
+# common solver utilities
+include("solvers/common/interp.jl")
+include("solvers/common/value_fun.jl")
+
+# egm specific
 include("solvers/egm/residuals.jl")
 include("solvers/egm/kernel.jl")
 
@@ -33,11 +37,9 @@ include("methods/EGM.jl")
 using .UtilsConfig: load_config
 using .ModelFactory: build_model
 using .EGM: build_method, solve
-using .EGMKernel: solve_egm_det
-using .Determinism: canonicalize_cfg, hash_hex
 
 # --- Exports ---
 
-export load_config, build_model, build_method, solve, solve_egm_det
+export load_config, build_model, build_method, solve
 
 end # module
