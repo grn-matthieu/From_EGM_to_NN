@@ -1,35 +1,35 @@
-module PolicyPlots
+ import ThesisProject: plot_policy
 
 """
     plot_policy(sol; vars=nothing, labels=nothing)
 
-Plot the policy functions from a Solution struct.
+Plot the policy functions from a Solution struct. Default behaviour is to plot every var in the sol.policy.
 - `vars`: Optional vector of variable symbols or indices to plot.
 - `labels`: Optional vector of labels for the plotted variables.
 
 Returns a Plots.Plot object (Plots lib compatible.)
 """
-function plot_policy(sol; vars=nothing, labels=nothing)
-    # Assume sol has fields: grid, policy (matrix or vector)
-    grid = sol.policy.a_grid
+function plot_policy(sol::ThesisProject.API.Solution;
+                     vars::Union{Nothing,AbstractVector{Symbol}}=nothing,
+                     labels::Union{Nothing,AbstractVector{String}}=nothing)
     policy = sol.policy
+    # X-axis: assume the grid is available as `:a` in policy or elsewhere.
+    hasproperty(policy, :a_grid) || error("Expected grid `:a_grid` in sol.policy for plotting.")
+    x = getproperty(policy, :a_grid)
 
-    if isnothing(vars)
-        vars = 1:size(policy, 2)
-    end
-    if isnothing(labels)
-        labels = ["Policy $i" for i in vars]
-    end
-
+    sel = isnothing(vars) ? collect(propertynames(policy)) : collect(vars)
     plt = plot()
-    for (k, y) in pairs(policy)                 # k::String, y::AbstractVector
-        k in vars || continue
-        plot!(plt, grid, y, label=labels[findfirst(==(k), vars)])
+    for k in sel
+        hasproperty(policy, k) || continue
+        y = getproperty(policy, k)
+        y isa AbstractVector || continue
+        plot!(plt, x, y, label = isnothing(labels) ? String(k) :
+                           (labels[findfirst(==(k), sel)]))
     end
-    xlabel!(plt, "State variable $k")
-    ylabel!(plt, "Policy")
+    xlabel!(plt, "state")
+    ylabel!(plt, "policy")
     title!(plt, "Policy Functions")
-    return plt
+    plt
 end
 
 """
@@ -65,5 +65,3 @@ function plot_euler_error(sol; vars=nothing, labels=nothing)
 end
 
 export plot_policy
-
-end # module

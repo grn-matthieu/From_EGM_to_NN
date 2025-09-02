@@ -1,9 +1,7 @@
-# --- Desc ---
-# This API is optional, when the user wants graphic visualization.
-
-
-function plot_policy(::Any; kwargs...)
-    error("plot_policy requires a plotting backend. `using Plots` in your session.")
-end
-
-export plot_policy
+"""
+plot_policy(...)
+Stub: errors unless a plotting backend is loaded (via package extension).
+"""
+plot_policy(::Any; kwargs...) = error(
+    "Visualization API 'plot_policy' requires a plotting backend. `using Plots` in your session."
+)

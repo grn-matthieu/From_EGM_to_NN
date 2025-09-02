@@ -15,12 +15,7 @@ grids:
   a_max: 20.0
 
 shocks:
-  active: true
-  ρ_shock: 0.95
-  σ_shock: 0.10
-  Nz : 11
-  method : rouwenhorst
-  m : 3.0
+  active: false
 
 utility:
   u_type: CRRA
