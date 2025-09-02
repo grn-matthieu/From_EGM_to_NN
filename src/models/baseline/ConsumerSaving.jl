@@ -9,7 +9,7 @@ import ..API: get_params, get_grids, get_shocks, get_utility
 # Define your model type
 struct ConsumerSavingModel <: AbstractModel
     params::NamedTuple
-    grids::NamedTuple
+    grids::Dict{Symbol, Any}
     shocks::Union{Nothing,ShockOutput}
     utility::NamedTuple
 end
@@ -33,6 +33,9 @@ function build_cs_model(cfg::AbstractDict)
     a_max = grids[:a_max]
     Na    = grids[:Na]
     agrid = collect(range(a_min, a_max; length=Na))
+
+    # Dict to prepare multiple control variables
+    grids = Dict{Symbol, Any}(:a => (; grid=agrid, min=a_min, max=a_max, N=Na))
 
     # 3. Handle shocks
     shocks = nothing
@@ -58,7 +61,7 @@ function build_cs_model(cfg::AbstractDict)
     # 6. Return model
     return ConsumerSavingModel(
         (;params...),
-        (; a_grid=agrid, a_min = a_min, a_max = a_max, Na=Na),
+        grids,
         shocks,
         utility
     )

@@ -12,25 +12,24 @@ Returns a Plots.Plot object (Plots lib compatible.)
 function plot_policy(sol::ThesisProject.API.Solution;
                      vars::Union{Nothing,AbstractVector{Symbol}}=nothing,
                      labels::Union{Nothing,AbstractVector{String}}=nothing)
-    policy = sol.policy
-    # X-axis: assume the grid is available as `:a` in policy or elsewhere.
-    hasproperty(policy, :a_grid) || error("Expected grid `:a_grid` in sol.policy for plotting.")
-    x = getproperty(policy, :a_grid)
 
-    sel = isnothing(vars) ? collect(propertynames(policy)) : collect(vars)
+    vars_to_plot = isnothing(vars) ? keys(sol.policy) : collect(vars)
     plt = plot()
-    for k in sel
-        hasproperty(policy, k) || continue
-        y = getproperty(policy, k)
-        y isa AbstractVector || continue
+    for k in vars_to_plot
+        hasproperty(grid, k) || continue # Needed bc vars might include non existing vars
+        x = sol.policy[Symbol(k)].grid
+        y = sol.policy[Symbol(k)].value
+        y isa AbstractVector || continue # Needed bc policy might not be a vector
         plot!(plt, x, y, label = isnothing(labels) ? String(k) :
-                           (labels[findfirst(==(k), sel)]))
+                           (labels[findfirst(==(k), vars_to_plot)]))
     end
     xlabel!(plt, "state")
     ylabel!(plt, "policy")
     title!(plt, "Policy Functions")
     plt
 end
+
+
 
 """
     plot_euler_error(sol; vars=nothing, labels=nothing)
@@ -41,13 +40,15 @@ Plot the Euler errors from a Solution object `sol`.
 
 Returns a Plots.Plot object.
 """
-function plot_euler_error(sol; vars=nothing, labels=nothing)
-    # Assume sol has fields: grid, euler_error (matrix or vector)
+function plot_euler_error(sol::ThesisProject.API.Solution;
+                     vars::Union{Nothing,AbstractVector{Symbol}}=nothing,
+                     labels::Union{Nothing,AbstractVector{String}}=nothing)
+    # Function assumes that grid as well as euler_errors are in the sol
     grid = sol.grid
-    euler_error = sol.euler_error
+    euler_errors = sol.euler_errors
 
     if isnothing(vars)
-        vars = 1:size(euler_error, 2)
+        vars = 1:size(euler_errors, 2)
     end
     if isnothing(labels)
         labels = ["Euler Error $i" for i in vars]
@@ -55,7 +56,7 @@ function plot_euler_error(sol; vars=nothing, labels=nothing)
 
     plt = plot()
     for (i, v) in enumerate(vars)
-        plot!(plt, grid, abs.(euler_error[:, v]), label=labels[i])
+        plot!(plt, grid[:i].grid, abs.(euler_errors[:, v]), label=labels[i])
     end
     xlabel!(plt, "State")
     ylabel!(plt, "Euler Error (abs)")

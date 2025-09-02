@@ -23,10 +23,10 @@ function solve_egm_det(model_params, model_grids, model_utility;
     runtime = 0.0
     start_time = time_ns()
 
-    a_grid = model_grids.a_grid
-    a_min  = model_grids.a_min
-    a_max  = model_grids.a_max
-    Na     = model_grids.Na
+    a_grid = model_grids[:a].grid
+    a_min  = model_grids[:a].min
+    a_max  = model_grids[:a].max
+    Na     = model_grids[:a].N
 
     γ = model_params.β * (1 + model_params.r)
     R = (1 + model_params.r)

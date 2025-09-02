@@ -15,10 +15,10 @@ Output: `Vector{Float64}` of length `length(sol.agrid) : policy fun`.
 """
 function compute_value(p, g, S, U, policy;tol=1e-8, maxit=1_000)
     # S is not used fn, to be implemented when dealing with stoch models
-    V = zeros(g.Na)
+    V = zeros(g[:a].N)
     for _ in 1:maxit
         V_new = similar(V)
-        V_new = U.u(policy.c_pol) + p.β * interp_linear!(V, g.a_grid, V_new, policy.a_pol)
+        V_new = U.u(policy[:c].value) + p.β * interp_linear!(V, g[:a].grid, V_new, policy[:a].value)
         if maximum(abs.(V_new .- V)) < tol
             return V_new
         end
