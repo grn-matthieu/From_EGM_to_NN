@@ -7,5 +7,5 @@ using Test
     model = build_model(smoke_cfg)
     method = build_method(smoke_cfg)
     sol   = solve(model, method, smoke_cfg)
-    @test !any(isnan, sol.policy.c)
+    @test !any(isnan, sol.policy.c_pol)
 end

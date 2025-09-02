@@ -1,10 +1,10 @@
 module ConsumerSaving
 
-using ..API
-using ..ModelContract
+using ..API: AbstractModel
 using ..Shocks
 
-import ..ModelContract: get_params, get_grids, get_shocks, get_utility
+import ..API: get_params, get_grids, get_shocks, get_utility
+
 
 # Define your model type
 struct ConsumerSavingModel <: AbstractModel

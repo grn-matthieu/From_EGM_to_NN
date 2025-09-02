@@ -1,12 +1,13 @@
 module EGM
 
 using ..API
-using ..ModelContract
+import ..API: build_method, solve
+
 using ..EGMKernel:solve_egm_det
 using ..ValueFunction: compute_value
 using ..Determinism: canonicalize_cfg, hash_hex
 
-export EGMMethod, build_method, solve
+export EGMMethod
 
 struct EGMMethod <: AbstractMethod
     opts::NamedTuple
@@ -20,13 +21,17 @@ Accepts either cfg[:method] or cfg[:solver] and returns an EGMMethod.
 """
 function build_method(cfg::AbstractDict)
     method_name = haskey(cfg, :method) ? cfg[:method] : cfg[:solver][:method]
-    return EGMMethod((
+    if method_name != "EGM"
+        error("Method builder received cfg with method = $method_name. It has not been implemented.")
+    else
+        return EGMMethod((
         name = method_name,
         tol = get(cfg[:solver], :tol, 1e-6),
         maxit = get(cfg[:solver], :maxit, 1000),
         interp_kind = get(cfg[:solver], :interp_kind, :linear),
         verbose = get(cfg[:solver], :verbose, false)
     ))
+    end
 end
 
 

@@ -1,11 +1,9 @@
 module ModelFactory
 
-using ..API
+import ..API: build_model
+
 using ..ModelContract
 using ..ConsumerSaving: build_cs_model
-
-export build_model
-
 
 """
     build_model(config::Dict)

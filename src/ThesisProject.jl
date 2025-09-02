@@ -33,14 +33,14 @@ include("methods/EGM.jl")
 # include("sim/panel.jl")
 # include("sim/moments.jl")
 
-
-using .UtilsConfig: load_config
-using .ModelFactory: build_model
-using .EGM: build_method, solve
+using .API: AbstractModel, AbstractMethod, Solution,
+            get_params, get_grids, get_shocks, get_utility, 
+            build_model, load_config, build_method, solve
 
 # --- Exports ---
 
-export load_config, build_model, build_method, solve
+export load_config, build_model, build_method, solve, 
+    get_params, get_grids, get_shocks, get_utility
 
 # --- Extensions ---
 include("viz/api.jl")      # stubs only

@@ -1,6 +1,6 @@
 module UtilsConfig
 
-export load_config
+import ..API: load_config
 
 using YAML
 
