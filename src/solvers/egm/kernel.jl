@@ -43,6 +43,7 @@ function solve_egm_det(model_params, model_grids, model_utility;
     cnext = similar(c)
     cnew = similar(c)
     a_next = similar(c)
+    resid = similar(c)
 
     converged = false
     iters = 0
@@ -117,7 +118,7 @@ function solve_egm_det(model_params, model_grids, model_utility;
     @. a_next = R * a_grid + model_params.y - c
     @. a_next = clamp(a_next, a_min, a_max)
 
-    return (;a_grid, c, a_next, iters, converged, max_resid, model_params, opts)
+    return (;a_grid, c, a_next, resid, iters, converged, max_resid, model_params, opts)
 end
 
 

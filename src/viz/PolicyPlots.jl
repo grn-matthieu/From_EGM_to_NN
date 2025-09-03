@@ -1,4 +1,4 @@
- import ThesisProject: plot_policy
+ import ThesisProject: plot_policy, plot_euler_errors
 
 """
     plot_policy(sol; vars=nothing, labels=nothing)
@@ -32,7 +32,7 @@ end
 
 
 """
-    plot_euler_error(sol; vars=nothing, labels=nothing)
+    plot_euler_errors(sol; vars=nothing, labels=nothing)
 
 Plot the Euler errors from a Solution object `sol`.
 - `vars`: Optional vector of variable symbols or indices to plot.
@@ -40,29 +40,15 @@ Plot the Euler errors from a Solution object `sol`.
 
 Returns a Plots.Plot object.
 """
-function plot_euler_error(sol::ThesisProject.API.Solution;
-                     vars::Union{Nothing,AbstractVector{Symbol}}=nothing,
-                     labels::Union{Nothing,AbstractVector{String}}=nothing)
-    # Function assumes that grid as well as euler_errors are in the sol
-    grid = sol.grid
-    euler_errors = sol.euler_errors
-
-    if isnothing(vars)
-        vars = 1:size(euler_errors, 2)
-    end
-    if isnothing(labels)
-        labels = ["Euler Error $i" for i in vars]
-    end
-
+function plot_euler_errors(sol::ThesisProject.API.Solution)
     plt = plot()
-    for (i, v) in enumerate(vars)
-        plot!(plt, grid[:i].grid, abs.(euler_errors[:, v]), label=labels[i])
-    end
+    x = sol.policy[:a].grid # Temporary for the CS model, where a is the state var
+    y = sol.policy[:c].euler_errors
+    plot!(plt, x, y, yscale=:log10)
     xlabel!(plt, "State")
-    ylabel!(plt, "Euler Error (abs)")
-    yscale!(plt, :log10)
-    title!(plt, "Euler Errors")
+    ylabel!(plt, "Abs. EErr (in log)")
+    title!(plt, "Euler Errors (method : $(sol.diagnostics.method))")
     return plt
 end
 
-export plot_policy
+export plot_policy, plot_euler_errors

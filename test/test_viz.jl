@@ -8,4 +8,8 @@
         plt = plot_policy(sol)
         isa(plt, Plots.Plot)
     end
+    @test begin
+        plt = plot_euler_errors(sol)
+        isa(plt, Plots.Plot)
+    end
 end

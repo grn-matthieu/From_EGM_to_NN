@@ -44,6 +44,6 @@ export load_config, build_model, build_method, solve,
 
 # --- Extensions ---
 include("viz/api.jl")      # stubs only
-export plot_policy         # users call ThesisProject.plot_policy(...)
+export plot_policy, plot_euler_errors        # users call ThesisProject.plot_policy(...), etc.
 
 end # module

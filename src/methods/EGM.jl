@@ -58,7 +58,7 @@ function solve(model::AbstractModel, method::EGMMethod, cfg::AbstractDict; rng=n
 
     # --- Processing ---
     policy = Dict{Symbol,Any}(
-        :c => (; value = sol.c, grid = g[:a].grid),
+        :c => (; value = sol.c, grid = g[:a].grid, euler_errors = sol.resid),
         :a => (; value = sol.a_next, grid = g[:a].grid)
     )
     value = compute_value(p, g, S, U, policy)
