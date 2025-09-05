@@ -5,7 +5,7 @@ module API
 
 export AbstractModel, AbstractMethod, Solution, 
         get_params, get_grids, get_shocks, get_utility, 
-        build_model, build_method, load_config, solve
+        build_model, build_method, load_config, validate_config, solve
 
 abstract type AbstractModel end
 abstract type AbstractMethod end
@@ -46,6 +46,11 @@ end
 
 function load_config(x) 
     error("load_config not implemented for $(typeof(x)).")
+end
+
+
+function validate_config(x)
+    error("validate_config not implemented for $(typeof(x)).")
 end
 
 

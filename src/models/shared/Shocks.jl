@@ -1,5 +1,7 @@
 module Shocks
 
+using SpecialFunctions: erf
+
 export discretize, ShockOutput
 
 struct ShockOutput

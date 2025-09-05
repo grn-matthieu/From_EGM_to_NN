@@ -10,7 +10,7 @@ export solve_egm_det
 """
     function solve_egm_det(
         model_params, model_grids;
-        tol::Real=1e-8, tol_pol::Real=1e-6, maxit::Int=500, verbose::Bool=false,
+        tol::Real=1e-8, tol_pol::Real=1e-6, maxit::Int=500,
         interp_kind::InterpKind=LinearInterp(), relax::Real=0.5, patience::Int=50, ν::Real=1e-10,
     )
     Vectorized EGM with residual-based stopping. No recurring income; borrowing limit at `model_params.a_min`.
@@ -99,7 +99,7 @@ function solve_egm_det(model_params, model_grids, model_utility;
             best_resid = max_resid
         end
 
-        if no_progress ≥ patience && verbose
+        if no_progress ≥ patience
             break
         end
 

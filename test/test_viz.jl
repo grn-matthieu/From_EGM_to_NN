@@ -1,5 +1,5 @@
 @testset "viz" begin
-    cfg_path = joinpath("@__DIR__", "..", "config", "smoke_config", "smoke_config.yaml")
+    cfg_path = joinpath(@__DIR__, "..", "config", "smoke_config", "smoke_config.yaml")
     cfg = load_config(cfg_path)
     model = build_model(cfg)
     method = build_method(cfg)

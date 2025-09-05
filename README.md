@@ -27,3 +27,45 @@ Maliar, L., Maliar, S., & Winant, P. (2021). Deep learning for solving dynamic e
 Judd, K. L. (1998). Numerical Methods in Economics. MIT Press.
 
 ---
+
+## Quickstart
+
+- Instantiate and test:
+  - `julia --project -e 'using Pkg; Pkg.instantiate(); Pkg.test()'`
+
+- Minimal example:
+  - `using ThesisProject`
+  - `cfg = load_config("config/smoke_config/smoke_config.yaml")`
+  - `validate_config(cfg)`
+  - `model = build_model(cfg)`
+  - `method = build_method(cfg)`
+  - `sol = solve(model, method, cfg)`
+
+- Plotting (optional):
+  - `using Plots`
+  - `plot_policy(sol)`; `plot_euler_errors(sol)`
+
+---
+
+## Config Format
+
+Configs are YAML files loaded via `load_config`, which recursively converts keys to symbols. A minimal config requires:
+- `:model`: at least `name`
+- `:params`: model parameters
+- `:grids`: `Na`, `a_min`, `a_max`
+- `:solver`: `method` (e.g., `"EGM"`)
+
+Validate early with `validate_config(cfg)`; the function throws if something is missing or inconsistent.
+
+---
+
+## Quality Checks (Optional)
+
+The test suite can run Aqua.jl (package hygiene) and JET.jl (type stability/errors) if they are installed. They are optional; tests skip them if unavailable.
+
+- Install once if desired:
+  - `julia --project -e 'using Pkg; Pkg.add(["Aqua", "JET"])'`
+
+- Run tests as usual: `Pkg.test()`
+
+---

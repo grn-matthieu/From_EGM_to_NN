@@ -1,12 +1,20 @@
 # Main testset to assess if the core of the code is stable
 @testset "Core stability" begin
-    cfg_path = joinpath("@__DIR__", "..", "config", "smoke_config", "smoke_config.yaml")
+    cfg_path = joinpath(@__DIR__, "..", "config", "smoke_config", "smoke_config.yaml")
     @test isfile(cfg_path) || @warn("config file not found: $cfg_path")
 
     # Test loading side
     config = load_config(cfg_path)
     @test config isa AbstractDict
     @test all(k -> haskey(config, k), (:model, :params, :grids)) # Fundamental keys in the config
+    @test begin # Test to validate a config we know to be stable
+        try
+            validate_config(config)
+            true
+        catch
+            false
+        end
+    end
 
     # Test model building
     model = build_model(config)
@@ -24,11 +32,23 @@
 
     # Test solver
     sol = nothing
-    @testset "solve" begin
+    @testset "solve" begin # Battery of tests on the solution obtained
         try
             sol = solve(model, method, config)
             @test isa(sol, ThesisProject.API.Solution)
             @test isa(sol.policy, AbstractDict)
+            @test haskey(sol.policy, :c) && haskey(sol.policy, :a)
+            @test length(sol.policy[:c].value) == grids[:a].N
+            @test length(sol.policy[:a].value) == grids[:a].N
+            @test sol.metadata[:converged] === true
+
+            # Test the tolerance check (ignore the first point where BC is not binding)
+            @test maximum(sol.policy[:c].euler_errors[min(2,end):end]) < 1e-5
+            # Policy bounds : does the asset policy respect the constraints?
+            @test all(sol.policy[:a].value .>= grids[:a].min)
+            @test all(sol.policy[:a].value .<= grids[:a].max)
+            # Monotonicity check
+            @test all(diff(sol.policy[:a].value) .>= -1e-8)
         catch err
             @warn "solve failed" err=(err, catch_backtrace())
             @test false

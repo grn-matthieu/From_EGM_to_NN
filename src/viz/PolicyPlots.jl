@@ -13,15 +13,17 @@ function plot_policy(sol::ThesisProject.API.Solution;
                      vars::Union{Nothing,AbstractVector{Symbol}}=nothing,
                      labels::Union{Nothing,AbstractVector{String}}=nothing)
 
-    vars_to_plot = isnothing(vars) ? keys(sol.policy) : collect(vars)
+    vars_to_plot = isnothing(vars) ? collect(keys(sol.policy)) : collect(vars) # Collect needed when vars is nothing
     plt = plot()
-    for k in vars_to_plot
-        hasproperty(grid, k) || continue # Needed bc vars might include non existing vars
-        x = sol.policy[Symbol(k)].grid
-        y = sol.policy[Symbol(k)].value
-        y isa AbstractVector || continue # Needed bc policy might not be a vector
-        plot!(plt, x, y, label = isnothing(labels) ? String(k) :
-                           (labels[findfirst(==(k), vars_to_plot)]))
+    for (i, k) in enumerate(vars_to_plot)
+        haskey(sol.policy, k) || continue # vars might include non-existing entries
+        buffer_policy = sol.policy[k]
+        x = getproperty(buffer_policy, :grid)
+        y = getproperty(buffer_policy, :value)
+        y isa AbstractVector || continue # some policies may be scalars or structs
+        # For labeling, we use the k-th label of the label list. If not enough labels : variable name.
+        lab = isnothing(labels) ? String(k) : (i <= length(labels) ? labels[i] : String(k))
+        plot!(plt, x, y, label = lab)
     end
     xlabel!(plt, "state")
     ylabel!(plt, "policy")
