@@ -14,9 +14,6 @@ grids:
   a_min: 0.0
   a_max: 20.0
 
-shocks:
-  active: false
-
 utility:
   u_type: CRRA
 

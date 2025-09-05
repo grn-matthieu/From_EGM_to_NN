@@ -3,7 +3,7 @@ module EGM
 using ..API
 import ..API: build_method, solve
 
-using ..EGMKernel:solve_egm_det
+using ..EGMKernel:solve_egm_det, solve_egm_stoch
 using ..ValueFunction: compute_value
 using ..Determinism: canonicalize_cfg, hash_hex
 
@@ -49,16 +49,14 @@ function solve(model::AbstractModel, method::EGMMethod, cfg::AbstractDict; rng=n
     U = get_utility(model)
 
     # --- Solution ---
-    # Check if S has an active key, if yes and active is true, then dispatch to the stoch solver
-    if haskey(cfg, :active) && cfg[:active]
-        #sol = solve_egm_stoch(P, g, S, U)
-    else
-        sol = solve_egm_det(p, g, U)
-    end
+    # The dispatch is made when a shock structure is provided in the config file
+    sol = (S === nothing) ? solve_egm_det(p, g, U) : solve_egm_stoch(p, g, S, U)
 
     # --- Processing ---
+    ee = sol.resid
+    ee_vec = ee isa AbstractMatrix ? vec(maximum(ee, dims=2)) : ee # make ee a vector of max errors per asset grid point
     policy = Dict{Symbol,Any}(
-        :c => (; value = sol.c, grid = g[:a].grid, euler_errors = sol.resid),
+        :c => (; value = sol.c, grid = g[:a].grid, euler_errors = ee_vec),
         :a => (; value = sol.a_next, grid = g[:a].grid)
     )
     value = compute_value(p, g, S, U, policy)
@@ -71,7 +69,7 @@ function solve(model::AbstractModel, method::EGMMethod, cfg::AbstractDict; rng=n
         :tol_pol => sol.opts.tol_pol,
         :relax => sol.opts.relax,
         :patience => sol.opts.patience,
-        :ν => sol.opts.ν,
+        :ϵ => sol.opts.ϵ,
         :interp_kind => string(sol.opts.interp_kind),
         :julia_version => string(VERSION)
     )

@@ -29,9 +29,8 @@ include("methods/EGM.jl")
 # include("methods/NN.jl")   # ok if stub
 
 # 6) simulation
-# include("sim/shock_panel.jl")
-# include("sim/panel.jl")
-# include("sim/moments.jl")
+include("sim/panel.jl")
+using .SimPanel: simulate_panel
 
 using .API: AbstractModel, AbstractMethod, Solution,
             get_params, get_grids, get_shocks, get_utility, 
@@ -40,7 +39,8 @@ using .API: AbstractModel, AbstractMethod, Solution,
 # --- Exports ---
 
 export load_config, validate_config, build_model, build_method, solve, 
-    get_params, get_grids, get_shocks, get_utility
+    get_params, get_grids, get_shocks, get_utility, 
+    simulate_panel
 
 # --- Extensions ---
 include("viz/api.jl")      # stubs only
