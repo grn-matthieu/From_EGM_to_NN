@@ -30,6 +30,8 @@ function simulate_panel(model::AbstractModel, method::AbstractMethod, cfg::Abstr
 
     # Require shocks (panel simulation targets stochastic models)
     # If the model is deterministic then simulation = 1 representative agent
+    # Thus sim is not really a panel but we keep the same output format
+    # and document shocks as zeros
     if S !== nothing
         zgrid = S.zgrid
         Π = S.Π
@@ -44,8 +46,11 @@ function simulate_panel(model::AbstractModel, method::AbstractMethod, cfg::Abstr
     zdraws = Matrix{Float64}(undef, N, T)
     seeds  = Vector{UInt64}(undef, N)
 
+
     # --- Seed handling ---
     # Master RNG/seed: prefer cfg.random.seed; else derive from canonical cfg
+    # The rule is to derive individual agent seeds from the master seed
+    # so that the same cfg always leads to the same panel sim
     random_cfg = get(cfg, :random, Dict{Symbol,Any}())
     master_seed = get(random_cfg, :seed, nothing)
     if master_seed === nothing
@@ -75,6 +80,7 @@ function simulate_panel(model::AbstractModel, method::AbstractMethod, cfg::Abstr
     end
 
     # simple scalar linear interpolation over agrid
+    # basically the same fun as in interp, but inlined and not needing extraction
     @inline function lin1(x::AbstractVector{<:Real}, y::AbstractVector{<:Real}, ξ::Real)
         n = length(x)
         if ξ <= x[1]
@@ -103,8 +109,11 @@ function simulate_panel(model::AbstractModel, method::AbstractMethod, cfg::Abstr
             zdraws[n, t] = zgrid[idx]
             idx = sample_row(Π, idx, arng)
         end
+        # Note : the zdraws are now fixed !
+        # shocks must be drawn before starting the asset loop
+    
 
-        # simulate assets/consumption paths
+        # a/c consumption path loop
         a_t = g[:a].min
         for t in axes(assets, 2)
             a_prev = a_t

@@ -4,7 +4,7 @@ using ..API
 import ..API: build_method, solve
 
 using ..EGMKernel:solve_egm_det, solve_egm_stoch
-using ..ValueFunction: compute_value
+using ..ValueFunction: compute_value_policy
 using ..Determinism: canonicalize_cfg, hash_hex
 
 export EGMMethod
@@ -54,12 +54,13 @@ function solve(model::AbstractModel, method::EGMMethod, cfg::AbstractDict; rng=n
 
     # --- Processing ---
     ee = sol.resid
-    ee_vec = ee isa AbstractMatrix ? vec(maximum(ee, dims=2)) : ee # make ee a vector of max errors per asset grid point
+    ee_vec = ee isa AbstractMatrix ? vec(maximum(ee, dims=2)) : ee # vector of max errors per asset grid point
+    ee_mat = ee isa AbstractMatrix ? ee : nothing
     policy = Dict{Symbol,Any}(
-        :c => (; value = sol.c, grid = g[:a].grid, euler_errors = ee_vec),
+        :c => (; value = sol.c, grid = g[:a].grid, euler_errors = ee_vec, euler_errors_mat = ee_mat),
         :a => (; value = sol.a_next, grid = g[:a].grid)
     )
-    value = compute_value(p, g, S, U, policy)
+    value = compute_value_policy(p, g, S, U, policy)
     metadata = Dict{Symbol,Any}(
         :iters => sol.iters,
         :max_it => sol.opts.maxit,

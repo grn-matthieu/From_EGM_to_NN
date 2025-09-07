@@ -1,0 +1,35 @@
+model:
+  name: cs
+
+params:
+  β: 0.96
+  σ: 2.0
+  r: 0.02
+  y: 1.0
+
+grids:
+  Na: 50
+  a_min: 0.0
+  a_max: 20.0
+
+utility:
+  u_type: CRRA
+
+solver:
+  method: EGM
+  tol: 1.0e-6
+  maxit: 10000
+  verbose: true
+  interp_kind: linear
+
+shocks:
+  active: true
+  method: "rouwenhorst"   # or "tauchen"
+  ρ_shock: 0.95
+  σ_shock: 0.10
+  Nz: 7
+  m: 3.0                  # only used with tauchen
+
+random:
+  seed: 1234
+
