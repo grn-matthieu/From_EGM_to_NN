@@ -1,6 +1,5 @@
 using Test
 using ThesisProject
-using InteractiveUtils
 
 @testset "Shocks validation succeeds" begin
     cfg = Dict(:ρ_shock => 0.9,
@@ -25,7 +24,8 @@ end
 
     @test_throws ErrorException ThesisProject.Shocks.discretize(cfg)
 
-    m = @which ThesisProject.Shocks.find_invariant(ones(2,2))
+    mt = methods(ThesisProject.Shocks.find_invariant)
+    m = findfirst(m -> m.sig == Tuple{typeof(ThesisProject.Shocks.find_invariant),AbstractMatrix{Float64}}, mt)
     Base.delete_method(m)
 end
 
