@@ -79,6 +79,14 @@ function find_invariant(Π::AbstractMatrix{<:Real}; tol=1e-12, maxit=1_000)
     error("Power iteration did not converge")
 end
 
+function _validate_invariant(π::AbstractVector{<:Real}, Π::AbstractMatrix{<:Real}; tol=1e-12)
+    if !isapprox(π, vec(π' * Π); atol=tol)
+        max_dev = maximum(abs.(π .- vec(π' * Π)))
+        error("Invariant distribution check failed: maximum deviation $max_dev exceeds tolerance $tol")
+    end
+    return nothing
+end
+
 
 function get_shock_params(shocks::AbstractDict)
     ρ = get(shocks, :ρ_shock, 0.0)
@@ -92,7 +100,7 @@ end
 
 
 function discretize(shocks::AbstractDict)::ShockOutput
-    ρ, σ_ε, Nz, method, m = get_shock_params(shocks)
+    ρ, σ_ε, Nz, method, m, validate = get_shock_params(shocks)
 
     if σ_ε == 0 || Nz == 1 # degenerate case
         zgrid = [0.0]
@@ -108,6 +116,10 @@ function discretize(shocks::AbstractDict)::ShockOutput
                 error("Unknown method: $method")
 
     π = find_invariant(Π)
+
+    if validate
+        _validate_invariant(π, Π)
+    end
 
     # Diagnostics
     μ = sum(π .* zgrid)

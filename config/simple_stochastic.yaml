@@ -25,3 +25,4 @@ shocks:
   σ_shock: 0.10
   Nz: 11
   m: 3.0            # m is only used with tauchen's method
+  validate: true    # set to false to skip invariant distribution check
