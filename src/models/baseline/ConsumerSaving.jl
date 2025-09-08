@@ -38,7 +38,7 @@ function build_cs_model(cfg::AbstractDict)
     # Utility closure (CRRA)
     σ = params[:σ]
     if isapprox(σ, 1.0; atol=1e-8) # handle the extreme case (log)
-        u = (c -> log(c))
+        u = (c -> log.(c))
         u_prime = (c -> 1.0 ./ c)
         u_prime_inv = (up -> 1.0 ./ up)
     else

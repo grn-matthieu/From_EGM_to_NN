@@ -3,8 +3,8 @@ experiment:
   seed: 1234
 
 model:
-  beta: 0.96
-  sigma: 2.0
+  β: 0.96
+  σ: 2.0
   r: 0.02
   y: 1.0
 

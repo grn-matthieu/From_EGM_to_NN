@@ -44,6 +44,7 @@ function open_write(path::AbstractString, header::Vector{<:AbstractString}, rows
     end
 end
 
+# Small fun to auto run the config
 function run_one(cfg_path::AbstractString)
     cfg = ThesisProject.load_config(cfg_path)
     ThesisProject.validate_config(cfg)
@@ -58,7 +59,7 @@ function write_det(sol, cfg, outdir)
     # Extracts
     pol_c = sol.policy[:c]
     pol_a = sol.policy[:a]
-    V     = sol.value # Vector
+    V     = sol.value # Vector (length Na)
 
     agrid = pol_c.grid
     c     = pol_c.value
@@ -85,6 +86,7 @@ function write_det(sol, cfg, outdir)
     open_write(outpath, header, rows)
     return outpath
 end
+
 
 function write_stoch(sol, cfg, outdir)
     # Extracts
@@ -122,6 +124,7 @@ function write_stoch(sol, cfg, outdir)
     open_write(outpath, header, rows)
     return outpath
 end
+
 
 function main()
     outdir = ensure_outputs_dir()

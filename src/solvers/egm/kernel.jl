@@ -112,7 +112,7 @@ Vectorized EGM for a model with Markov income shocks. Returns a NamedTuple with 
 (a_grid, z_grid, c, a_next, resid, iters, converged, max_resid, model_params, opts).
 """
 function solve_egm_stoch(model_params, model_grids, model_shocks, model_utility;
-        tol::Real=1e-8, tol_pol::Real = 1e-6, maxit::Int=500,
+        tol::Real=1e-8, tol_pol::Real = 1e-6, maxit::Int=1000,
         interp_kind::InterpKind=LinearInterp(), relax::Real=0.5,
         ϵ::Real=1e-10, patience::Int=50, c_init=nothing)::NamedTuple
 
