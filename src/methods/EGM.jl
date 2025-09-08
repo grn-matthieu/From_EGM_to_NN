@@ -22,7 +22,9 @@ Accepts either cfg[:method] or cfg[:solver] and returns an EGMMethod.
 function build_method(cfg::AbstractDict)
     method_name = haskey(cfg, :method) ? cfg[:method] : cfg[:solver][:method]
     if method_name != "EGM"
-        error("Method builder received cfg with method = $method_name. It has not been implemented.")
+        error(
+            "Method builder received cfg with method = $method_name. It has not been implemented.",
+        )
     else
         ik = get(cfg[:solver], :interp_kind, :linear)
         ik = ik isa Symbol ? ik : Symbol(ik)
@@ -33,7 +35,7 @@ function build_method(cfg::AbstractDict)
             maxit = get(cfg[:solver], :maxit, 1000),
             interp_kind = ik,
             verbose = get(cfg[:solver], :verbose, false),
-            warm_start = get(cfg[:solver], :warm_start, :default)
+            warm_start = get(cfg[:solver], :warm_start, :default),
         ))
     end
 end
@@ -43,7 +45,12 @@ end
 
 Entry point for the EGM solver. Extracts contract fields, runs a minimal EGM loop, and returns a Solution.
 """
-function solve(model::AbstractModel, method::EGMMethod, cfg::AbstractDict; rng=nothing)::Solution
+function solve(
+    model::AbstractModel,
+    method::EGMMethod,
+    cfg::AbstractDict;
+    rng = nothing,
+)::Solution
     # --- Extraction ---
     p = get_params(model)
     g = get_grids(model)
@@ -53,7 +60,7 @@ function solve(model::AbstractModel, method::EGMMethod, cfg::AbstractDict; rng=n
     # --- Warm-start policy initialization ---
     function _build_c_init_det()
         a_grid = g[:a].grid
-        a_min  = g[:a].min
+        a_min = g[:a].min
         R = 1 + p.r
         # Default: let kernel choose half resources
         ws = Symbol(lowercase(string(method.opts.warm_start)))
@@ -76,7 +83,7 @@ function solve(model::AbstractModel, method::EGMMethod, cfg::AbstractDict; rng=n
 
     function _build_c_init_stoch()
         a_grid = g[:a].grid
-        a_min  = g[:a].min
+        a_min = g[:a].min
         R = 1 + p.r
         z_grid = S.zgrid
         Nz = length(z_grid)
@@ -84,7 +91,7 @@ function solve(model::AbstractModel, method::EGMMethod, cfg::AbstractDict; rng=n
         if ws == :steady_state
             Na = length(a_grid)
             c = Array{Float64}(undef, Na, Nz)
-            @inbounds for j in 1:Nz
+            @inbounds for j = 1:Nz
                 y = exp(z_grid[j])
                 ccol = @. y + R * a_grid - a_grid
                 cmin = 1e-12
@@ -108,27 +115,42 @@ function solve(model::AbstractModel, method::EGMMethod, cfg::AbstractDict; rng=n
     # --- Solution ---
     ik = method.opts.interp_kind
     interp = ik == :linear ? LinearInterp() : MonotoneCubicInterp()
-    sol = S === nothing ?
-        solve_egm_det(p, g, U;
-            tol=method.opts.tol,
-            tol_pol=method.opts.tol_pol,
-            maxit=method.opts.maxit,
-            interp_kind=interp,
-            c_init=c_init) :
-        solve_egm_stoch(p, g, S, U;
-            tol=method.opts.tol,
-            tol_pol=method.opts.tol_pol,
-            maxit=method.opts.maxit,
-            interp_kind=interp,
-            c_init=c_init)
+    sol =
+        S === nothing ?
+        solve_egm_det(
+            p,
+            g,
+            U;
+            tol = method.opts.tol,
+            tol_pol = method.opts.tol_pol,
+            maxit = method.opts.maxit,
+            interp_kind = interp,
+            c_init = c_init,
+        ) :
+        solve_egm_stoch(
+            p,
+            g,
+            S,
+            U;
+            tol = method.opts.tol,
+            tol_pol = method.opts.tol_pol,
+            maxit = method.opts.maxit,
+            interp_kind = interp,
+            c_init = c_init,
+        )
 
     # --- Processing ---
     ee = sol.resid
-    ee_vec = ee isa AbstractMatrix ? vec(maximum(ee, dims=2)) : ee # vector of max errors per asset grid point
+    ee_vec = ee isa AbstractMatrix ? vec(maximum(ee, dims = 2)) : ee # vector of max errors per asset grid point
     ee_mat = ee isa AbstractMatrix ? ee : nothing
     policy = Dict{Symbol,Any}(
-        :c => (; value = sol.c, grid = g[:a].grid, euler_errors = ee_vec, euler_errors_mat = ee_mat),
-        :a => (; value = sol.a_next, grid = g[:a].grid)
+        :c => (;
+            value = sol.c,
+            grid = g[:a].grid,
+            euler_errors = ee_vec,
+            euler_errors_mat = ee_mat,
+        ),
+        :a => (; value = sol.a_next, grid = g[:a].grid),
     )
     value = compute_value_policy(p, g, S, U, policy)
     metadata = Dict{Symbol,Any}(
@@ -141,13 +163,15 @@ function solve(model::AbstractModel, method::EGMMethod, cfg::AbstractDict; rng=n
         :relax => sol.opts.relax,
         :patience => sol.opts.patience,
         :interp_kind => string(sol.opts.interp_kind),
-        :julia_version => string(VERSION)
+        :julia_version => string(VERSION),
     )
 
     # Validation: monotonicity and positivity
-    is_nondec(x; tol=1e-12) = x isa AbstractMatrix ? all(j -> all(diff(view(x, :, j)) .>= -tol), axes(x, 2)) : all(diff(x) .>= -tol)
-    is_positive(x; tol=1e-12) = all(x .>= tol)
-    respects_amin(x, amin; tol=1e-12) = all(x .>= (amin - tol))
+    is_nondec(x; tol = 1e-12) =
+        x isa AbstractMatrix ? all(j -> all(diff(view(x, :, j)) .>= -tol), axes(x, 2)) :
+        all(diff(x) .>= -tol)
+    is_positive(x; tol = 1e-12) = all(x .>= tol)
+    respects_amin(x, amin; tol = 1e-12) = all(x .>= (amin - tol))
 
     c_val = policy[:c].value
     a_val = policy[:a].value
@@ -180,11 +204,11 @@ function solve(model::AbstractModel, method::EGMMethod, cfg::AbstractDict; rng=n
     # Model ID
     model_id = hash_hex(canonicalize_cfg(cfg))
 
-    diagnostics = (; 
-        model_id = model_id, 
-        method = method.opts.name, 
+    diagnostics = (;
+        model_id = model_id,
+        method = method.opts.name,
         seed = sol.opts.seed,
-        runtime = sol.opts.runtime
+        runtime = sol.opts.runtime,
     )
 
     return Solution(policy, value, diagnostics, metadata, model, method)

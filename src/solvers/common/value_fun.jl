@@ -13,13 +13,13 @@ evaluation:
 
 Output: `Vector{Float64}` of length `length(sol.agrid) : policy fun`.
 """
-function compute_value(p, g, S, U, policy;tol=1e-8, maxit=1_000)
+function compute_value(p, g, S, U, policy; tol = 1e-8, maxit = 1_000)
     # S is not used fn, to be implemented when dealing with stoch models
     V = zeros(g[:a].N)
-    
+
     # Reusable interpolation workspace to avoid allocations
     tmp = similar(V)
-    for _ in 1:maxit
+    for _ = 1:maxit
         V_new = similar(V)
         cont = interp_linear!(tmp, g[:a].grid, V, policy[:a].value)
         V_new = U.u(policy[:c].value) + p.β * cont
@@ -38,7 +38,7 @@ end
 Stability-robust value evaluation that supports both deterministic (vector) and
 stochastic (matrix over shocks) policies. Prefer this over `compute_value` in solvers.
 """
-function compute_value_policy(p, g, S, U, policy; tol::Real=1e-8, maxit::Int=1_000)
+function compute_value_policy(p, g, S, U, policy; tol::Real = 1e-8, maxit::Int = 1_000)
     agrid = g[:a].grid
     Na = g[:a].N
 
@@ -61,7 +61,7 @@ function compute_value_policy(p, g, S, U, policy; tol::Real=1e-8, maxit::Int=1_0
     if cpol isa AbstractVector && apol isa AbstractVector
         V = zeros(Na)
         tmp = similar(V)
-        for _ in 1:maxit
+        for _ = 1:maxit
             cont = interp_linear!(tmp, agrid, V, apol)
             V_new = U.u(cpol) .+ βv .* cont
             if maximum(abs.(V_new .- V)) < tol
@@ -82,11 +82,11 @@ function compute_value_policy(p, g, S, U, policy; tol::Real=1e-8, maxit::Int=1_0
     P = S === nothing ? nothing : getfield(S, 2)  # (zgrid, Π, π, diagnostics)
     @assert P !== nothing "Missing shocks transition matrix for stochastic value evaluation"
 
-    for _ in 1:maxit
-        @inbounds for j in 1:Nz
+    for _ = 1:maxit
+        @inbounds for j = 1:Nz
             aj = view(apol, :, j)
             @views cont[:, j] .= 0.0
-            @inbounds for jp in 1:Nz
+            @inbounds for jp = 1:Nz
                 vcol = view(V, :, jp)
                 interp_linear!(tmp, agrid, vcol, aj)
                 @. cont[:, j] += P[j, jp] * tmp

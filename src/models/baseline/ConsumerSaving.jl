@@ -8,7 +8,7 @@ import ..API: get_params, get_grids, get_shocks, get_utility
 
 struct ConsumerSavingModel <: AbstractModel
     params::NamedTuple
-    grids::Dict{Symbol, Any}
+    grids::Dict{Symbol,Any}
     shocks::Union{Nothing,ShockOutput}
     utility::NamedTuple
 end
@@ -25,9 +25,9 @@ function build_cs_model(cfg::AbstractDict)
     # Asset grid (for the cs model)
     a_min = grids[:a_min]
     a_max = grids[:a_max]
-    Na    = grids[:Na]
-    agrid = collect(range(a_min, a_max; length=Na))
-    grids = Dict{Symbol, Any}(:a => (; grid=agrid, min=a_min, max=a_max, N=Na))
+    Na = grids[:Na]
+    agrid = collect(range(a_min, a_max; length = Na))
+    grids = Dict{Symbol,Any}(:a => (; grid = agrid, min = a_min, max = a_max, N = Na))
 
     # Shocks discretization (if stoch, modalities in the shocks field)
     shocks = nothing
@@ -37,12 +37,12 @@ function build_cs_model(cfg::AbstractDict)
 
     # Utility closure (CRRA)
     σ = params[:σ]
-    if isapprox(σ, 1.0; atol=1e-8) # handle the extreme case (log)
+    if isapprox(σ, 1.0; atol = 1e-8) # handle the extreme case (log)
         u = (c -> log.(c))
         u_prime = (c -> 1.0 ./ c)
         u_prime_inv = (up -> 1.0 ./ up)
     else
-        u = (c -> (c.^(1-σ) .- 1.0) ./ (1.0 - σ))
+        u = (c -> (c .^ (1-σ) .- 1.0) ./ (1.0 - σ))
         u_prime = (c -> c .^ (-σ))
         u_prime_inv = (up -> up .^ (-1.0/σ))
     end
@@ -57,4 +57,3 @@ get_shocks(model::ConsumerSavingModel) = model.shocks
 get_utility(model::ConsumerSavingModel) = model.utility
 
 end # module
-

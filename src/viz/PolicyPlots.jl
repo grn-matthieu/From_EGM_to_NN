@@ -1,4 +1,4 @@
- import ThesisProject: plot_policy, plot_euler_errors
+import ThesisProject: plot_policy, plot_euler_errors
 
 """
     plot_policy(sol; vars=nothing, labels=nothing, mean=false, shock_weights=nothing, surface=false)
@@ -14,19 +14,22 @@ Plot policy functions from a `Solution`. Handles deterministic (vector) and stoc
 
 Returns a `Plots.Plot` object (requires `using Plots`) else dispatches to the generic fun.
 """
-function plot_policy(sol::ThesisProject.API.Solution;
-                     vars::Union{Nothing,AbstractVector{Symbol}}=nothing,
-                     labels::Union{Nothing,AbstractVector{String}}=nothing,
-                     mean::Bool=false,
-                     shock_weights::Union{Nothing,AbstractVector}=nothing,
-                     surface::Union{Bool,Symbol}=false)
+function plot_policy(
+    sol::ThesisProject.API.Solution;
+    vars::Union{Nothing,AbstractVector{Symbol}} = nothing,
+    labels::Union{Nothing,AbstractVector{String}} = nothing,
+    mean::Bool = false,
+    shock_weights::Union{Nothing,AbstractVector} = nothing,
+    surface::Union{Bool,Symbol} = false,
+)
 
     vars_to_plot = isnothing(vars) ? collect(keys(sol.policy)) : collect(vars)
     plt = plot()
 
     # Try to pull z-grid and invariant weights for stochastic labeling when needed
     zgrid = try
-        getproperty(getproperty(sol, :model), :shocks) === nothing ? nothing : getproperty(getproperty(sol, :model), :shocks).zgrid
+        getproperty(getproperty(sol, :model), :shocks) === nothing ? nothing :
+        getproperty(getproperty(sol, :model), :shocks).zgrid
     catch
         nothing
     end
@@ -60,7 +63,8 @@ function plot_policy(sol::ThesisProject.API.Solution;
         y = getproperty(pol, :value)
 
         # Base label for this variable ; for matrices, per-shock labels are derived below (from k).
-        base_lab = isnothing(labels) ? String(k) : (i <= length(labels) ? labels[i] : String(k))
+        base_lab =
+            isnothing(labels) ? String(k) : (i <= length(labels) ? labels[i] : String(k))
 
         if y isa AbstractVector # Deterministic policy or 1 sim
             plot!(plt, x, y, label = base_lab)
@@ -70,36 +74,40 @@ function plot_policy(sol::ThesisProject.API.Solution;
             if zgrid !== nothing && length(zgrid) == nseries
                 series_labels = ["$(base_lab) (z=$(round(z, digits=3)))" for z in zgrid]
             else
-                series_labels = ["$(base_lab) [s=$(j)]" for j in 1:nseries]
+                series_labels = ["$(base_lab) [s=$(j)]" for j = 1:nseries]
             end
 
             # If requested, draw a heatmap/surface over (a,z) (fancy)
             if surface != false
-                zaxis = (zgrid !== nothing && length(zgrid) == nseries) ? zgrid : collect(1:nseries)
+                zaxis =
+                    (zgrid !== nothing && length(zgrid) == nseries) ? zgrid :
+                    collect(1:nseries)
                 if surface === true || surface === :surface
                     surface!(plt, x, zaxis, y'; label = base_lab)
                 elseif surface === :heatmap
                     heatmap!(plt, x, zaxis, y'; label = base_lab)
                 else
                     # unknown value → default to lines
-                    for j in 1:nseries
+                    for j = 1:nseries
                         plot!(plt, x, view(y, :, j), label = series_labels[j])
                     end
                 end
             else
                 # Plot one line per shock column
-                for j in 1:nseries
+                for j = 1:nseries
                     plot!(plt, x, view(y, :, j), label = series_labels[j])
                 end
             end
 
             # Optional mean overlay to highlight average policy
             if mean
-                w = shock_weights !== nothing ? shock_weights : (zweights !== nothing ? zweights : fill(1.0 / nseries, nseries))
+                w =
+                    shock_weights !== nothing ? shock_weights :
+                    (zweights !== nothing ? zweights : fill(1.0 / nseries, nseries))
                 # ensure weights length matches
                 if length(w) == nseries
                     ymean = y * collect(w)
-                    plot!(plt, x, ymean, label = "$(base_lab) (mean)", lw=3, ls=:dash)
+                    plot!(plt, x, ymean, label = "$(base_lab) (mean)", lw = 3, ls = :dash)
                 end
             end
         else
@@ -126,7 +134,7 @@ Plot Euler errors. For stochastic models, supports aggregating across shocks if 
 
 Returns a `Plots.Plot` object.
 """
-function plot_euler_errors(sol::ThesisProject.API.Solution; by::Symbol=:auto)
+function plot_euler_errors(sol::ThesisProject.API.Solution; by::Symbol = :auto)
     plt = plot()
     x = sol.policy[:a].grid
     cpol = sol.policy[:c]
@@ -135,14 +143,21 @@ function plot_euler_errors(sol::ThesisProject.API.Solution; by::Symbol=:auto)
     y = cpol.euler_errors
     label_suffix = "(stored)"
     if by != :auto
-        emat = hasproperty(cpol, :euler_errors_mat) ? getproperty(cpol, :euler_errors_mat) : nothing
+        emat =
+            hasproperty(cpol, :euler_errors_mat) ? getproperty(cpol, :euler_errors_mat) :
+            nothing
         if emat !== nothing && emat isa AbstractMatrix
             if by == :max
-                y = vec(maximum(emat, dims=2))
+                y = vec(maximum(emat, dims = 2))
                 label_suffix = "(max across shocks)"
             elseif by == :mean
                 # weight by invariant distribution if available
-                S = try getproperty(sol.model, :shocks) catch; nothing end
+                S = try
+                    getproperty(sol.model, :shocks)
+                catch
+                    ;
+                    nothing
+                end
                 if S !== nothing
                     w = nothing
                     try
@@ -159,7 +174,7 @@ function plot_euler_errors(sol::ThesisProject.API.Solution; by::Symbol=:auto)
                     end
                     y = emat * collect(w)
                 else
-                    y = mean(emat; dims=2)[:]
+                    y = mean(emat; dims = 2)[:]
                 end
                 label_suffix = "(mean across shocks)"
             end
@@ -169,11 +184,19 @@ function plot_euler_errors(sol::ThesisProject.API.Solution; by::Symbol=:auto)
         end
     else
         # If auto, try to infer whether this is a stochastic reduction
-        label_suffix = hasproperty(cpol, :euler_errors_mat) && (getproperty(cpol, :euler_errors_mat) isa AbstractMatrix) ?
-                       "(max across shocks)" : ""
+        label_suffix =
+            hasproperty(cpol, :euler_errors_mat) &&
+            (getproperty(cpol, :euler_errors_mat) isa AbstractMatrix) ?
+            "(max across shocks)" : ""
     end
 
-    plot!(plt, x, y, yscale = :log10, label = isempty(label_suffix) ? nothing : label_suffix)
+    plot!(
+        plt,
+        x,
+        y,
+        yscale = :log10,
+        label = isempty(label_suffix) ? nothing : label_suffix,
+    )
     xlabel!(plt, "State")
     ylabel!(plt, "Abs. EErr (log10)")
     title!(plt, "Euler Errors (method: $(sol.diagnostics.method))")

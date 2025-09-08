@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# --- utils ---
+step() {
+  echo "[$(date +%H:%M:%S)] $*"
+}
+
+spinner() {
+  local pid=$1
+  local delay=0.1
+  local spinstr='|/-\'
+  while kill -0 $pid 2>/dev/null; do
+    local temp=${spinstr#?}
+    printf " [%c]  " "$spinstr"
+    spinstr=$temp${spinstr%"$temp"}
+    sleep $delay
+    printf "\b\b\b\b\b\b"
+  done
+  wait $pid
+}
+
+# --- staged Julia files ---
+mapfile -t FILES < <(git diff --cached --name-only --diff-filter=ACMRT | grep -E '\.jl$' || true)
+
+# --- format step ---
+if [ ${#FILES[@]} -gt 0 ]; then
+  step "Formatting staged Julia files..."
+  julia --color=yes -e '
+    using Pkg; Pkg.activate("."); import JuliaFormatter
+    for f in ARGS
+      JuliaFormatter.format_file(f)
+    end
+  ' "${FILES[@]}"
+  git add "${FILES[@]}"
+else
+  step "No staged Julia files to format."
+fi
+
+# --- test step with spinner ---
+step "Running Julia tests (Pkg.test)..."
+(
+  export JULIA_PROJECT=@.
+  export CI=true
+  julia --color=yes -e 'using Pkg; Pkg.instantiate(); Pkg.test()'
+) &
+spinner $!
+
+step "All checks passed."

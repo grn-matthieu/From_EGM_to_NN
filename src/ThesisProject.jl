@@ -32,14 +32,31 @@ include("methods/EGM.jl")
 include("sim/panel.jl")
 using .SimPanel: simulate_panel
 
-using .API: AbstractModel, AbstractMethod, Solution,
-            get_params, get_grids, get_shocks, get_utility, 
-            build_model, load_config, validate_config, build_method, solve
+using .API:
+    AbstractModel,
+    AbstractMethod,
+    Solution,
+    get_params,
+    get_grids,
+    get_shocks,
+    get_utility,
+    build_model,
+    load_config,
+    validate_config,
+    build_method,
+    solve
 
 # --- Exports ---
 
-export load_config, validate_config, build_model, build_method, solve, 
-    get_params, get_grids, get_shocks, get_utility, 
+export load_config,
+    validate_config,
+    build_model,
+    build_method,
+    solve,
+    get_params,
+    get_grids,
+    get_shocks,
+    get_utility,
     simulate_panel
 
 # --- Extensions ---

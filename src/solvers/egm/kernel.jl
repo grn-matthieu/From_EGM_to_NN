@@ -1,6 +1,7 @@
 module EGMKernel
 
-using ..CommonInterp: interp_linear!, interp_pchip!, InterpKind, LinearInterp, MonotoneCubicInterp
+using ..CommonInterp:
+    interp_linear!, interp_pchip!, InterpKind, LinearInterp, MonotoneCubicInterp
 using ..EGMResiduals: euler_resid_det, euler_resid_stoch
 
 export solve_egm_det, solve_egm_stoch
@@ -14,20 +15,29 @@ Stopping criteria : max euler errors + policy change.
 Returns a NamedTuple with fields (a_grid, c, a_next, resid, iters, converged, max_resid, model_params, opts). To be
 converted later into a Solution object.
 """
-function solve_egm_det(model_params, model_grids, model_utility;
-        tol::Real=1e-8, tol_pol::Real=1e-6, maxit::Int=500,
-        interp_kind::InterpKind=LinearInterp(), relax::Real=0.5, patience::Int=50, ϵ::Real=1e-10,
-        c_init=nothing)::NamedTuple
+function solve_egm_det(
+    model_params,
+    model_grids,
+    model_utility;
+    tol::Real = 1e-8,
+    tol_pol::Real = 1e-6,
+    maxit::Int = 500,
+    interp_kind::InterpKind = LinearInterp(),
+    relax::Real = 0.5,
+    patience::Int = 50,
+    ϵ::Real = 1e-10,
+    c_init = nothing,
+)::NamedTuple
     start_time = time_ns()
 
     a_grid = model_grids[:a].grid
-    a_min  = model_grids[:a].min
-    a_max  = model_grids[:a].max
-    Na     = model_grids[:a].N
+    a_min = model_grids[:a].min
+    a_max = model_grids[:a].max
+    Na = model_grids[:a].N
 
     βR = model_params.β * (1 + model_params.r)
     R = (1 + model_params.r)
-    cmin  = 1e-12
+    cmin = 1e-12
 
     # Initial guess for resources and consumption
     resources = @. R * a_grid - a_min + model_params.y
@@ -35,7 +45,7 @@ function solve_egm_det(model_params, model_grids, model_utility;
 
     # Buffers
     cnext = similar(c)
-    cnew  = similar(c)
+    cnew = similar(c)
     a_next = similar(c)
 
     converged = false
@@ -45,7 +55,7 @@ function solve_egm_det(model_params, model_grids, model_utility;
     no_progress = 0
     resid = similar(c)
 
-    for it in 1:maxit
+    for it = 1:maxit
         iters = it
 
         @. a_next = model_params.y + R * a_grid - c
@@ -59,13 +69,13 @@ function solve_egm_det(model_params, model_grids, model_utility;
             @error "Unknown interpolation kind: $interp_kind"
         end
 
-        @. cnew = model_utility.u_prime_inv(βR * cnext.^(-model_params.σ))
+        @. cnew = model_utility.u_prime_inv(βR * cnext .^ (-model_params.σ))
         cmax = @. model_params.y + R * a_grid - a_min
         @. cnew = clamp(cnew, cmin, cmax)
 
         # Monotone enforcement under PCHIP
         if interp_kind isa MonotoneCubicInterp
-            @inbounds for i in 2:Na
+            @inbounds for i = 2:Na
                 if cnew[i] < cnew[i-1]
                     cnew[i] = cnew[i-1] + 1e-12
                 end
@@ -100,8 +110,17 @@ function solve_egm_det(model_params, model_grids, model_utility;
     @. a_next = clamp(a_next, a_min, a_max)
 
     runtime = (time_ns() - start_time) / 1e9
-    opts = (; tol=tol, tol_pol=tol_pol, maxit=maxit, interp_kind=interp_kind, relax=relax,
-             patience=patience, ϵ=ϵ, seed=nothing, runtime=runtime)
+    opts = (;
+        tol = tol,
+        tol_pol = tol_pol,
+        maxit = maxit,
+        interp_kind = interp_kind,
+        relax = relax,
+        patience = patience,
+        ϵ = ϵ,
+        seed = nothing,
+        runtime = runtime,
+    )
 
     return (; a_grid, c, a_next, resid, iters, converged, max_resid, model_params, opts)
 end
@@ -115,17 +134,27 @@ Stopping criteria : max euler errors + policy change (in expectation, evaluated 
 Returns a NamedTuple with fields (a_grid, z_grid, c, a_next, resid, iters, converged, max_resid, model_params, opts). Output is to be converted
 later in a Solution object.
 """
-function solve_egm_stoch(model_params, model_grids, model_shocks, model_utility;
-        tol::Real=1e-8, tol_pol::Real = 1e-6, maxit::Int=1000,
-        interp_kind::InterpKind=LinearInterp(), relax::Real=0.5,
-        ϵ::Real=1e-10, patience::Int=50, c_init=nothing)::NamedTuple
+function solve_egm_stoch(
+    model_params,
+    model_grids,
+    model_shocks,
+    model_utility;
+    tol::Real = 1e-8,
+    tol_pol::Real = 1e-6,
+    maxit::Int = 1000,
+    interp_kind::InterpKind = LinearInterp(),
+    relax::Real = 0.5,
+    ϵ::Real = 1e-10,
+    patience::Int = 50,
+    c_init = nothing,
+)::NamedTuple
 
     start_time = time_ns()
 
     a_grid = model_grids[:a].grid
-    a_min  = model_grids[:a].min
-    a_max  = model_grids[:a].max
-    Na     = model_grids[:a].N
+    a_min = model_grids[:a].min
+    a_max = model_grids[:a].max
+    Na = model_grids[:a].N
 
     z_grid = model_shocks.zgrid
     Π = model_shocks.Π
@@ -149,7 +178,7 @@ function solve_egm_stoch(model_params, model_grids, model_shocks, model_utility;
     a_next = similar(c)
     EUprime = similar(a_grid)
 
-    for it in 1:maxit
+    for it = 1:maxit
         iters = it
 
         for (j, z) in enumerate(z_grid)
@@ -178,7 +207,7 @@ function solve_egm_stoch(model_params, model_grids, model_shocks, model_utility;
             @. a_next[:, j] = clamp(a_next[:, j], a_min, a_max)
 
             if interp_kind isa MonotoneCubicInterp
-                @inbounds for i in 2:Na
+                @inbounds for i = 2:Na
                     if cnew[i, j] < cnew[i-1, j]
                         cnew[i, j] = cnew[i-1, j] + 1e-12
                     end
@@ -210,11 +239,30 @@ function solve_egm_stoch(model_params, model_grids, model_shocks, model_utility;
     end
 
     runtime = (time_ns() - start_time) / 1e9
-    opts = (; tol=tol, tol_pol=tol_pol, maxit=maxit, interp_kind=interp_kind, relax=relax,
-             patience=patience, ϵ=ϵ, seed=nothing, runtime=runtime)
+    opts = (;
+        tol = tol,
+        tol_pol = tol_pol,
+        maxit = maxit,
+        interp_kind = interp_kind,
+        relax = relax,
+        patience = patience,
+        ϵ = ϵ,
+        seed = nothing,
+        runtime = runtime,
+    )
 
-    return (; a_grid, z_grid, c, a_next, resid=euler_resid_stoch(model_params, a_grid, z_grid, Π, c),
-             iters, converged, max_resid, model_params, opts)
+    return (;
+        a_grid,
+        z_grid,
+        c,
+        a_next,
+        resid = euler_resid_stoch(model_params, a_grid, z_grid, Π, c),
+        iters,
+        converged,
+        max_resid,
+        model_params,
+        opts,
+    )
 end
 
 end #module

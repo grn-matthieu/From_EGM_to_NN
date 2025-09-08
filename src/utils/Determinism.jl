@@ -26,20 +26,20 @@ function canonicalize_cfg(cfg)
     function canonical(obj)
         if obj isa AbstractDict
             # Sort keys as symbols
-            pairs = sort(collect(obj); by=x->Symbol(x[1]))
+            pairs = sort(collect(obj); by = x->Symbol(x[1]))
             Dict(Symbol(k) => canonical(v) for (k, v) in pairs)
         elseif obj isa AbstractArray
             map(canonical, obj)
         elseif obj isa AbstractFloat
             # Fixed precision (8 decimals)
-            round(obj, digits=8)
+            round(obj, digits = 8)
         else
             obj
         end
     end
     can_cfg = canonical(cfg)
     # Use JSON3 with sorted keys and no whitespace
-    json_str = JSON3.write(can_cfg; canonical=true)
+    json_str = JSON3.write(can_cfg; canonical = true)
     Vector{UInt8}(codeunits(json_str))
 end
 
@@ -49,7 +49,7 @@ end
 
 Computes SHA256 hash of bytes and return first `n` hex chars.
 """
-function hash_hex(bytes; n=12)
+function hash_hex(bytes; n = 12)
     hex = bytes2hex(sha256(bytes))
     hex[1:n]
 end
@@ -63,7 +63,7 @@ Derives a 64-bit integer seed from a master and key.
 function derive_seed(master, key)::Int
     hex = bytes2hex(sha256(string(master, ":", key)))
     nhex = 2*sizeof(Int)                               # 16 on 64-bit, 8 on 32-bit
-    u = parse(Base.unsigned(Int), hex[1:nhex]; base=16)
+    u = parse(Base.unsigned(Int), hex[1:nhex]; base = 16)
     return Int(u)
 end
 

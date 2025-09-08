@@ -16,7 +16,7 @@ struct SmokeResult
     interp_kind::String
 end
 
-function run_one(cfg_path::AbstractString; tol_resid=1e-5, tol_iters=10_000)
+function run_one(cfg_path::AbstractString; tol_resid = 1e-5, tol_iters = 10_000)
     cfg = ThesisProject.load_config(cfg_path)
     ThesisProject.validate_config(cfg)
     model = ThesisProject.build_model(cfg)
@@ -38,7 +38,16 @@ function main()
     # CLI args are config paths; if none provided, use defaults
     if isempty(ARGS)
         push!(cfgs, joinpath(@__DIR__, "..", "config", "smoke_config", "smoke_config.yaml"))
-        push!(cfgs, joinpath(@__DIR__, "..", "config", "smoke_config", "smoke_config_stochastic.yaml"))
+        push!(
+            cfgs,
+            joinpath(
+                @__DIR__,
+                "..",
+                "config",
+                "smoke_config",
+                "smoke_config_stochastic.yaml",
+            ),
+        )
     else
         append!(cfgs, ARGS)
     end
@@ -49,8 +58,20 @@ function main()
             r = run_one(c)
             push!(results, r)
             status = r.ok ? "OK" : "FAIL"
-            println("[", status, "] ", c, " | resid=", @sprintf("%.3e", r.max_resid),
-                    " iters=", r.iters, " interp=", r.interp_kind, " t=", @sprintf("%.2fs", r.runtime))
+            println(
+                "[",
+                status,
+                "] ",
+                c,
+                " | resid=",
+                @sprintf("%.3e", r.max_resid),
+                " iters=",
+                r.iters,
+                " interp=",
+                r.interp_kind,
+                " t=",
+                @sprintf("%.2fs", r.runtime)
+            )
         catch err
             println("[ERROR] ", c, " | ", err)
             push!(results, SmokeResult(c, false, false, Inf, 0, 0.0, "?"))

@@ -2,7 +2,8 @@ using Test
 
 @testset "EGM options" begin
     # Deterministic config with small grid and custom options
-    cfgd = load_config(joinpath(@__DIR__, "..", "config", "smoke_config", "smoke_config.yaml"))
+    cfgd =
+        load_config(joinpath(@__DIR__, "..", "config", "smoke_config", "smoke_config.yaml"))
     cfgd[:grids][:Na] = 40
     cfgd[:solver][:interp_kind] = :pchip
     cfgd[:solver][:warm_start] = :steady_state

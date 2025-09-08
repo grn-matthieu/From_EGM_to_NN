@@ -24,7 +24,7 @@ const ROOT = normpath(joinpath(@__DIR__, ".."))
 """
 Activate the project immediately so downstream `using ThesisProject` works.
 """
-Pkg.activate(ROOT; io=devnull)
+Pkg.activate(ROOT; io = devnull)
 using ThesisProject
 # Load plotting extension (Project has Plots as a weak dep)
 try
@@ -58,16 +58,19 @@ end
 
 # Parse simple CLI flags --Na=..., --Nz=..., --tol=..., --tol_pol=...
 function parse_cli(args)
-    Na = nothing; Nz = nothing; tol = nothing; tol_pol = nothing
+    Na = nothing;
+    Nz = nothing;
+    tol = nothing;
+    tol_pol = nothing
     for arg in args
         if startswith(arg, "--Na=")
-            Na = parse(Int, split(arg, "=", limit=2)[2])
+            Na = parse(Int, split(arg, "=", limit = 2)[2])
         elseif startswith(arg, "--Nz=")
-            Nz = parse(Int, split(arg, "=", limit=2)[2])
+            Nz = parse(Int, split(arg, "=", limit = 2)[2])
         elseif startswith(arg, "--tol=")
-            tol = parse(Float64, split(arg, "=", limit=2)[2])
+            tol = parse(Float64, split(arg, "=", limit = 2)[2])
         elseif startswith(arg, "--tol_pol=")
-            tol_pol = parse(Float64, split(arg, "=", limit=2)[2])
+            tol_pol = parse(Float64, split(arg, "=", limit = 2)[2])
         end
     end
     return (; Na, Nz, tol, tol_pol)
@@ -91,9 +94,9 @@ function run_one(cfg_path::AbstractString, opts)
         cfg[:shocks][:Nz] = opts.Nz
     end
 
-    model  = ThesisProject.build_model(cfg)
+    model = ThesisProject.build_model(cfg)
     method = ThesisProject.build_method(cfg)
-    sol    = ThesisProject.solve(model, method, cfg)
+    sol = ThesisProject.solve(model, method, cfg)
     return sol, cfg
 end
 
@@ -101,26 +104,56 @@ function write_det(sol, cfg, outdir)
     # Extracts
     pol_c = sol.policy[:c]
     pol_a = sol.policy[:a]
-    V     = sol.value # Vector (length Na)
+    V = sol.value # Vector (length Na)
 
     agrid = pol_c.grid
-    c     = pol_c.value
+    c = pol_c.value
     anext = pol_a.value
-    ee    = pol_c.euler_errors
+    ee = pol_c.euler_errors
 
-    meta  = sol.metadata
-    diag  = sol.diagnostics
+    meta = sol.metadata
+    diag = sol.diagnostics
 
     header = [
-        "run_id","case","method","iters","converged","max_resid","tol","tol_pol","interp_kind","julia_version","timestamp",
-        "i","a","c","a_next","V","ee"
+        "run_id",
+        "case",
+        "method",
+        "iters",
+        "converged",
+        "max_resid",
+        "tol",
+        "tol_pol",
+        "interp_kind",
+        "julia_version",
+        "timestamp",
+        "i",
+        "a",
+        "c",
+        "a_next",
+        "V",
+        "ee",
     ]
     ts = Dates.format(now(UTC), dateformat"yyyy-mm-ddTHH:MM:SSZ")
 
     rows = (
         (
-            diag.model_id, "deterministic", diag.method, meta[:iters], meta[:converged], meta[:max_resid], meta[:tol], meta[:tol_pol], meta[:interp_kind], meta[:julia_version], ts,
-            i, agrid[i], c[i], anext[i], V[i], ee[i]
+            diag.model_id,
+            "deterministic",
+            diag.method,
+            meta[:iters],
+            meta[:converged],
+            meta[:max_resid],
+            meta[:tol],
+            meta[:tol_pol],
+            meta[:interp_kind],
+            meta[:julia_version],
+            ts,
+            i,
+            agrid[i],
+            c[i],
+            anext[i],
+            V[i],
+            ee[i],
         ) for i in eachindex(agrid)
     )
 
@@ -134,32 +167,66 @@ function write_stoch(sol, cfg, outdir)
     # Extracts
     pol_c = sol.policy[:c]
     pol_a = sol.policy[:a]
-    V     = sol.value # Matrix Na x Nz
+    V = sol.value # Matrix Na x Nz
 
     agrid = pol_c.grid
-    cmat  = pol_c.value
-    amat  = pol_a.value
-    eem   = pol_c.euler_errors_mat
+    cmat = pol_c.value
+    amat = pol_a.value
+    eem = pol_c.euler_errors_mat
 
     # Shocks
     S = ThesisProject.get_shocks(sol.model)
     zgrid = S.zgrid
 
-    meta  = sol.metadata
-    diag  = sol.diagnostics
+    meta = sol.metadata
+    diag = sol.diagnostics
 
     header = [
-        "run_id","case","method","iters","converged","max_resid","tol","tol_pol","interp_kind","julia_version","timestamp",
-        "i","j","z","a","c","a_next","V","ee"
+        "run_id",
+        "case",
+        "method",
+        "iters",
+        "converged",
+        "max_resid",
+        "tol",
+        "tol_pol",
+        "interp_kind",
+        "julia_version",
+        "timestamp",
+        "i",
+        "j",
+        "z",
+        "a",
+        "c",
+        "a_next",
+        "V",
+        "ee",
     ]
     ts = Dates.format(now(UTC), dateformat"yyyy-mm-ddTHH:MM:SSZ")
 
     Na, Nz = size(cmat)
     rows = (
         (
-            diag.model_id, "stochastic", diag.method, meta[:iters], meta[:converged], meta[:max_resid], meta[:tol], meta[:tol_pol], meta[:interp_kind], meta[:julia_version], ts,
-            i, j, zgrid[j], agrid[i], cmat[i,j], amat[i,j], V[i,j], (eem === nothing ? missing : eem[i,j])
-        ) for j in 1:Nz for i in 1:Na
+            diag.model_id,
+            "stochastic",
+            diag.method,
+            meta[:iters],
+            meta[:converged],
+            meta[:max_resid],
+            meta[:tol],
+            meta[:tol_pol],
+            meta[:interp_kind],
+            meta[:julia_version],
+            ts,
+            i,
+            j,
+            zgrid[j],
+            agrid[i],
+            cmat[i, j],
+            amat[i, j],
+            V[i, j],
+            (eem === nothing ? missing : eem[i, j]),
+        ) for j = 1:Nz for i = 1:Na
     )
 
     outpath = joinpath(outdir, "egm_baseline_stoch.csv")
@@ -172,7 +239,7 @@ function save_plots(sol, case::AbstractString, plotdir::AbstractString)
     saved = String[]
     # Policy plot (overlay c and a if present)
     try
-        plt_pol = ThesisProject.plot_policy(sol; vars=[:c, :a])
+        plt_pol = ThesisProject.plot_policy(sol; vars = [:c, :a])
         fpol = joinpath(plotdir, "policy_$(case).png")
         savefig(plt_pol, fpol)
         push!(saved, fpol)
@@ -181,7 +248,7 @@ function save_plots(sol, case::AbstractString, plotdir::AbstractString)
     end
     # Euler error plot
     try
-        plt_ee = ThesisProject.plot_euler_errors(sol; by=:auto)
+        plt_ee = ThesisProject.plot_euler_errors(sol; by = :auto)
         fee = joinpath(plotdir, "euler_errors_$(case).png")
         savefig(plt_ee, fee)
         push!(saved, fee)

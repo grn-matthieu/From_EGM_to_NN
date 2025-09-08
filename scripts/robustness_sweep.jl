@@ -16,7 +16,7 @@ Run:
 module RobustnessSweep
 
 import Pkg
-Pkg.activate(normpath(joinpath(@__DIR__, "..")); io=devnull)
+Pkg.activate(normpath(joinpath(@__DIR__, "..")); io = devnull)
 using Dates
 using Printf
 using Random
@@ -43,16 +43,19 @@ end
 
 # Parse simple CLI flags --Na=..., --Nz=..., --tol=..., --tol_pol=...
 function parse_cli(args)
-    Na = nothing; Nz = nothing; tol = nothing; tol_pol = nothing
+    Na = nothing;
+    Nz = nothing;
+    tol = nothing;
+    tol_pol = nothing
     for arg in args
         if startswith(arg, "--Na=")
-            Na = parse(Int, split(arg, "=", limit=2)[2])
+            Na = parse(Int, split(arg, "=", limit = 2)[2])
         elseif startswith(arg, "--Nz=")
-            Nz = parse(Int, split(arg, "=", limit=2)[2])
+            Nz = parse(Int, split(arg, "=", limit = 2)[2])
         elseif startswith(arg, "--tol=")
-            tol = parse(Float64, split(arg, "=", limit=2)[2])
+            tol = parse(Float64, split(arg, "=", limit = 2)[2])
         elseif startswith(arg, "--tol_pol=")
-            tol_pol = parse(Float64, split(arg, "=", limit=2)[2])
+            tol_pol = parse(Float64, split(arg, "=", limit = 2)[2])
         end
     end
     return (; Na, Nz, tol, tol_pol)
@@ -80,9 +83,9 @@ function safe_solve(cfg; stochastic::Bool, opts)
     end
 
     try
-        model  = ThesisProject.build_model(cfg)
+        model = ThesisProject.build_model(cfg)
         method = ThesisProject.build_method(cfg)
-        sol    = ThesisProject.solve(model, method, cfg)
+        sol = ThesisProject.solve(model, method, cfg)
         return (:ok, sol)
     catch err
         return (:error, sprint(showerror, err))
@@ -126,14 +129,28 @@ function main()
     base_cfg = ThesisProject.load_config(joinpath(ROOT, "config", "simple_baseline.yaml"))
     ThesisProject.validate_config(base_cfg)
 
-    betas  = parse_list("BETA_LIST",  [0.92, 0.95, 0.96, 0.98])
+    betas = parse_list("BETA_LIST", [0.92, 0.95, 0.96, 0.98])
     sigmas = parse_list("SIGMA_LIST", [1.0, 2.0, 3.0, 4.0])
 
     ts = Dates.format(now(UTC), dateformat"yyyy-mm-ddTHH:MM:SSZ")
     header = [
-        "timestamp","case","beta","sigma","status","error",
-        "run_id","iters","converged","max_resid","tol","tol_pol","interp_kind","runtime",
-        "ee_max","ee_min","ee_mean"
+        "timestamp",
+        "case",
+        "beta",
+        "sigma",
+        "status",
+        "error",
+        "run_id",
+        "iters",
+        "converged",
+        "max_resid",
+        "tol",
+        "tol_pol",
+        "interp_kind",
+        "runtime",
+        "ee_max",
+        "ee_min",
+        "ee_mean",
     ]
 
     rows = Vector{NTuple{17,Any}}()
@@ -152,18 +169,52 @@ function main()
                 meta = sol.metadata
                 diag = sol.diagnostics
                 ee = ee_stats(sol)
-                push!(rows, (
-                    ts, case, b, s, "ok", "",
-                    diag.model_id, meta[:iters], meta[:converged], meta[:max_resid], meta[:tol], meta[:tol_pol], meta[:interp_kind], diag.runtime,
-                    ee.ee_max, ee.ee_min, ee.ee_mean
-                ))
+                push!(
+                    rows,
+                    (
+                        ts,
+                        case,
+                        b,
+                        s,
+                        "ok",
+                        "",
+                        diag.model_id,
+                        meta[:iters],
+                        meta[:converged],
+                        meta[:max_resid],
+                        meta[:tol],
+                        meta[:tol_pol],
+                        meta[:interp_kind],
+                        diag.runtime,
+                        ee.ee_max,
+                        ee.ee_min,
+                        ee.ee_mean,
+                    ),
+                )
             else
                 errmsg = String(payload)
-                push!(rows, (
-                    ts, case, b, s, "error", errmsg,
-                    missing, missing, false, missing, missing, missing, missing, missing,
-                    missing, missing, missing
-                ))
+                push!(
+                    rows,
+                    (
+                        ts,
+                        case,
+                        b,
+                        s,
+                        "error",
+                        errmsg,
+                        missing,
+                        missing,
+                        false,
+                        missing,
+                        missing,
+                        missing,
+                        missing,
+                        missing,
+                        missing,
+                        missing,
+                        missing,
+                    ),
+                )
             end
         end
     end

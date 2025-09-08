@@ -22,7 +22,7 @@
 
     # Test model getters
     params = get_params(model)
-    grids  = get_grids(model)
+    grids = get_grids(model)
     @test params isa NamedTuple
     @test (grids isa AbstractDict)
 
@@ -43,7 +43,7 @@
             @test sol.metadata[:converged] === true
 
             # Test the tolerance check (ignore the first point where BC is not binding)
-            @test maximum(sol.policy[:c].euler_errors[min(2,end):end]) < 1e-5
+            @test maximum(sol.policy[:c].euler_errors[min(2, end):end]) < 1e-5
             # Policy bounds : does the asset policy respect the constraints?
             @test all(sol.policy[:a].value .>= grids[:a].min)
             @test all(sol.policy[:a].value .<= grids[:a].max)

@@ -13,7 +13,7 @@ function euler_resid_det(model_params, c::Vector{Float64}, c_next::Vector{Float6
     resid = similar(c)
 
     # Clamping to avoid division by zero
-    c_clamped      = clamp.(c, 1e-12, Inf)
+    c_clamped = clamp.(c, 1e-12, Inf)
     c_next_clamped = clamp.(c_next, 1e-12, Inf)
 
     β = model_params.β
@@ -33,15 +33,17 @@ and shocks `z_grid` with transition matrix `Pz`. The policy `c` is a Na x Nz mat
 are computed, linear interpolation is used on the asset grid.
 Outputs a Na x Nz matrix of absolute Euler equation residuals.
 """
-function euler_resid_stoch(model_params,
-                           a_grid::AbstractVector{<:Real},
-                           z_grid::AbstractVector{<:Real},
-                           Pz::AbstractMatrix{<:Real},
-                           c::AbstractMatrix{<:Real})
+function euler_resid_stoch(
+    model_params,
+    a_grid::AbstractVector{<:Real},
+    z_grid::AbstractVector{<:Real},
+    Pz::AbstractMatrix{<:Real},
+    c::AbstractMatrix{<:Real},
+)
     Na, Nz = size(c)
     @assert length(a_grid) == Na
     @assert length(z_grid) == Nz
-    @assert size(Pz,1) == Nz && size(Pz,2) == Nz
+    @assert size(Pz, 1) == Nz && size(Pz, 2) == Nz
 
     β = model_params.β
     σ = model_params.σ
@@ -59,24 +61,26 @@ function euler_resid_stoch(model_params,
         else
             j = searchsortedfirst(x, xq)
             j = clamp(j, 2, n)
-            x0 = x[j-1]; x1 = x[j]
-            y0 = y[j-1]; y1 = y[j]
+            x0 = x[j-1];
+            x1 = x[j]
+            y0 = y[j-1];
+            y1 = y[j]
             t = (xq - x0) / (x1 - x0)
             return (1 - t) * y0 + t * y1
         end
     end
 
-    @inbounds for j in 1:Nz
+    @inbounds for j = 1:Nz
         y = exp(z_grid[j])
-        for i in 1:Na
-            c_ij = max(c[i,j], 1e-12)
+        for i = 1:Na
+            c_ij = max(c[i, j], 1e-12)
             ap = R * a_grid[i] + y - c_ij
             Emu = 0.0
-            for jp in 1:Nz
+            for jp = 1:Nz
                 cp = lin1(a_grid, view(c, :, jp), ap)
                 Emu += Pz[j, jp] * (max(cp, 1e-12) / c_ij)^(-σ)
             end
-            res[i,j] = abs(1.0 - β * R * Emu)
+            res[i, j] = abs(1.0 - β * R * Emu)
         end
     end
     return res

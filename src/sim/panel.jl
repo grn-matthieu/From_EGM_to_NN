@@ -7,7 +7,8 @@ using Statistics
 using Logging
 using ..Determinism: make_rng, derive_seed, canonicalize_cfg, hash_hex
 
-using ..API: Solution, AbstractModel, AbstractMethod, get_params, get_grids, get_shocks, solve
+using ..API:
+    Solution, AbstractModel, AbstractMethod, get_params, get_grids, get_shocks, solve
 
 
 """
@@ -18,8 +19,14 @@ Agents draw from the Markov chain implied by the model's shocks.
 
 Returns a NamedTuple with fields: assets::Matrix, consumption::Matrix, shocks::Matrix, seeds::Vector.
 """
-function simulate_panel(model::AbstractModel, method::AbstractMethod, cfg::AbstractDict;
-                        N::Int=1_000, T::Int=200, rng = Random.default_rng())
+function simulate_panel(
+    model::AbstractModel,
+    method::AbstractMethod,
+    cfg::AbstractDict;
+    N::Int = 1_000,
+    T::Int = 200,
+    rng = Random.default_rng(),
+)
     # Solve once and for all to get the optimal policy fun and grids
     sol = solve(model, method, cfg)
 
@@ -44,9 +51,9 @@ function simulate_panel(model::AbstractModel, method::AbstractMethod, cfg::Abstr
     cpol = sol.policy[:c].value
 
     assets = Matrix{Float64}(undef, N, T)
-    cons   = Matrix{Float64}(undef, N, T)
+    cons = Matrix{Float64}(undef, N, T)
     zdraws = Matrix{Float64}(undef, N, T)
-    seeds  = Vector{UInt64}(undef, N)
+    seeds = Vector{UInt64}(undef, N)
 
 
     # --- Seed handling ---
@@ -72,13 +79,13 @@ function simulate_panel(model::AbstractModel, method::AbstractMethod, cfg::Abstr
     @inline function sample_row(Π::AbstractMatrix{<:Real}, i::Int, rng)
         u = rand(rng)
         s = 0.0
-        @inbounds for j in 1:axes(Π,2)
-            s += Π[i,j]
+        @inbounds for j = 1:axes(Π, 2)
+            s += Π[i, j]
             if u <= s
                 return j
             end
         end
-        return last(axes(Π,2))
+        return last(axes(Π, 2))
     end
 
     # simple scalar linear interpolation over agrid
@@ -92,8 +99,10 @@ function simulate_panel(model::AbstractModel, method::AbstractMethod, cfg::Abstr
         else
             j = searchsortedfirst(x, ξ)
             j = clamp(j, 2, n)
-            x0 = x[j-1]; x1 = x[j]
-            y0 = y[j-1]; y1 = y[j]
+            x0 = x[j-1];
+            x1 = x[j]
+            y0 = y[j-1];
+            y1 = y[j]
             t = (ξ - x0) / (x1 - x0)
             return (1 - t) * y0 + t * y1
         end
@@ -113,7 +122,7 @@ function simulate_panel(model::AbstractModel, method::AbstractMethod, cfg::Abstr
         end
         # Note : the zdraws are now fixed !
         # shocks must be drawn before starting the asset loop
-    
+
 
         # a/c consumption path loop
         a_t = g[:a].min
