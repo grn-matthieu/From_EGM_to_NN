@@ -3,6 +3,8 @@ module SimPanel
 export simulate_panel
 
 using Random
+using Statistics
+using Logging
 using ..Determinism: make_rng, derive_seed, canonicalize_cfg, hash_hex
 
 using ..API: Solution, AbstractModel, AbstractMethod, get_params, get_grids, get_shocks, solve
@@ -136,10 +138,21 @@ function simulate_panel(model::AbstractModel, method::AbstractMethod, cfg::Abstr
             assets[n, t] = a_t
         end
     end
+    log_growth = diff(log.(cons); dims = 2)
+    mean_log_c_growth = mean(log_growth)
+
+    final_assets = view(assets, :, size(assets, 2))
+    final_asset_mean = mean(final_assets)
+    final_asset_std = std(final_assets)
+
+    @info "panel moments" mean_log_c_growth final_asset_mean final_asset_std
 
     diagnostics = (
         rng_kind = string(typeof(master_rng)),
         master_seed = master_seed,
+        mean_log_c_growth = mean_log_c_growth,
+        final_asset_mean = final_asset_mean,
+        final_asset_std = final_asset_std,
     )
 
     return (; assets, consumption = cons, shocks = zdraws, seeds, diagnostics)
