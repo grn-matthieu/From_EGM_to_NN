@@ -75,6 +75,39 @@ function solve(model::AbstractModel, method::EGMMethod, cfg::AbstractDict; rng=n
         :julia_version => string(VERSION)
     )
 
+    # Validation: monotonicity and positivity
+    is_nondec(x; tol=1e-12) = x isa AbstractMatrix ? all(j -> all(diff(view(x, :, j)) .>= -tol), axes(x, 2)) : all(diff(x) .>= -tol)
+    is_positive(x; tol=1e-12) = all(x .>= tol)
+    respects_amin(x, amin; tol=1e-12) = all(x .>= (amin - tol))
+
+    c_val = policy[:c].value
+    a_val = policy[:a].value
+    amin = g[:a].min
+
+    violations = Dict{Symbol,Any}()
+    valid = true
+    if !is_positive(c_val)
+        violations[:c_positive] = false
+        valid = false
+    end
+    if !respects_amin(a_val, amin)
+        violations[:a_above_min] = false
+        valid = false
+    end
+    if !is_nondec(c_val)
+        violations[:c_monotone_nondec] = false
+        valid = false
+    end
+    if !is_nondec(a_val)
+        violations[:a_monotone_nondec] = false
+        valid = false
+    end
+    metadata[:valid] = valid
+    if !valid
+        metadata[:validation] = violations
+        @warn "EGM solution failed monotonicity/positivity checks; marking as invalid." violations
+    end
+
     # Model ID
     model_id = hash_hex(canonicalize_cfg(cfg))
 

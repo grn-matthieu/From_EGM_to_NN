@@ -26,11 +26,23 @@ Activate the project immediately so downstream `using ThesisProject` works.
 """
 Pkg.activate(ROOT; io=devnull)
 using ThesisProject
+# Load plotting extension (Project has Plots as a weak dep)
+try
+    @eval using Plots
+catch err
+    @warn "Plots not available; plot generation will be skipped" err
+end
 
 function ensure_outputs_dir()
     outdir = joinpath(ROOT, "outputs")
     isdir(outdir) || mkpath(outdir)
     return outdir
+end
+
+function ensure_plots_dir(outdir::AbstractString)
+    pdir = joinpath(outdir, "plots")
+    isdir(pdir) || mkpath(pdir)
+    return pdir
 end
 
 function open_write(path::AbstractString, header::Vector{<:AbstractString}, rows)
@@ -126,21 +138,56 @@ function write_stoch(sol, cfg, outdir)
 end
 
 
+function save_plots(sol, case::AbstractString, plotdir::AbstractString)
+    saved = String[]
+    # Policy plot (overlay c and a if present)
+    try
+        plt_pol = ThesisProject.plot_policy(sol; vars=[:c, :a])
+        fpol = joinpath(plotdir, "policy_$(case).png")
+        savefig(plt_pol, fpol)
+        push!(saved, fpol)
+    catch err
+        @warn "Failed to save policy plot" case err
+    end
+    # Euler error plot
+    try
+        plt_ee = ThesisProject.plot_euler_errors(sol; by=:auto)
+        fee = joinpath(plotdir, "euler_errors_$(case).png")
+        savefig(plt_ee, fee)
+        push!(saved, fee)
+    catch err
+        @warn "Failed to save Euler error plot" case err
+    end
+    return saved
+end
+
+
 function main()
     outdir = ensure_outputs_dir()
+    plotdir = ensure_plots_dir(outdir)
 
-    det_cfg = joinpath(ROOT, "config", "simple_baseline.yaml")
+    det_cfg = joinpath(ROOT, "config", "smoke_config", "smoke_config.yaml")
     stc_cfg = joinpath(ROOT, "config", "smoke_config", "smoke_config_stochastic.yaml")
 
     @info "Running deterministic baseline" det_cfg
     sol_det, cfg_det = run_one(det_cfg)
     det_csv = write_det(sol_det, cfg_det, outdir)
+    det_plots = save_plots(sol_det, "det", plotdir)
 
     @info "Running stochastic baseline" stc_cfg
     sol_stc, cfg_stc = run_one(stc_cfg)
     stc_csv = write_stoch(sol_stc, cfg_stc, outdir)
+    stc_plots = save_plots(sol_stc, "stoch", plotdir)
 
-    println("Written:\n  " * det_csv * "\n  " * stc_csv)
+    println("Written CSVs:\n  " * det_csv * "\n  " * stc_csv)
+    if isdefined(GenerateBaselineCSV, :Plots)
+        println("Written plots:")
+        for p in vcat(det_plots, stc_plots)
+            println("  " * p)
+        end
+    else
+        println("Plots not generated (Plots.jl not available)")
+    end
 end
 
 end # module

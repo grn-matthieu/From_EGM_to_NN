@@ -7,7 +7,7 @@ export euler_resid_det, euler_resid_stoch
 """
     euler_resid_det(model_params, c, c_next)
 
-Compute absolute Euler equation residuals for the deterministic model.
+Compute absolute Euler equation residuals for the deterministic model. Computations are based on the CRRA utility function.
 """
 function euler_resid_det(model_params, c::Vector{Float64}, c_next::Vector{Float64})
     resid = similar(c)
@@ -29,7 +29,9 @@ end
     euler_resid_stoch(model_params, a_grid, z_grid, Pz, c)
 
 Compute absolute Euler equation residuals for the stochastic savings model on a grid of assets `a_grid`
-and shocks `z_grid` with transition matrix `Pz`. The policy `c` is a Na x Nz matrix of consumption.
+and shocks `z_grid` with transition matrix `Pz`. The policy `c` is a Na x Nz matrix of consumption. When residuals
+are computed, linear interpolation is used on the asset grid.
+Outputs a Na x Nz matrix of absolute Euler equation residuals.
 """
 function euler_resid_stoch(model_params,
                            a_grid::AbstractVector{<:Real},

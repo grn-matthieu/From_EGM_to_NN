@@ -9,8 +9,10 @@ export solve_egm_det, solve_egm_stoch
 """
     solve_egm_det(model_params, model_grids, model_utility; ...)
 
-Vectorized EGM with residual-based stopping, deterministic income.
-Returns a NamedTuple with fields (a_grid, c, a_next, resid, iters, converged, max_resid, model_params, opts).
+Vectorized EGM with a deterministic income (eq. to log normal income with eps = 0).
+Stopping criteria : max euler errors + policy change.
+Returns a NamedTuple with fields (a_grid, c, a_next, resid, iters, converged, max_resid, model_params, opts). To be
+converted later into a Solution object.
 """
 function solve_egm_det(model_params, model_grids, model_utility;
         tol::Real=1e-8, tol_pol::Real=1e-6, maxit::Int=500,
@@ -108,8 +110,10 @@ end
 """
     solve_egm_stoch(model_params, model_grids, model_shocks, model_utility; ...)
 
-Vectorized EGM for a model with Markov income shocks. Returns a NamedTuple with fields
-(a_grid, z_grid, c, a_next, resid, iters, converged, max_resid, model_params, opts).
+Vectorized EGM solver for the CS model with an AR(1) income process.
+Stopping criteria : max euler errors + policy change (in expectation, evaluated at disc nodes).
+Returns a NamedTuple with fields (a_grid, z_grid, c, a_next, resid, iters, converged, max_resid, model_params, opts). Output is to be converted
+later in a Solution object.
 """
 function solve_egm_stoch(model_params, model_grids, model_shocks, model_utility;
         tol::Real=1e-8, tol_pol::Real = 1e-6, maxit::Int=1000,
