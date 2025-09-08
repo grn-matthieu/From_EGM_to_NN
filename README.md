@@ -55,6 +55,21 @@ Configs are YAML files loaded via `load_config`, which recursively converts keys
 - `:grids`: `Na`, `a_min`, `a_max`
 - `:solver`: `method` (e.g., `"EGM"`)
 
+Optional solver fields supported by the EGM method:
+- `solver.interp_kind`: interpolation for policy evaluation inside EGM. One of `linear`, `pchip`, `monotone_cubic` (default: `linear`).
+- `solver.warm_start`: initial policy guess. One of `default`/`half_resources` (kernel default), or `steady_state` (sets `a' = a`, so `c = y + (1+r)a - a`). You may also provide a custom initial policy via `init.c` in the config (vector for deterministic, matrix for stochastic), which takes precedence.
+
+---
+
+## Smoke Checks
+
+- Run a fast regression sweep on key configs:
+  - `julia --project scripts/smoke.jl`
+  - Exit code is non-zero if any config fails (useful in CI).
+  - You can pass specific configs: `julia --project scripts/smoke.jl config/smoke_config/smoke_config.yaml`
+
+CI is configured via `.github/workflows/ci.yml` to run tests and smoke checks on pushes and PRs.
+
 Validate early with `validate_config(cfg)`; the function throws if something is missing or inconsistent.
 
 ---

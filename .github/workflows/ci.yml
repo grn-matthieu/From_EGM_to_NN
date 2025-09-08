@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        julia-version: [ '1.10', '1.11' ]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: ${{ matrix.julia-version }}
+      - name: Instantiate
+        run: julia --project -e 'using Pkg; Pkg.instantiate()'
+      - name: Run tests
+        run: julia --project -e 'using Pkg; Pkg.test()'
+      - name: Smoke (deterministic and stochastic)
+        run: |
+          julia --project scripts/smoke.jl
+

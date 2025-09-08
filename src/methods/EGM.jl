@@ -3,16 +3,16 @@ module EGM
 using ..API
 import ..API: build_method, solve
 
-using ..EGMKernel:solve_egm_det, solve_egm_stoch
+using ..EGMKernel: solve_egm_det, solve_egm_stoch
 using ..ValueFunction: compute_value_policy
 using ..Determinism: canonicalize_cfg, hash_hex
+using ..CommonInterp: LinearInterp, MonotoneCubicInterp
 
 export EGMMethod
 
 struct EGMMethod <: AbstractMethod
     opts::NamedTuple
 end
-
 
 """
     build_method(cfg::AbstractDict) -> EGMMethod
@@ -24,17 +24,37 @@ function build_method(cfg::AbstractDict)
     if method_name != "EGM"
         error("Method builder received cfg with method = $method_name. It has not been implemented.")
     else
+        # Map interpolation kind from config to concrete type
+        interp_key = get(cfg[:solver], :interp_kind, :linear)
+        interp_kind = begin
+            s = Symbol(lowercase(string(interp_key)))
+            if s == :linear
+                LinearInterp()
+            elseif s in (:pchip, :monotone_cubic, :monotonecubic)
+                MonotoneCubicInterp()
+            else
+                @warn "Unknown interp_kind=$(interp_key); defaulting to linear"
+                LinearInterp()
+            end
+        end
+
+        # Warm-start option (how to initialize the policy)
+        warm_start = get(cfg[:solver], :warm_start, :default)
+
         return EGMMethod((
-        name = method_name,
-        tol = get(cfg[:solver], :tol, 1e-6),
-        maxit = get(cfg[:solver], :maxit, 1000),
-        interp_kind = get(cfg[:solver], :interp_kind, :linear),
-        verbose = get(cfg[:solver], :verbose, false)
-    ))
+            name = method_name,
+            tol = get(cfg[:solver], :tol, 1e-6),
+            tol_pol = get(cfg[:solver], :tol_pol, 1e-6),
+            maxit = get(cfg[:solver], :maxit, 1000),
+            relax = get(cfg[:solver], :relax, 0.5),
+            patience = get(cfg[:solver], :patience, 50),
+            delta = get(cfg[:solver], :delta, 1e-10),
+            interp_kind = interp_kind,
+            warm_start = warm_start,
+            verbose = get(cfg[:solver], :verbose, false)
+        ))
     end
 end
-
-
 
 """
     solve(model::AbstractModel, method::EGMMethod, cfg::AbstractDict; rng=nothing)::Solution
@@ -48,9 +68,82 @@ function solve(model::AbstractModel, method::EGMMethod, cfg::AbstractDict; rng=n
     S = get_shocks(model)
     U = get_utility(model)
 
+    # --- Warm-start policy initialization ---
+    function _build_c_init_det()
+        a_grid = g[:a].grid
+        a_min  = g[:a].min
+        R = 1 + p.r
+        # Default: let kernel choose half resources
+        ws = Symbol(lowercase(string(method.opts.warm_start)))
+        if ws == :steady_state
+            # Keep assets constant: a' = a => c = y + R*a - a
+            c = @. p.y + R * a_grid - a_grid
+            cmin = 1e-12
+            cmax = @. p.y + R * a_grid - a_min
+            return clamp.(c, cmin, cmax)
+        elseif ws in (:default, :half_resources, :none)
+            return nothing
+        else
+            # Optional custom: cfg.init.c if provided
+            if haskey(cfg, :init) && haskey(cfg[:init], :c)
+                return copy(cfg[:init][:c])
+            end
+            return nothing
+        end
+    end
+
+    function _build_c_init_stoch()
+        a_grid = g[:a].grid
+        a_min  = g[:a].min
+        R = 1 + p.r
+        z_grid = S.zgrid
+        Nz = length(z_grid)
+        ws = Symbol(lowercase(string(method.opts.warm_start)))
+        if ws == :steady_state
+            Na = length(a_grid)
+            c = Array{Float64}(undef, Na, Nz)
+            @inbounds for j in 1:Nz
+                y = exp(z_grid[j])
+                ccol = @. y + R * a_grid - a_grid
+                cmin = 1e-12
+                cmax = @. y + R * a_grid - a_min
+                @. ccol = clamp(ccol, cmin, cmax)
+                @views c[:, j] .= ccol
+            end
+            return c
+        elseif ws in (:default, :half_resources, :none)
+            return nothing
+        else
+            if haskey(cfg, :init) && haskey(cfg[:init], :c)
+                return copy(cfg[:init][:c])
+            end
+            return nothing
+        end
+    end
+
+    c_init = S === nothing ? _build_c_init_det() : _build_c_init_stoch()
+
     # --- Solution ---
-    # The dispatch is made when a shock structure is provided in the config file
-    sol = (S === nothing) ? solve_egm_det(p, g, U) : solve_egm_stoch(p, g, S, U)
+    # Dispatch on shocks and pass options through
+    if S === nothing
+        sol = solve_egm_det(p, g, U;
+            tol=method.opts.tol,
+            tol_pol=get(method.opts, :tol_pol, 1e-6),
+            maxit=method.opts.maxit,
+            interp_kind=method.opts.interp_kind,
+            relax=get(method.opts, :relax, 0.5),
+            patience=get(method.opts, :patience, 50),
+            c_init=c_init)
+    else
+        sol = solve_egm_stoch(p, g, S, U;
+            tol=method.opts.tol,
+            tol_pol=get(method.opts, :tol_pol, 1e-6),
+            maxit=method.opts.maxit,
+            interp_kind=method.opts.interp_kind,
+            relax=get(method.opts, :relax, 0.5),
+            patience=get(method.opts, :patience, 50),
+            c_init=c_init)
+    end
 
     # --- Processing ---
     ee = sol.resid
@@ -70,7 +163,6 @@ function solve(model::AbstractModel, method::EGMMethod, cfg::AbstractDict; rng=n
         :tol_pol => sol.opts.tol_pol,
         :relax => sol.opts.relax,
         :patience => sol.opts.patience,
-        :ϵ => sol.opts.ϵ,
         :interp_kind => string(sol.opts.interp_kind),
         :julia_version => string(VERSION)
     )
@@ -121,4 +213,5 @@ function solve(model::AbstractModel, method::EGMMethod, cfg::AbstractDict; rng=n
     return Solution(policy, value, diagnostics, metadata, model, method)
 end
 
-end #
+end # module
+
