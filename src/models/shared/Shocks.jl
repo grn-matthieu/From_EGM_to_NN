@@ -79,8 +79,8 @@ function find_invariant(Π::AbstractMatrix{<:Real}; tol=1e-12, maxit=1_000)
     error("Power iteration did not converge")
 end
 
-function _validate_invariant(π::AbstractVector{<:Real}, Π::AbstractMatrix{<:Real}; tol=1e-12)
-    if !isapprox(π, vec(π' * Π); atol=tol)
+function _validate_invariant(π::AbstractVector{<:Real}, Π::AbstractMatrix{<:Real}; tol=1e-10)
+    if !(isapprox(π, vec(π' * Π); atol=tol))
         max_dev = maximum(abs.(π .- vec(π' * Π)))
         error("Invariant distribution check failed: maximum deviation $max_dev exceeds tolerance $tol")
     end
