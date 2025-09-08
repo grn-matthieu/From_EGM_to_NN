@@ -32,7 +32,8 @@ function build_method(cfg::AbstractDict)
             tol_pol = get(cfg[:solver], :tol_pol, 1e-6),
             maxit = get(cfg[:solver], :maxit, 1000),
             interp_kind = ik,
-            verbose = get(cfg[:solver], :verbose, false)
+            verbose = get(cfg[:solver], :verbose, false),
+            warm_start = get(cfg[:solver], :warm_start, :default)
         ))
     end
 end
@@ -112,12 +113,14 @@ function solve(model::AbstractModel, method::EGMMethod, cfg::AbstractDict; rng=n
             tol=method.opts.tol,
             tol_pol=method.opts.tol_pol,
             maxit=method.opts.maxit,
-            interp_kind=interp) :
+            interp_kind=interp,
+            c_init=c_init) :
         solve_egm_stoch(p, g, S, U;
             tol=method.opts.tol,
             tol_pol=method.opts.tol_pol,
             maxit=method.opts.maxit,
-            interp_kind=interp)
+            interp_kind=interp,
+            c_init=c_init)
 
     # --- Processing ---
     ee = sol.resid
