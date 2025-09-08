@@ -24,33 +24,14 @@ function build_method(cfg::AbstractDict)
     if method_name != "EGM"
         error("Method builder received cfg with method = $method_name. It has not been implemented.")
     else
-        # Map interpolation kind from config to concrete type
-        interp_key = get(cfg[:solver], :interp_kind, :linear)
-        interp_kind = begin
-            s = Symbol(lowercase(string(interp_key)))
-            if s == :linear
-                LinearInterp()
-            elseif s in (:pchip, :monotone_cubic, :monotonecubic)
-                MonotoneCubicInterp()
-            else
-                @warn "Unknown interp_kind=$(interp_key); defaulting to linear"
-                LinearInterp()
-            end
-        end
-
-        # Warm-start option (how to initialize the policy)
-        warm_start = get(cfg[:solver], :warm_start, :default)
-
+        ik = get(cfg[:solver], :interp_kind, :linear)
+        ik = ik isa Symbol ? ik : Symbol(ik)
         return EGMMethod((
             name = method_name,
             tol = get(cfg[:solver], :tol, 1e-6),
             tol_pol = get(cfg[:solver], :tol_pol, 1e-6),
             maxit = get(cfg[:solver], :maxit, 1000),
-            relax = get(cfg[:solver], :relax, 0.5),
-            patience = get(cfg[:solver], :patience, 50),
-            delta = get(cfg[:solver], :delta, 1e-10),
-            interp_kind = interp_kind,
-            warm_start = warm_start,
+            interp_kind = ik,
             verbose = get(cfg[:solver], :verbose, false)
         ))
     end
@@ -124,26 +105,19 @@ function solve(model::AbstractModel, method::EGMMethod, cfg::AbstractDict; rng=n
     c_init = S === nothing ? _build_c_init_det() : _build_c_init_stoch()
 
     # --- Solution ---
-    # Dispatch on shocks and pass options through
-    if S === nothing
-        sol = solve_egm_det(p, g, U;
+    ik = method.opts.interp_kind
+    interp = ik == :linear ? LinearInterp() : MonotoneCubicInterp()
+    sol = S === nothing ?
+        solve_egm_det(p, g, U;
             tol=method.opts.tol,
-            tol_pol=get(method.opts, :tol_pol, 1e-6),
+            tol_pol=method.opts.tol_pol,
             maxit=method.opts.maxit,
-            interp_kind=method.opts.interp_kind,
-            relax=get(method.opts, :relax, 0.5),
-            patience=get(method.opts, :patience, 50),
-            c_init=c_init)
-    else
-        sol = solve_egm_stoch(p, g, S, U;
+            interp_kind=interp) :
+        solve_egm_stoch(p, g, S, U;
             tol=method.opts.tol,
-            tol_pol=get(method.opts, :tol_pol, 1e-6),
+            tol_pol=method.opts.tol_pol,
             maxit=method.opts.maxit,
-            interp_kind=method.opts.interp_kind,
-            relax=get(method.opts, :relax, 0.5),
-            patience=get(method.opts, :patience, 50),
-            c_init=c_init)
-    end
+            interp_kind=interp)
 
     # --- Processing ---
     ee = sol.resid

@@ -10,7 +10,7 @@ Configure via env vars (optional):
   SIGMA_LIST e.g. "1.0,2.0,3.0"
 
 Run:
-  julia --project=. scripts/robustness_sweep.jl
+  julia --project=. scripts/robustness_sweep.jl [--Na=..] [--Nz=..] [--tol=..] [--tol_pol=..]
 """
 
 module RobustnessSweep
@@ -41,15 +41,44 @@ function parse_list(envname::AbstractString, default::Vector{Float64})
     end
 end
 
-function safe_solve(cfg; stochastic::Bool)
+# Parse simple CLI flags --Na=..., --Nz=..., --tol=..., --tol_pol=...
+function parse_cli(args)
+    Na = nothing; Nz = nothing; tol = nothing; tol_pol = nothing
+    for arg in args
+        if startswith(arg, "--Na=")
+            Na = parse(Int, split(arg, "=", limit=2)[2])
+        elseif startswith(arg, "--Nz=")
+            Nz = parse(Int, split(arg, "=", limit=2)[2])
+        elseif startswith(arg, "--tol=")
+            tol = parse(Float64, split(arg, "=", limit=2)[2])
+        elseif startswith(arg, "--tol_pol=")
+            tol_pol = parse(Float64, split(arg, "=", limit=2)[2])
+        end
+    end
+    return (; Na, Nz, tol, tol_pol)
+end
+
+function safe_solve(cfg; stochastic::Bool, opts)
     # Toggle shocks.active
     if haskey(cfg, :shocks)
         cfg[:shocks][:active] = stochastic
-    elseif stochastic
-        # provide a minimal shocks block if missing
-        cfg[:shocks] = Dict{Symbol,Any}(:active=>true)
+    elseif stochastic || opts.Nz !== nothing
+        cfg[:shocks] = Dict{Symbol,Any}(:active=>stochastic)
     end
-    # Build and solve
+
+    if opts.Nz !== nothing && haskey(cfg, :shocks)
+        cfg[:shocks][:Nz] = opts.Nz
+    end
+    if opts.Na !== nothing
+        cfg[:grids][:Na] = opts.Na
+    end
+    if opts.tol !== nothing
+        cfg[:solver][:tol] = opts.tol
+    end
+    if opts.tol_pol !== nothing
+        cfg[:solver][:tol_pol] = opts.tol_pol
+    end
+
     try
         model  = ThesisProject.build_model(cfg)
         method = ThesisProject.build_method(cfg)
@@ -89,6 +118,7 @@ function open_write(path::AbstractString, header::Vector{<:AbstractString}, rows
 end
 
 function main()
+    opts = parse_cli(ARGS)
     outdir = ensure_outputs_dir()
     outpath = joinpath(outdir, "egm_robustness_sweep.csv")
 
@@ -115,7 +145,7 @@ function main()
             cfg[:params][:σ] = s
 
             case = stochastic ? "stochastic" : "deterministic"
-            status, payload = safe_solve(cfg; stochastic)
+            status, payload = safe_solve(cfg; stochastic, opts)
 
             if status == :ok
                 sol = payload

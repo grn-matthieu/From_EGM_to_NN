@@ -10,7 +10,7 @@ Outputs two files in `outputs/`:
 - egm_baseline_stoch.csv
 
 Run with:
-  julia --project=. scripts/generate_baseline_csv.jl
+  julia --project=. scripts/generate_baseline_csv.jl [--Na=..] [--Nz=..] [--tol=..] [--tol_pol=..]
 """
 
 module GenerateBaselineCSV
@@ -56,10 +56,40 @@ function open_write(path::AbstractString, header::Vector{<:AbstractString}, rows
     end
 end
 
+# Parse simple CLI flags --Na=..., --Nz=..., --tol=..., --tol_pol=...
+function parse_cli(args)
+    Na = nothing; Nz = nothing; tol = nothing; tol_pol = nothing
+    for arg in args
+        if startswith(arg, "--Na=")
+            Na = parse(Int, split(arg, "=", limit=2)[2])
+        elseif startswith(arg, "--Nz=")
+            Nz = parse(Int, split(arg, "=", limit=2)[2])
+        elseif startswith(arg, "--tol=")
+            tol = parse(Float64, split(arg, "=", limit=2)[2])
+        elseif startswith(arg, "--tol_pol=")
+            tol_pol = parse(Float64, split(arg, "=", limit=2)[2])
+        end
+    end
+    return (; Na, Nz, tol, tol_pol)
+end
+
 # Small fun to auto run the config
-function run_one(cfg_path::AbstractString)
+function run_one(cfg_path::AbstractString, opts)
     cfg = ThesisProject.load_config(cfg_path)
     ThesisProject.validate_config(cfg)
+
+    if opts.Na !== nothing
+        cfg[:grids][:Na] = opts.Na
+    end
+    if opts.tol !== nothing
+        cfg[:solver][:tol] = opts.tol
+    end
+    if opts.tol_pol !== nothing
+        cfg[:solver][:tol_pol] = opts.tol_pol
+    end
+    if opts.Nz !== nothing && haskey(cfg, :shocks)
+        cfg[:shocks][:Nz] = opts.Nz
+    end
 
     model  = ThesisProject.build_model(cfg)
     method = ThesisProject.build_method(cfg)
@@ -163,6 +193,7 @@ end
 
 
 function main()
+    opts = parse_cli(ARGS)
     outdir = ensure_outputs_dir()
     plotdir = ensure_plots_dir(outdir)
 
@@ -170,12 +201,12 @@ function main()
     stc_cfg = joinpath(ROOT, "config", "smoke_config", "smoke_config_stochastic.yaml")
 
     @info "Running deterministic baseline" det_cfg
-    sol_det, cfg_det = run_one(det_cfg)
+    sol_det, cfg_det = run_one(det_cfg, opts)
     det_csv = write_det(sol_det, cfg_det, outdir)
     det_plots = save_plots(sol_det, "det", plotdir)
 
     @info "Running stochastic baseline" stc_cfg
-    sol_stc, cfg_stc = run_one(stc_cfg)
+    sol_stc, cfg_stc = run_one(stc_cfg, opts)
     stc_csv = write_stoch(sol_stc, cfg_stc, outdir)
     stc_plots = save_plots(sol_stc, "stoch", plotdir)
 
