@@ -1,5 +1,3 @@
-```bash
-// filepath: d:\From_EGM_to_NN\.githooks\pre-commit
 #!/usr/bin/env bash
 set -euo pipefail
 
