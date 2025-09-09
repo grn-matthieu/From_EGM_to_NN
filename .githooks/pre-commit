@@ -81,10 +81,10 @@ SYSIMG_PATH="$REPO_ROOT/LocalSysImage.$SYSIMG_EXT"
 if [ -f "$SYSIMG_PATH" ]; then
   step "Using local sysimage: $SYSIMG_PATH"
   # run tests in a fresh external Julia process, activate project and run tests
-  julia -q --project="$REPO_ROOT" -J "$SYSIMG_PATH" -e 'using Pkg; Pkg.activate("."); Pkg.test()'
+  julia -q -J "$SYSIMG_PATH" -e 'using Pkg; Pkg.activate("."); Pkg.test("ThesisProject")'
 else
   step "Local sysimage not found; running without sysimage"
-  julia -q --project="$REPO_ROOT" -e 'using Pkg; Pkg.activate("."); Pkg.test()'
+  julia -q -e 'using Pkg; Pkg.activate("."); Pkg.test("ThesisProject")'
 fi
 
 step "All checks passed."
