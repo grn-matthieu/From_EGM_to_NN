@@ -4,17 +4,17 @@ export simulate_panel
 
 using Random
 using Statistics
-using ..Determinism: make_rng, derive_seed, canonicalize_cfg, hash_hex
+using ..Determinism: make_rng, derive_seed
 
 using ..API:
     Solution, AbstractModel, AbstractMethod, get_params, get_grids, get_shocks, solve
 
 
 """
-    simulate_panel(model, method, cfg; N=1000, T=200, rng::AbstractRNG))
+    simulate_panel(model, method, cfg; N=1000, T=200, rng::AbstractRNG)
 
 Simulates a panel of N agents for T periods using a solved policy from `method` on `model`.
-Agents draw from the Markov chain implied by the model's shocks. The master seed is taken from `cfg[:random][:seed]` if available, otherwise it is deterministically derived from the canonicalized cfg.
+Agents draw from the Markov chain implied by the model's shocks. The master seed is taken from `cfg[:random][:seed]` if available, otherwise it is deterministically derived from the provided `rng` via `derive_seed`.
 
 Returns a NamedTuple with fields: assets::Matrix, consumption::Matrix, shocks::Matrix, seeds::Vector and diagnostics::Vector.
 """
@@ -27,7 +27,7 @@ function simulate_panel(
     rng::AbstractRNG,
 )
     # Solve once and for all to get the optimal policy fun and grids
-    sol = solve(model, method, cfg)
+    sol = solve(model, method, cfg; rng = rng)
 
     p = get_params(model)
     g = get_grids(model)
@@ -36,15 +36,9 @@ function simulate_panel(
     agrid = g[:a].grid
     R = 1 + p.r
 
-    # Require shocks (panel simulation targets stochastic models)
-    # If the model is deterministic then simulation = 1 representative agent
-    # Thus sim is not really a panel but we keep the same output format
-    # and document shocks as zeros
-    if S !== nothing
-        zgrid = S.zgrid
-        Π = S.Π
-        π0 = S.π
-    end
+    zgrid = [0.0]
+    Π = ones(1, 1)
+    π0 = [1.0]
 
     # Care : cpol can be a matrix (a,z) or a vector (a) depending on shocks
     cpol = sol.policy[:c].value
@@ -56,36 +50,40 @@ function simulate_panel(
 
 
     # --- Seed handling ---
-    # Master RNG/seed: prefer cfg.random.seed; else derive from canonical cfg
-    # The rule is to derive individual agent seeds from the master seed
-    # so that the same cfg always leads to the same panel sim
+    # Master RNG/seed: prefer cfg.random.seed; else derive from the provided rng
+    # The rule is to derive individual agent seeds from the master seed so that
+    # identical rng instances lead to identical panel simulations.
     master_seed = get(get(cfg, :random, Dict()), :seed, nothing)
     if master_seed === nothing
-        hex = hash_hex(canonicalize_cfg(cfg); n = 16)
-        master_seed = parse(UInt64, hex; base = 16)
+        master_seed = derive_seed(rng, :panel)
     else
         master_seed = UInt64(master_seed)
     end
     master_rng = make_rng(master_seed)
 
-    # Deterministic model: document shocks as zeros in the output
+    π0 = fill(nothing, N)  # placeholder if no shocks
     if S === nothing
+        # Deterministic model: document shocks as zeros in the output
         zdraws .= 0.0
-    end
+    else
+        zgrid = S.zgrid
+        Π = S.Π
+        π0 = S.π
 
-    # Fun to sample from a row of a transition matrix Π
-    # In the sim, useful bc we need to sample T times per agent
-    # Note: Π assumed to be row-stochastic
-    @inline function sample_row(Π::AbstractMatrix{<:Real}, i::Int, rng)
-        u = rand(rng)
-        s = 0.0
-        @inbounds for j in axes(Π, 2)
-            s += Π[i, j]
-            if u <= s
-                return j
+        # Fun to sample from a row of a transition matrix Π
+        # In the sim, useful bc we need to sample T times per agent
+        # Note: Π assumed to be row-stochastic
+        @inline function sample_row(Π::AbstractMatrix{<:Real}, i::Int, rng)
+            u = rand(rng)
+            s = 0.0
+            @inbounds for j in axes(Π, 2)
+                s += Π[i, j]
+                if u <= s
+                    return j
+                end
             end
+            return last(axes(Π, 2))
         end
-        return last(axes(Π, 2))
     end
 
     # simple scalar linear interpolation over agrid
@@ -107,21 +105,22 @@ function simulate_panel(
             return (1 - t) * y0 + t * y1
         end
     end
-
     @inbounds for n in axes(assets, 1)
         # independent rng per agent derived from the master rng
         agent_seed = derive_seed(master_rng, n)
-        seeds[n] = UInt64(agent_seed % UInt64)
+        seeds[n] = agent_seed
         arng = make_rng(agent_seed)
 
-        # shocks indices and values
-        idx = sample_row(reshape(π0, 1, :), 1, arng)  # sample initial state from π0
-        for t in axes(assets, 2)
-            zdraws[n, t] = zgrid[idx]
-            idx = sample_row(Π, idx, arng)
+        if S !== nothing
+            # shocks indices and values
+            idx = sample_row(reshape(π0, 1, :), 1, arng)  # sample initial state from π0
+            for t in axes(assets, 2)
+                zdraws[n, t] = zgrid[idx]
+                idx = sample_row(Π, idx, arng)
+            end
+            # Note : the zdraws are now fixed !
+            # shocks must be drawn before starting the asset loop
         end
-        # Note : the zdraws are now fixed !
-        # shocks must be drawn before starting the asset loop
 
 
         # a/c consumption path loop

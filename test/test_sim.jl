@@ -64,6 +64,17 @@ using Statistics
     @test cons ≈ cons2
     @test shocks ≈ shocks2
 
+    # reproducibility when reusing the same RNG instance
+    rng_shared = ThesisProject.Determinism.make_rng(2024)
+    out_shared1 =
+        ThesisProject.simulate_panel(model, method, cfg; N = N, T = T, rng = rng_shared)
+    out_shared2 =
+        ThesisProject.simulate_panel(model, method, cfg; N = N, T = T, rng = rng_shared)
+    @test getkey(out_shared1, :seeds) == getkey(out_shared2, :seeds)
+    @test getkey(out_shared1, :shocks) ≈ getkey(out_shared2, :shocks)
+    @test getkey(out_shared1, :consumption) ≈ getkey(out_shared2, :consumption)
+    @test getkey(out_shared1, :assets) ≈ getkey(out_shared2, :assets)
+
     # different seeds produce different panels
     cfg2 = deepcopy(cfg)
     cfg2[:random] = deepcopy(cfg[:random])
@@ -100,4 +111,45 @@ using Statistics
     if (:rng_kind in keys(diag)) || (:rng_kind in collect(fieldnames(typeof(diag))))
         @test !isempty(string(getkey(diag, :rng_kind)))
     end
+end
+
+@testset "SimPanel deterministic" begin
+    cfg_path = joinpath(@__DIR__, "..", "config", "smoke_config", "smoke_config.yaml")
+    @test isfile(cfg_path) || begin
+        @warn("Config not found; skipping deterministic SimPanel tests", path = cfg_path)
+        @test true
+        return
+    end
+
+    cfg = ThesisProject.load_config(cfg_path)
+
+    model = ThesisProject.build_model(cfg)
+    method = ThesisProject.build_method(cfg)
+
+    N = 12
+    T = 6
+
+    rng1 = ThesisProject.Determinism.make_rng(1234)
+    rng2 = ThesisProject.Determinism.make_rng(1234)
+
+    out1 = ThesisProject.simulate_panel(model, method, cfg; N = N, T = T, rng = rng1)
+    out2 = ThesisProject.simulate_panel(model, method, cfg; N = N, T = T, rng = rng2)
+
+    getkey(x, k) = x isa NamedTuple ? getfield(x, k) : x[k]
+
+    assets = getkey(out1, :assets)
+    cons = getkey(out1, :consumption)
+    shocks = getkey(out1, :shocks)
+
+    @test size(assets) == (N, T)
+    @test size(cons) == (N, T)
+    @test shocks == zeros(N, T)
+
+    assets2 = getkey(out2, :assets)
+    cons2 = getkey(out2, :consumption)
+    shocks2 = getkey(out2, :shocks)
+
+    @test assets ≈ assets2
+    @test cons ≈ cons2
+    @test shocks == shocks2
 end
