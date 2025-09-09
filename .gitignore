@@ -25,3 +25,4 @@ Thumbs.db
 
 # Ignore dll files
 *.dll
+*.so

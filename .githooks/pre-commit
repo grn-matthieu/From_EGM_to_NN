@@ -1,35 +1,34 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ---------- utils ----------
+# ...existing code...
+
+# ---------- minimal utils ----------
 step(){ echo "[$(date +%H:%M:%S)] $*"; }
-spinner(){ local pid=$1 d=0.1 s='|/-\'; while kill -0 $pid 2>/dev/null; do local t=${s#?}; printf " [%c]  " "$s"; s=$t${s%"$t"}; sleep $d; printf "\b\b\b\b\b\b"; done; wait $pid; }
 hash_files(){
   if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$@" | awk '{print $1}'
   else openssl dgst -sha256 "$@" | awk '{print $2}'
   fi
 }
 
-# ---------- paths ----------
+# ---------- paths (use local sysimage name) ----------
 SYSIMG_EXT=$([[ "${OS:-}" == "Windows_NT" ]] && echo dll || (uname | grep -q Darwin && echo dylib || echo so))
-SYSIMG="sys_egmnn.$SYSIMG_EXT"
+SYSIMG="LocalSysImage.$SYSIMG_EXT"
 STAMP=".git/sysimage.stamp"
 
 # ---------- format only staged .jl ----------
 mapfile -t JLFILES < <(git diff --cached --name-only --diff-filter=ACMRT | grep -E '\.jl$' || true)
 if [ ${#JLFILES[@]} -gt 0 ]; then
   step "Formatting staged Julia files..."
-  # run in-project so Julia sees Project/Manifest; skip formatting if JuliaFormatter missing
-  julia --project=. --color=yes -e '
+  julia -q -e '
     using Pkg
-    Pkg.activate(".")
     Pkg.instantiate()
     try
       import JuliaFormatter
       for f in ARGS
         JuliaFormatter.format_file(f)
       end
-    catch e
+    catch
       println(">>> JuliaFormatter not available; skipping formatting of staged Julia files.")
     end
   ' "${JLFILES[@]}"
@@ -38,50 +37,8 @@ else
   step "No staged Julia files to format."
 fi
 
-# ---------- maybe rebuild sysimage ----------
-NEED_REBUILD=false
-SIG_NEW=$( (test -f Project.toml && cat Project.toml; test -f Manifest.toml && cat Manifest.toml) | hash_files )
-SIG_OLD=$(test -f "$STAMP" && cat "$STAMP" || echo "")
-if [ ! -f "$SYSIMG" ] || [ "$SIG_NEW" != "$SIG_OLD" ]; then NEED_REBUILD=true; fi
-
-# allow developer to skip expensive sysimage builds
-if [ "${SKIP_SYSIMAGE:-0}" = "1" ]; then
-  NEED_REBUILD=false
-fi
-
-if $NEED_REBUILD; then
-  step "Rebuilding sysimage ($SYSIMG)..."
-  (
-    export SYSIMG
-    # guard: do not fail hook if PackageCompiler is not available; just skip
-    julia --project=. --color=no -e '
-      using Pkg
-      Pkg.activate(".")
-      Pkg.instantiate()
-      try
-        @eval using PackageCompiler
-      catch err
-        println(">>> PackageCompiler not available; skipping sysimage build.")
-        exit(0)
-      end
-      precompile_file = isfile("scripts/precompile.jl") ? "scripts/precompile.jl" : (isfile("deps/precompile.jl") ? "deps/precompile.jl" : nothing)
-      if precompile_file !== nothing
-        create_sysimage(; sysimage_path=ENV["SYSIMG"], precompile_execution_file=precompile_file, cpu_target="generic")
-      else
-        # fallback: compile core deps only
-        create_sysimage([:Pkg, :Test]; sysimage_path=ENV["SYSIMG"], cpu_target="generic")
-      end
-    '
-  )
-  echo "$SIG_NEW" > "$STAMP"
-  step "Sysimage rebuilt."
-else
-  step "Sysimage up to date."
-fi
-
 # ---------- skip tests for doc-only commits ----------
 DOC_ONLY=true
-# If any .jl staged OR Project/Manifest staged, we must test
 if git diff --cached --name-only --diff-filter=ACMRT | grep -Eq '\.jl$|(^|/)Project\.toml$|(^|/)Manifest\.toml$'; then
   DOC_ONLY=false
 fi
@@ -91,18 +48,80 @@ if $DOC_ONLY; then
   exit 0
 fi
 
-# ---------- run tests with spinner ----------
-step "Running Julia tests with sysimage ($SYSIMG)..."
-(
-  export JULIA_PROJECT=@.
-  export CI=true
-  if [ -f "$SYSIMG" ]; then
-    julia -J "$SYSIMG" --color=no -e 'using Pkg; Pkg.test()'
-  else
-    julia --color=no -e 'using Pkg; Pkg.activate(@__DIR__); Pkg.test()'
-  fi
-) &
-spinner $!
+# ---------- run package tests (use local sysimage if present) ----------
+step "Running tests for ThesisProject (package must be in dev mode)..."
+if [ -f "$SYSIMG" ]; then
+  step "Using local sysimage: $SYSIMG"
+  # run tests against the dev-installed package (no local project activation)
+  julia -q -J "$SYSIMG" -e 'using Pkg; Pkg.test("ThesisProject")'
+else
+  step "Local sysimage not found; running without sysimage"
+  julia -q -e 'using Pkg; Pkg.test("ThesisProject")'
+fi
 
 step "All checks passed."
 exit 0
+```// filepath: d:\From_EGM_to_NN\.githooks\pre-commit
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ...existing code...
+
+# ---------- minimal utils ----------
+step(){ echo "[$(date +%H:%M:%S)] $*"; }
+hash_files(){
+  if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$@" | awk '{print $1}'
+  else openssl dgst -sha256 "$@" | awk '{print $2}'
+  fi
+}
+
+# ---------- paths (use local sysimage name) ----------
+SYSIMG_EXT=$([[ "${OS:-}" == "Windows_NT" ]] && echo dll || (uname | grep -q Darwin && echo dylib || echo so))
+SYSIMG="LocalSysImage.$SYSIMG_EXT"
+STAMP=".git/sysimage.stamp"
+
+# ---------- format only staged .jl ----------
+mapfile -t JLFILES < <(git diff --cached --name-only --diff-filter=ACMRT | grep -E '\.jl$' || true)
+if [ ${#JLFILES[@]} -gt 0 ]; then
+  step "Formatting staged Julia files..."
+  julia -q --project=. -e '
+    using Pkg
+    Pkg.instantiate()
+    try
+      import JuliaFormatter
+      for f in ARGS
+        JuliaFormatter.format_file(f)
+      end
+    catch
+      println(">>> JuliaFormatter not available; skipping formatting of staged Julia files.")
+    end
+  ' "${JLFILES[@]}"
+  git add "${JLFILES[@]}"
+else
+  step "No staged Julia files to format."
+fi
+
+# ---------- skip tests for doc-only commits ----------
+DOC_ONLY=true
+if git diff --cached --name-only --diff-filter=ACMRT | grep -Eq '\.jl$|(^|/)Project\.toml$|(^|/)Manifest\.toml$'; then
+  DOC_ONLY=false
+fi
+
+if $DOC_ONLY; then
+  step "Doc-only commit detected → skipping tests."
+  exit 0
+fi
+
+# ---------- run package tests (use local sysimage if present) ----------
+step "Running tests for ThesisProject (package must be in dev mode)..."
+if [ -f "$SYSIMG" ]; then
+  step "Using local sysimage: $SYSIMG"
+  # run tests against the dev-installed package (no local project activation)
+  julia -q -J "$SYSIMG" -e 'using Pkg; Pkg.test("ThesisProject")'
+else
+  step "Local sysimage not found; running without sysimage"
+  julia -q -e 'using Pkg; Pkg.test("ThesisProject")'
+fi
+
+step "All checks passed."
+exit
