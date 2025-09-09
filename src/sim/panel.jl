@@ -155,8 +155,6 @@ function simulate_panel(
     final_asset_mean = mean(final_assets)
     final_asset_std = std(final_assets)
 
-    @info "panel moments" mean_log_c_growth final_asset_mean final_asset_std
-
     diagnostics = (
         rng_kind = string(typeof(master_rng)),
         master_seed = master_seed,
