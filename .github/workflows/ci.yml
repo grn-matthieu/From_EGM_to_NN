@@ -17,10 +17,10 @@ jobs:
         with:
           version: ${{ matrix.julia-version }}
       - name: Instantiate
-        run: julia --project -e 'using Pkg; Pkg.instantiate()'
+        run: julia -e 'using Pkg; Pkg.instantiate()'
       - name: Run tests
-        run: julia --project -e 'using Pkg; Pkg.test()'
+        run: julia -e 'using Pkg; Pkg.test()'
       - name: Smoke (deterministic and stochastic)
         run: |
-          julia --project scripts/smoke.jl
+          julia scripts/smoke.jl
 
