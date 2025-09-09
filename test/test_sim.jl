@@ -64,6 +64,34 @@ using Statistics
     @test cons ≈ cons2
     @test shocks ≈ shocks2
 
+    # different seeds produce different panels
+    cfg2 = deepcopy(cfg)
+    cfg2[:random] = deepcopy(cfg[:random])
+    cfg2[:random][:seed] = cfg2[:random][:seed] + 1
+    rng_diff = ThesisProject.Determinism.make_rng(1234)
+    out_diff =
+        ThesisProject.simulate_panel(model, method, cfg2; N = N, T = T, rng = rng_diff)
+    shocks_diff = getkey(out_diff, :shocks)
+    seeds_diff = getkey(out_diff, :seeds)
+    @test seeds != seeds_diff
+    @test !(shocks ≈ shocks_diff)
+
+    # missing cfg.random.seed should still be reproducible with identical RNGs
+    cfg_noseed = deepcopy(cfg)
+    cfg_noseed[:random] = Dict(:seed => nothing)
+    rng_a = ThesisProject.Determinism.make_rng(42)
+    rng_b = ThesisProject.Determinism.make_rng(42)
+    out_a =
+        ThesisProject.simulate_panel(model, method, cfg_noseed; N = N, T = T, rng = rng_a)
+    out_b =
+        ThesisProject.simulate_panel(model, method, cfg_noseed; N = N, T = T, rng = rng_b)
+    shocks_a = getkey(out_a, :shocks)
+    shocks_b = getkey(out_b, :shocks)
+    seeds_a = getkey(out_a, :seeds)
+    seeds_b = getkey(out_b, :seeds)
+    @test seeds_a == seeds_b
+    @test shocks_a ≈ shocks_b
+
     # diagnostics basic checks (allow missing keys but prefer presence)
     @test isa(diag, Dict) || isa(diag, NamedTuple)
     if (:master_seed in keys(diag)) || (:master_seed in collect(fieldnames(typeof(diag))))

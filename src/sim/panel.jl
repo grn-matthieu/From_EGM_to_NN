@@ -4,7 +4,6 @@ export simulate_panel
 
 using Random
 using Statistics
-using Logging
 using ..Determinism: make_rng, derive_seed, canonicalize_cfg, hash_hex
 
 using ..API:
@@ -15,8 +14,7 @@ using ..API:
     simulate_panel(model, method, cfg; N=1000, T=200, rng::AbstractRNG))
 
 Simulates a panel of N agents for T periods using a solved policy from `method` on `model`.
-Agents draw from the Markov chain implied by the model's shocks. The master seed is derived from the rng optionnaly provided.
-Passing a pre-seeded RNG ensures reproducibility.
+Agents draw from the Markov chain implied by the model's shocks. The master seed is taken from `cfg[:random][:seed]` if available, otherwise it is deterministically derived from the canonicalized cfg.
 
 Returns a NamedTuple with fields: assets::Matrix, consumption::Matrix, shocks::Matrix, seeds::Vector and diagnostics::Vector.
 """
@@ -61,11 +59,12 @@ function simulate_panel(
     # Master RNG/seed: prefer cfg.random.seed; else derive from canonical cfg
     # The rule is to derive individual agent seeds from the master seed
     # so that the same cfg always leads to the same panel sim
-    master_seed = get(cfg, :random, Dict())[:seed]  # can be missing
-    # If missing, use a random int
+    master_seed = get(get(cfg, :random, Dict()), :seed, nothing)
     if master_seed === nothing
-        master_seed = rand(rng, UInt)
-        @warn "no cfg[:random][:seed] provided; using random seed"
+        hex = hash_hex(canonicalize_cfg(cfg); n = 16)
+        master_seed = parse(UInt64, hex; base = 16)
+    else
+        master_seed = UInt64(master_seed)
     end
     master_rng = make_rng(master_seed)
 
