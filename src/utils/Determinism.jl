@@ -60,11 +60,11 @@ end
 
 Derives a 64-bit integer seed from a master and key.
 """
-function derive_seed(master, key)::Int
+function derive_seed(master, key)::UInt64
     hex = bytes2hex(sha256(string(master, ":", key)))
-    nhex = 2*sizeof(Int)                               # 16 on 64-bit, 8 on 32-bit
-    u = parse(Base.unsigned(Int), hex[1:nhex]; base = 16)
-    return Int(u)
+    nhex = 2*sizeof(UInt)                               # 16 on 64-bit, 8 on 32-bit
+    u = parse(UInt, hex[1:nhex]; base = 16)
+    return u
 end
 
 end # module

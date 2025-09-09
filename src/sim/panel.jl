@@ -61,8 +61,12 @@ function simulate_panel(
     # Master RNG/seed: prefer cfg.random.seed; else derive from canonical cfg
     # The rule is to derive individual agent seeds from the master seed
     # so that the same cfg always leads to the same panel sim
-    cfg_id = hash_hex(canonicalize_cfg(cfg))
-    master_seed = derive_seed(Int(rand(rng, UInt)), cfg_id)
+    master_seed = get(cfg, :random, Dict())[:seed]  # can be missing
+    # If missing, use a random int
+    if master_seed === nothing
+        master_seed = rand(rng, UInt)
+        @warn "no cfg[:random][:seed] provided; using random seed"
+    end
     master_rng = make_rng(master_seed)
 
     # Deterministic model: document shocks as zeros in the output
@@ -76,7 +80,7 @@ function simulate_panel(
     @inline function sample_row(Π::AbstractMatrix{<:Real}, i::Int, rng)
         u = rand(rng)
         s = 0.0
-        @inbounds for j = 1:axes(Π, 2)
+        @inbounds for j in axes(Π, 2)
             s += Π[i, j]
             if u <= s
                 return j
@@ -106,8 +110,8 @@ function simulate_panel(
     end
 
     @inbounds for n in axes(assets, 1)
-        # independent rng per agent derived from the master seed
-        agent_seed = derive_seed(master_seed, n)
+        # independent rng per agent derived from the master rng
+        agent_seed = derive_seed(master_rng, n)
         seeds[n] = UInt64(agent_seed % UInt64)
         arng = make_rng(agent_seed)
 

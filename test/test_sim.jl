@@ -1,4 +1,4 @@
-using Random, Statistics
+using Statistics
 
 @testset "SimPanel smoke" begin
     cfg_path = joinpath(@__DIR__, "..", "config", "smoke_config", "smoke_config_stochastic.yaml")
@@ -17,8 +17,8 @@ using Random, Statistics
     N = 12
     T = 6
 
-    rng1 = MersenneTwister(1234)
-    rng2 = MersenneTwister(1234)
+    rng1 = ThesisProject.Determinism.make_rng(1234)
+    rng2 = ThesisProject.Determinism.make_rng(1234)
 
     out1 = nothing # We try two identical RNGs to test reproducibility
     out2 = nothing
