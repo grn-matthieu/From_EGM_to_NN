@@ -12,12 +12,13 @@ using ..API:
 
 
 """
-    simulate_panel(model, method, cfg; N=1000, T=200, rng=Random.default_rng())
+    simulate_panel(model, method, cfg; N=1000, T=200, rng::AbstractRNG))
 
 Simulates a panel of N agents for T periods using a solved policy from `method` on `model`.
-Agents draw from the Markov chain implied by the model's shocks.
+Agents draw from the Markov chain implied by the model's shocks. The master seed is derived from the rng optionnaly provided.
+Passing a pre-seeded RNG ensures reproducibility.
 
-Returns a NamedTuple with fields: assets::Matrix, consumption::Matrix, shocks::Matrix, seeds::Vector.
+Returns a NamedTuple with fields: assets::Matrix, consumption::Matrix, shocks::Matrix, seeds::Vector and diagnostics::Vector.
 """
 function simulate_panel(
     model::AbstractModel,
@@ -25,7 +26,7 @@ function simulate_panel(
     cfg::AbstractDict;
     N::Int = 1_000,
     T::Int = 200,
-    rng = Random.default_rng(),
+    rng::AbstractRNG,
 )
     # Solve once and for all to get the optimal policy fun and grids
     sol = solve(model, method, cfg)
@@ -60,12 +61,8 @@ function simulate_panel(
     # Master RNG/seed: prefer cfg.random.seed; else derive from canonical cfg
     # The rule is to derive individual agent seeds from the master seed
     # so that the same cfg always leads to the same panel sim
-    random_cfg = get(cfg, :random, Dict{Symbol,Any}())
-    master_seed = get(random_cfg, :seed, nothing)
-    if master_seed === nothing
-        cfg_id = hash_hex(canonicalize_cfg(cfg))
-        master_seed = derive_seed(0, cfg_id)
-    end
+    cfg_id = hash_hex(canonicalize_cfg(cfg))
+    master_seed = derive_seed(Int(rand(rng, UInt)), cfg_id)
     master_rng = make_rng(master_seed)
 
     # Deterministic model: document shocks as zeros in the output
