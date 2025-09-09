@@ -10,7 +10,7 @@ export make_rng, canonicalize_cfg, hash_hex, derive_seed
 """
     make_rng(seed::Integer)
 
-Creates a StableRNGs.LehmerRNG with the given seed.
+Creates a StableRNGs with the given seed (integer).
 """
 make_rng(seed::Integer) = StableRNG(seed)
 
@@ -58,7 +58,7 @@ end
 """
     derive_seed(master, key)::Int
 
-Derives a 64-bit integer seed from a master and key.
+Derives a 64-bit integer seed from a master rng and key.
 """
 function derive_seed(master, key)::UInt64
     hex = bytes2hex(sha256(string(master, ":", key)))
