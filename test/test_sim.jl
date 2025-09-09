@@ -1,7 +1,8 @@
 using Statistics
 
 @testset "SimPanel smoke" begin
-    cfg_path = joinpath(@__DIR__, "..", "config", "smoke_config", "smoke_config_stochastic.yaml")
+    cfg_path =
+        joinpath(@__DIR__, "..", "config", "smoke_config", "smoke_config_stochastic.yaml")
     @test isfile(cfg_path) || begin
         @warn("Config not found; skipping SimPanel tests", path = cfg_path)
         @test true
