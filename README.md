@@ -1,5 +1,5 @@
 # From_EGM_to_NN
-**Master’s Thesis – Master in Economics, IP Paris**  
+**Master’s Thesis – Master in Economics, IP Paris**
 Author: *Matthieu Grenier*
 
 Supervisor : *Pablo Winant*
@@ -8,7 +8,7 @@ Supervisor : *Pablo Winant*
 
 ## Overview
 
-This repository contains the code, notebooks, and results for my Master’s thesis in **computational economics**.  
+This repository contains the code, notebooks, and results for my Master’s thesis in **computational economics**.
 The project investigates how **deep learning** methods can be useful for economists compared to traditional **perturbation** and **projection** methods.
 
 This thesis is inspired by **Maliar et al. (2021)**. The notebooks in the repository replicate and enhance their approach. We select throughout the notebooks problems with a kink in the policy function. This attribute makes it a good stress test for numerical solution methods.
@@ -92,5 +92,21 @@ The test suite can run Aqua.jl (package hygiene) and JET.jl (type stability/erro
   - `julia --project -e 'using Pkg; Pkg.add(["Aqua", "JET"])'`
 
 - Run tests as usual: `Pkg.test()`
+
+---
+
+## Formatting
+
+This repository uses [pre-commit](https://pre-commit.com/) with JuliaFormatter to keep `.jl` files tidy.
+
+Install and activate the hook:
+
+- `pip install pre-commit`
+- `julia --project -e 'using Pkg; Pkg.add("JuliaFormatter")'`
+- `pre-commit install`
+
+Run formatting manually with:
+
+- `pre-commit run --files $(git ls-files '*.jl')`
 
 ---

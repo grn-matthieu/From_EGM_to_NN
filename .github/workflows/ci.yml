@@ -13,18 +13,19 @@ jobs:
         julia-version: ['1.11.6']
     steps:
       - uses: actions/checkout@v4
-
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - run: pip install pre-commit
+      - name: Run pre-commit
+        run: pre-commit run --show-diff-on-failure --files $(git ls-files '*.jl')
       - uses: julia-actions/setup-julia@v2
         with:
           version: ${{ matrix.julia-version }}
-
-      - uses: julia-actions/cache@v2
-
       - name: Instantiate
         run: julia --project=. -e 'using Pkg; Pkg.instantiate()'
-
       - name: Run tests
         run: julia --project=. -e 'using Pkg; Pkg.test()'
-
       - name: Smoke (deterministic and stochastic)
-        run: julia --project=. scripts/smoke.jl
+        run: |
+          julia --project=. scripts/smoke.jl
