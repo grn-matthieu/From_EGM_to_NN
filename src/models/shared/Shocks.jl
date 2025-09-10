@@ -137,4 +137,3 @@ function discretize(shocks::AbstractDict)::ShockOutput
 end
 
 end # module
-

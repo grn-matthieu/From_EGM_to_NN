@@ -4,7 +4,7 @@ repos:
       - id: julia-formatter-local
         name: JuliaFormatter (project)
         language: system
-        entry: julia --project=. -e "using JuliaFormatter; for f in ARGS; endswith(f, \".jl\") && JuliaFormatter.format(f; overwrite=true); end"
+        entry: julia --startup-file=no --project=. -e "using JuliaFormatter; for f in ARGS; endswith(f, \".jl\") && JuliaFormatter.format(f; overwrite=true); end"
         files: \.jl$
         pass_filenames: true
         require_serial: true

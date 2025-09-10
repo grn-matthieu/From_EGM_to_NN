@@ -22,8 +22,8 @@ jobs:
           version: ${{ matrix.julia-version }}
       - name: Instantiate
         run: julia --project=. -e 'using Pkg; Pkg.instantiate()'
-      - name: Run pre-commit
-        run: pre-commit run --show-diff-on-failure --files $(git ls-files "*.jl")
+      - name: Run pre-commit (all files)
+        run: pre-commit run --all-files --show-diff-on-failure
       - name: Run tests
         run: julia --project=. -e 'using Pkg; Pkg.test()'
       - name: Smoke (deterministic and stochastic)

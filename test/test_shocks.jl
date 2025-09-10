@@ -6,7 +6,6 @@ using ThesisProject
     out = ThesisProject.Shocks.discretize(cfg)
     @test out isa ThesisProject.Shocks.ShockOutput
 end
-
 @testset "Shocks validation failure" begin
     cfg = Dict(:ρ_shock => 0.9, :σ_shock => 0.1, :Nz => 3, :validate => true)
 
