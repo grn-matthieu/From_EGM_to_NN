@@ -13,14 +13,18 @@ jobs:
         julia-version: ['1.11.6']
     steps:
       - uses: actions/checkout@v4
+
       - uses: julia-actions/setup-julia@v2
         with:
           version: ${{ matrix.julia-version }}
-      - name: Instantiate
-        run: julia -- project -e 'using Pkg; Pkg.instantiate()'
-      - name: Run tests
-        run: julia --project -e 'using Pkg; Pkg.test()'
-      - name: Smoke (deterministic and stochastic)
-        run: |
-          julia scripts/smoke.jl
 
+      - uses: julia-actions/cache@v2
+
+      - name: Instantiate
+        run: julia --project=. -e 'using Pkg; Pkg.instantiate()'
+
+      - name: Run tests
+        run: julia --project=. -e 'using Pkg; Pkg.test()'
+
+      - name: Smoke (deterministic and stochastic)
+        run: julia --project=. scripts/smoke.jl
