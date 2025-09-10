@@ -1,13 +1,15 @@
 repos:
-  - repo: https://github.com/domluna/JuliaFormatter.jl
-    rev: v2.1.6
+  - repo: local
     hooks:
-      - id: julia-formatter
+      - id: julia-formatter-local
+        name: JuliaFormatter (project)
+        language: system
+        entry: julia --project=. -e "using JuliaFormatter; for f in ARGS; endswith(f, \".jl\") && JuliaFormatter.format(f; overwrite=true); end"
         files: \.jl$
-        env:
-          JULIA_PROJECT: .
+        pass_filenames: true
+        require_serial: true
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.5.0
+    rev: v6.0.0
     hooks:
       - id: trailing-whitespace
       - id: mixed-line-ending
