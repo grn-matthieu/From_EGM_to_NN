@@ -22,11 +22,7 @@ jobs:
           version: ${{ matrix.julia-version }}
       - name: Instantiate
         run: julia --project=. -e 'using Pkg; Pkg.instantiate()'
-      - name: Verify JuliaFormatter is available
-        run: julia --project=. -e 'using JuliaFormatter; println("JuliaFormatter OK")'
       - name: Run pre-commit
-        env:
-          JULIA_PROJECT: .
         run: pre-commit run --show-diff-on-failure --files $(git ls-files "*.jl")
       - name: Run tests
         run: julia --project=. -e 'using Pkg; Pkg.test()'
