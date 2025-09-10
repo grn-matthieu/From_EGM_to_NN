@@ -19,7 +19,7 @@ jobs:
       - name: Instantiate
         run: julia -e 'using Pkg; Pkg.instantiate()'
       - name: Run tests
-        run: julia -e 'using Pkg; Pkg.test()'
+        run: julia -e 'using Pkg; Pkg.test("ThesisProject")'
       - name: Smoke (deterministic and stochastic)
         run: |
           julia scripts/smoke.jl
