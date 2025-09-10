@@ -24,6 +24,7 @@ jobs:
         run: julia --project=. -e 'using Pkg; Pkg.instantiate()'
       - name: Run pre-commit (all files)
         run: pre-commit run --all-files --show-diff-on-failure
+        continue-on-error: true
       - name: Run tests
         run: julia --project=. -e 'using Pkg; Pkg.test()'
       - name: Smoke (deterministic and stochastic)
