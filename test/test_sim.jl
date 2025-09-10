@@ -28,7 +28,7 @@ using Statistics
         out1 = ThesisProject.simulate_panel(model, method, cfg; N = N, T = T, rng = rng1)
         out2 = ThesisProject.simulate_panel(model, method, cfg; N = N, T = T, rng = rng2)
     catch err
-        @warn "simulate_panel threw an error" err=(err, catch_backtrace())
+        @warn "simulate_panel threw an error" err = (err, catch_backtrace())
         @test false
         return
     end

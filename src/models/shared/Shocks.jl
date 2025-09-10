@@ -33,12 +33,12 @@ function tauchen(ρ::Real, σ_ε::Real, Nz::Int; m::Real = 3.0)
         μ = ρ * zgrid[j]
         for k = 1:Nz
             if k == 1
-                Π[j, k] = Φ((zgrid[1] - μ + step/2)/σ_ε)
+                Π[j, k] = Φ((zgrid[1] - μ + step / 2) / σ_ε)
             elseif k == Nz
-                Π[j, k] = 1 - Φ((zgrid[Nz] - μ - step/2)/σ_ε)
+                Π[j, k] = 1 - Φ((zgrid[Nz] - μ - step / 2) / σ_ε)
             else
-                up = (zgrid[k] - μ + step/2) / σ_ε
-                lo = (zgrid[k] - μ - step/2) / σ_ε
+                up = (zgrid[k] - μ + step / 2) / σ_ε
+                lo = (zgrid[k] - μ - step / 2) / σ_ε
                 Π[j, k] = Φ(up) - Φ(lo)
             end
         end
@@ -55,13 +55,13 @@ function rouwenhorst(ρ::Real, σ_ε::Real, Nz::Int)
         Πold = Π
         Π = zeros(n, n)
         Π[1:(end-1), 1:(end-1)] .+= p .* Πold
-        Π[1:(end-1), 2:end] .+= (1-p) .* Πold
-        Π[2:end, 1:(end-1)] .+= (1-q) .* Πold
+        Π[1:(end-1), 2:end] .+= (1 - p) .* Πold
+        Π[2:end, 1:(end-1)] .+= (1 - q) .* Πold
         Π[2:end, 2:end] .+= q .* Πold
         Π[2:(end-1), :] .*= 0.5
     end
     σ_y = σ_ε / sqrt(1 - ρ^2 + eps())
-    zgrid = collect(range(-σ_y*sqrt(Nz-1), σ_y*sqrt(Nz-1); length = Nz))
+    zgrid = collect(range(-σ_y * sqrt(Nz - 1), σ_y * sqrt(Nz - 1); length = Nz))
     return zgrid, Π
 end
 

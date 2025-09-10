@@ -50,7 +50,7 @@
             # Monotonicity check
             @test all(diff(sol.policy[:a].value) .>= -1e-8)
         catch err
-            @warn "solve failed" err=(err, catch_backtrace())
+            @warn "solve failed" err = (err, catch_backtrace())
             @test false
         end
     end

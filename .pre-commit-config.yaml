@@ -4,12 +4,14 @@ repos:
       - id: julia-formatter-local
         name: JuliaFormatter (project)
         language: system
-        entry: julia --startup-file=no --project=. -e "using JuliaFormatter; for f in ARGS; endswith(f, \".jl\") && JuliaFormatter.format(f; overwrite=true); end"
+        entry: julia --startup-file=no --project=.formatter -e "using JuliaFormatter; for f in ARGS; endswith(f, \".jl\") && JuliaFormatter.format(f; overwrite=true); end"
         files: \.jl$
         pass_filenames: true
         require_serial: true
+
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
       - id: trailing-whitespace
       - id: mixed-line-ending
+        args: [--fix=lf]  # normalize to LF

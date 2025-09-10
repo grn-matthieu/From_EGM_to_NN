@@ -155,7 +155,7 @@ function plot_euler_errors(sol::ThesisProject.API.Solution; by::Symbol = :auto)
                 S = try
                     getproperty(sol.model, :shocks)
                 catch
-                    ;
+
                     nothing
                 end
                 if S !== nothing

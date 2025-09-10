@@ -97,9 +97,9 @@ function simulate_panel(
         else
             j = searchsortedfirst(x, ξ)
             j = clamp(j, 2, n)
-            x0 = x[j-1];
+            x0 = x[j-1]
             x1 = x[j]
-            y0 = y[j-1];
+            y0 = y[j-1]
             y1 = y[j]
             t = (ξ - x0) / (x1 - x0)
             return (1 - t) * y0 + t * y1

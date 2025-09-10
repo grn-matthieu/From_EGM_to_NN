@@ -42,9 +42,9 @@ function build_cs_model(cfg::AbstractDict)
         u_prime = (c -> 1.0 ./ c)
         u_prime_inv = (up -> 1.0 ./ up)
     else
-        u = (c -> (c .^ (1-σ) .- 1.0) ./ (1.0 - σ))
+        u = (c -> (c .^ (1 - σ) .- 1.0) ./ (1.0 - σ))
         u_prime = (c -> c .^ (-σ))
-        u_prime_inv = (up -> up .^ (-1.0/σ))
+        u_prime_inv = (up -> up .^ (-1.0 / σ))
     end
     utility = (; u, u_prime, u_prime_inv, σ)
 

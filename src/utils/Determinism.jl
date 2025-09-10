@@ -26,7 +26,7 @@ function canonicalize_cfg(cfg)
     function canonical(obj)
         if obj isa AbstractDict
             # Sort keys as symbols
-            pairs = sort(collect(obj); by = x->Symbol(x[1]))
+            pairs = sort(collect(obj); by = x -> Symbol(x[1]))
             Dict(Symbol(k) => canonical(v) for (k, v) in pairs)
         elseif obj isa AbstractArray
             map(canonical, obj)
@@ -62,7 +62,7 @@ Derives a 64-bit integer seed from a master rng and key.
 """
 function derive_seed(master, key)::UInt64
     hex = bytes2hex(sha256(string(master, ":", key)))
-    nhex = 2*sizeof(UInt)                               # 16 on 64-bit, 8 on 32-bit
+    nhex = 2 * sizeof(UInt)                               # 16 on 64-bit, 8 on 32-bit
     u = parse(UInt, hex[1:nhex]; base = 16)
     return u
 end

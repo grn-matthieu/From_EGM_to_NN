@@ -58,9 +58,9 @@ end
 
 # Parse simple CLI flags --Na=..., --Nz=..., --tol=..., --tol_pol=...
 function parse_cli(args)
-    Na = nothing;
-    Nz = nothing;
-    tol = nothing;
+    Na = nothing
+    Nz = nothing
+    tol = nothing
     tol_pol = nothing
     for arg in args
         if startswith(arg, "--Na=")

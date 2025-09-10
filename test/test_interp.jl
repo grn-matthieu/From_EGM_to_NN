@@ -9,5 +9,5 @@ using ThesisProject.CommonInterp: pchip_slopes
 
     y2 = [1.0, 1.5, 2.5]
     d2, _, _ = pchip_slopes(x, y2)
-    @test d2[2] ≈ 2/3
+    @test d2[2] ≈ 2 / 3
 end

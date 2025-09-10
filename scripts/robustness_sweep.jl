@@ -36,16 +36,16 @@ function parse_list(envname::AbstractString, default::Vector{Float64})
     try
         return [parse(Float64, strip(x)) for x in split(s, ",") if !isempty(strip(x))]
     catch err
-        @warn "Failed to parse $envname; using defaults" s error=err
+        @warn "Failed to parse $envname; using defaults" s error = err
         return default
     end
 end
 
 # Parse simple CLI flags --Na=..., --Nz=..., --tol=..., --tol_pol=...
 function parse_cli(args)
-    Na = nothing;
-    Nz = nothing;
-    tol = nothing;
+    Na = nothing
+    Nz = nothing
+    tol = nothing
     tol_pol = nothing
     for arg in args
         if startswith(arg, "--Na=")
@@ -66,7 +66,7 @@ function safe_solve(cfg; stochastic::Bool, opts)
     if haskey(cfg, :shocks)
         cfg[:shocks][:active] = stochastic
     elseif stochastic || opts.Nz !== nothing
-        cfg[:shocks] = Dict{Symbol,Any}(:active=>stochastic)
+        cfg[:shocks] = Dict{Symbol,Any}(:active => stochastic)
     end
 
     if opts.Nz !== nothing && haskey(cfg, :shocks)

@@ -35,9 +35,9 @@ function interp_linear!(
         else
             j = searchsortedfirst(x, ξ)
             j = clamp(j, 2, N)  # guard
-            x0 = x[j-1];
+            x0 = x[j-1]
             x1 = x[j]
-            y0 = y[j-1];
+            y0 = y[j-1]
             y1 = y[j]
             t = (ξ - x0) / (x1 - x0)
             out[k] = (1 - t) * y0 + t * y1
@@ -59,7 +59,7 @@ function pchip_slopes(x::AbstractVector{<:Real}, y::AbstractVector{<:Real})
 
     n = length(x)
     d = similar(y, Float64)
-    Δ = similar(y, Float64);
+    Δ = similar(y, Float64)
     h = similar(y, Float64)
     @inbounds for i = 1:(n-1)
         h[i] = x[i+1] - x[i]
@@ -74,7 +74,7 @@ function pchip_slopes(x::AbstractVector{<:Real}, y::AbstractVector{<:Real})
         else
             w1 = 2h[i] + h[i-1]
             w2 = h[i] + 2h[i-1]
-            d[i] = (w1 + w2) / (w1/Δ[i-1] + w2/Δ[i])
+            d[i] = (w1 + w2) / (w1 / Δ[i-1] + w2 / Δ[i])
         end
     end
     return d, h, Δ
@@ -110,16 +110,16 @@ function interp_pchip!(
             continue
         end
         j = searchsortedfirst(x, ξ)
-        i = j-1
+        i = j - 1
         hi = h[i]
         t = (ξ - x[i]) / hi
-        t2 = t*t
-        t3 = t2*t
+        t2 = t * t
+        t3 = t2 * t
         h00 = 2t3 - 3t2 + 1
         h10 = t3 - 2t2 + t
         h01 = -2t3 + 3t2
         h11 = t3 - t2
-        out[k] = h00*y[i] + h10*hi*d[i] + h01*y[i+1] + h11*hi*d[i+1]
+        out[k] = h00 * y[i] + h10 * hi * d[i] + h01 * y[i+1] + h11 * hi * d[i+1]
     end
     return out
 end
