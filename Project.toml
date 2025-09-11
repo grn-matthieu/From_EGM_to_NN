@@ -6,6 +6,7 @@ version = "1.0.0"
 [deps]
 JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
 JuliaFormatter = "98e50ef6-434e-11e9-1051-2b60c6c9e899"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Logging = "56ddb016-857b-54e1-b83d-db4d58db5568"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 SHA = "ea8e919c-243c-51af-8825-aaa63cd721ce"
@@ -23,6 +24,7 @@ ThesisProjectPlotsExt = ["Plots"]
 [compat]
 JSON3 = "1.14.3"
 JuliaFormatter = "2.1.6"
+LinearAlgebra = "1.11.0"
 Logging = "1.11.0"
 Plots = "1"
 Random = "1.11.0"
