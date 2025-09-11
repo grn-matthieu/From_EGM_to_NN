@@ -4,6 +4,7 @@ using Test
     @testset "Aqua" begin
         try
             # Run a broad suite of hygiene checks
+            @eval using Aqua
             Aqua.test_all(ThesisProject)
             @test true
         catch err
@@ -15,6 +16,7 @@ using Test
     @testset "JET" begin
         try
             # Type stability and errors analysis
+            @eval using JET
             JET.test_package(ThesisProject)
             @test true
         catch err

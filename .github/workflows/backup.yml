@@ -1,0 +1,26 @@
+name: Daily backup
+
+on:
+  schedule:
+    - cron: "0 0 * * *"
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Compress repository
+        run: |
+          tar -czf repo-backup.tar.gz .
+
+      - name: Upload backup to draft release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: backup-${{ github.run_id }}
+          name: "Scheduled backup ${{ github.run_id }}"
+          draft: true
+          files: repo-backup.tar.gz

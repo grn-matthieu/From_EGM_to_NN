@@ -19,6 +19,8 @@ jobs:
         with:
           version: ${{ matrix.julia-version }}
 
+      - uses: julia-actions/cache@v2
+
       - name: Instantiate formatter env
         run: julia --project=.formatter -e 'using Pkg; Pkg.instantiate()'
 
@@ -33,36 +35,33 @@ jobs:
 
       - name: Run pre-commit (all files)
         run: pre-commit run --all-files --show-diff-on-failure
-        # remove continue-on-error once you’ve committed all formatter changes
-
-      - name: Run tests
-        run: julia --project=. -e 'using Pkg; Pkg.test()'
 
       - name: Run tests with coverage
-        run: julia --project=. -e 'using Pkg; Pkg.test(coverage=true)'
+        run: julia --project=. --code-coverage=user -e 'using Pkg; Pkg.test()'
+
       - name: Generate coverage report
         uses: julia-actions/julia-processcoverage@v1
 
       - name: Check coverage
         run: |
           julia --project=. -e '
-            using Pkg
-            Pkg.add("Coverage")
-            using Coverage
+            using Coverage: LCOV, get_summary
             cov = LCOV.readfile("lcov.info")
             covered, total = get_summary(cov)
             pct = covered / total * 100
             println("Coverage: ", pct)
             if pct < 70
-                error("Coverage below 70%")
+              error("Coverage below 70%")
             end
           '
+
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v4
         with:
           files: lcov.info
           fail_ci_if_error: true
-          token : ${{ secrets.CODECOV_TOKEN }}
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Smoke (deterministic and stochastic)
         run: julia --project=. scripts/smoke.jl
