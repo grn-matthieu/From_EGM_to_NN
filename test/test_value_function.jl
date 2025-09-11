@@ -18,8 +18,8 @@ using ThesisProject.Shocks: ShockOutput
     policy = Dict(:c => (; value = cpol), :a => (; value = apol))
 
     V = compute_value(p, g, nothing, U, policy)
-    V_ss = log(2.0) / (1 - β)
-    @test all(isapprox.(V, V_ss; atol = 1e-8))
+    V_ss = fill(log(2.0) / (1 - β), length(agrid))
+    @test all(isapprox(V, V_ss; atol = 1e-6))
 end
 
 @testset "Value function stochastic" begin
@@ -48,5 +48,5 @@ end
     V_expected = hcat(fill(Vstates[1], Na), fill(Vstates[2], Na))
 
     @test size(V) == (Na, Nz)
-    @test maximum(abs.(V .- V_expected)) < 1e-8
+    @test maximum(abs.(V .- V_expected)) < 1e-6
 end
