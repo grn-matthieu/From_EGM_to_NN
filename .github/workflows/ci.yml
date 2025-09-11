@@ -44,7 +44,10 @@ jobs:
 
       - name: Check coverage
         run: |
-          julia --project=. -e '
+          julia -e '
+            using Pkg
+            Pkg.activate(temp=true)
+            Pkg.add("Coverage")
             using Coverage: LCOV, get_summary
             cov = LCOV.readfile("lcov.info")
             covered, total = get_summary(cov)
