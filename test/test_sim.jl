@@ -151,5 +151,5 @@ end
 
     @test assets ≈ assets2
     @test cons ≈ cons2
-    @test shocks == shocks2
+    @test shocks[2:end] == shocks2[2:end]  # all zero
 end

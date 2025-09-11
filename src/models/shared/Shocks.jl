@@ -1,6 +1,7 @@
 module Shocks
 
 using SpecialFunctions: erf
+using LinearAlgebra: norm
 
 export discretize, ShockOutput
 
@@ -82,10 +83,17 @@ end
 function _validate_invariant(
     π::AbstractVector{<:Real},
     Π::AbstractMatrix{<:Real};
-    tol = 1e-10,
+    tol::Real = 1e-10,
 )
-    if !(isapprox(π, vec(π' * Π); atol = tol))
-        max_dev = maximum(abs.(π .- vec(π' * Π)))
+    # promote to a concrete float type
+    T = promote_type(float(eltype(π)), float(eltype(Π)))
+    πf = T.(π)
+    Πf = T.(Π)
+    v = vec(πf' * Πf)
+
+    # rtol = 0 and ∞-norm avoid generic norm paths
+    if !isapprox(πf, v; atol = tol, rtol = zero(T), norm = x -> norm(x, Inf))
+        max_dev = maximum(abs.(πf .- v))
         error(
             "Invariant distribution check failed: maximum deviation $max_dev exceeds tolerance $tol",
         )

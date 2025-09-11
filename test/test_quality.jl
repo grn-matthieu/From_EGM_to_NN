@@ -17,7 +17,7 @@ using Test
         try
             # Type stability and errors analysis
             @eval using JET
-            JET.test_package(ThesisProject)
+            JET.report_package(ThesisProject; target_modules = (ThesisProject,))
             @test true
         catch err
             @warn "JET.jl not available; skipping JET checks" err

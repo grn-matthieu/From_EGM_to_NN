@@ -1,6 +1,6 @@
 module EGMResiduals
 
-export euler_resid_det, euler_resid_stoch
+export euler_resid_det, euler_resid_stoch, euler_resid_det_2
 
 # --- Functions ---
 
@@ -22,6 +22,59 @@ function euler_resid_det(model_params, c::Vector{Float64}, c_next::Vector{Float6
 
     @. resid = abs(1 - β * R * (c_clamped / c_next_clamped)^σ)
     return resid
+end
+
+"""
+    euler_resid_det(model_params, a_grid, c)
+
+Compute absolute Euler equation residuals for the deterministic model on an
+asset grid `a_grid` given a consumption policy `c`. The policy is defined on the
+same grid and residuals are obtained by linearly interpolating the policy when
+evaluating future consumption. Output is a vector of residuals of length
+`length(a_grid)`.
+"""
+function euler_resid_det_2(
+    model_params,
+    a_grid::AbstractVector{<:Real},
+    c::AbstractVector{<:Real},
+)
+    Na = length(a_grid)
+    @assert length(c) == Na
+
+    β = model_params.β
+    σ = model_params.σ
+    R = 1 + model_params.r
+    y = getfield(model_params, :y)
+
+    res = similar(c, Float64)
+
+    # linear interpolation helper over a_grid
+    lin1(x::AbstractVector{<:Real}, y::AbstractVector{<:Real}, xq::Real) = begin
+        n = length(x)
+        if xq <= x[1]
+            return y[1]
+        elseif xq >= x[end]
+            return y[end]
+        else
+            j = searchsortedfirst(x, xq)
+            j = clamp(j, 2, n)
+            x0 = x[j-1]
+            x1 = x[j]
+            y0 = y[j-1]
+            y1 = y[j]
+            t = (xq - x0) / (x1 - x0)
+            return (1 - t) * y0 + t * y1
+        end
+    end
+
+    @inbounds for i = 1:Na
+        c_i = max(c[i], 1e-12)
+        ap = R * a_grid[i] + y - c_i
+        cp = lin1(a_grid, c, ap)
+        cp = max(cp, 1e-12)
+        res[i] = abs(1.0 - β * R * (c_i / cp)^σ)
+    end
+    return res
 end
 
 

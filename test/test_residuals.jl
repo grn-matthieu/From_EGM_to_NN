@@ -1,5 +1,5 @@
 using Test
-using ThesisProject.EGMResiduals: euler_resid_det, euler_resid_stoch
+using ThesisProject.EGMResiduals: euler_resid_det, euler_resid_stoch, euler_resid_det_2
 
 @testset "euler_resid_det" begin
     params = (; β = 0.96, σ = 2.0, r = 0.04)
@@ -16,6 +16,32 @@ using ThesisProject.EGMResiduals: euler_resid_det, euler_resid_stoch
     res0 = euler_resid_det(params, c0, c_next0)
     expected0 = abs(1 - params.β * R * ((1e-12) / c_next0[1])^params.σ)
     @test res0[1] ≈ expected0
+end
+
+@testset "euler_resid_det_interp" begin
+    params = (; β = 0.96, σ = 2.0, r = 0.04, y = 1.0)
+    a_grid = [0.0, 1.0]
+    c = [0.5, 0.6]
+    res = euler_resid_det_2(params, a_grid, c)
+
+    R = 1 + params.r
+    β = params.β
+    σ = params.σ
+    expected = similar(c, Float64)
+    for i in eachindex(c)
+        c_i = max(c[i], 1e-12)
+        ap = R * a_grid[i] + params.y - c_i
+        cp =
+            ap <= a_grid[1] ? c[1] :
+            ap >= a_grid[end] ? c[end] :
+            begin
+                t = (ap - a_grid[1]) / (a_grid[end] - a_grid[1])
+                (1 - t) * c[1] + t * c[end]
+            end
+        cp = max(cp, 1e-12)
+        expected[i] = abs(1 - β * R * (c_i / cp)^σ)
+    end
+    @test res ≈ expected
 end
 
 @testset "euler_resid_stoch" begin

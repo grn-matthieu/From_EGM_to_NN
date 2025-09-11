@@ -13,57 +13,29 @@ evaluation:
 
 Output: `Vector{Float64}` of length `length(sol.agrid) : policy fun`.
 """
-function compute_value(p, g, S, U, policy; tol = 1e-8, maxit = 1_000)
-    # S is not used fn, to be implemented when dealing with stoch models
-    V = zeros(g[:a].N)
-
-    # Reusable interpolation workspace to avoid allocations
-    tmp = similar(V)
-    for _ = 1:maxit
-        V_new = similar(V)
-        cont = interp_linear!(tmp, g[:a].grid, V, policy[:a].value)
-        V_new = U.u(policy[:c].value) + p.β * cont
-        if maximum(abs.(V_new .- V)) < tol
-            return V_new
-        end
-        V .= V_new
-    end
-    return V
-end
-
-
-"""
-    compute_value_policy(p, g, S, U, policy; tol=1e-8, maxit=1_000)
-
-Stability-robust value evaluation that supports both deterministic (vector) and
-stochastic (matrix over shocks) policies. Prefer this over `compute_value` in solvers.
-"""
 function compute_value_policy(p, g, S, U, policy; tol::Real = 1e-8, maxit::Int = 1_000)
-    agrid = g[:a].grid
-    Na = g[:a].N
+    agrid = g[:a].grid::AbstractVector{<:Real}
+    Na = g[:a].N::Int
 
-    cpol = policy[:c].value
-    apol = policy[:a].value
+    cpol_any = policy[:c].value
+    apol_any = policy[:a].value
 
-    # Determine discount factor β robustly (allow ASCII fallback)
-    βv = begin
-        nms = propertynames(p)
-        if :β in nms
-            getfield(p, :β)
-        elseif :beta in nms
-            getfield(p, :beta)
-        else
-            error("Parameter β (or beta) not found in params")
-        end
-    end
+    βv =
+        hasproperty(p, :β) ? getfield(p, :β) :
+        hasproperty(p, :beta) ? getfield(p, :beta) :
+        throw(ArgumentError("Parameter β/beta not found"))
 
     # Deterministic
-    if cpol isa AbstractVector && apol isa AbstractVector
-        V = zeros(Na)
-        tmp = similar(V)
+    if cpol_any isa AbstractVector{<:Real} && apol_any isa AbstractVector{<:Real}
+        cpol = cpol_any::AbstractVector{<:Real}
+        apol = apol_any::AbstractVector{<:Real}
+
+        V = zeros(Float64, Na)
+        tmp = similar(agrid, Float64)
+
         for _ = 1:maxit
-            cont = interp_linear!(tmp, agrid, V, apol)
-            V_new = U.u(cpol) .+ βv .* cont
+            interp_linear!(tmp, agrid, V, apol)
+            V_new = U.u(cpol) .+ βv .* tmp
             if maximum(abs.(V_new .- V)) < tol
                 return V_new
             end
@@ -73,23 +45,27 @@ function compute_value_policy(p, g, S, U, policy; tol::Real = 1e-8, maxit::Int =
     end
 
     # Stochastic
-    @assert cpol isa AbstractMatrix && apol isa AbstractMatrix "Stochastic value evaluation expects matrix policies"
+    cpol = (cpol_any::AbstractMatrix{<:Real})
+    apol = (apol_any::AbstractMatrix{<:Real})
     Nz = size(cpol, 2)
-    V = zeros(Na, Nz)
-    cont = similar(V)
-    tmp = similar(agrid)
+    V = zeros(Float64, Na, Nz)
+    cont = zeros(Float64, Na, Nz)
+    tmp = similar(agrid, Float64)
 
-    P = S === nothing ? nothing : getfield(S, 2)  # (zgrid, Π, π, diagnostics)
-    @assert P !== nothing "Missing shocks transition matrix for stochastic value evaluation"
+    Π = S === nothing ? nothing : getfield(S, 2)
+    @assert Π !== nothing "Missing shocks transition matrix for stochastic value evaluation"
+    @assert Π isa AbstractMatrix "Π must be a matrix"
+    @assert eltype(Π) <: Real "Π must be numeric"
 
     for _ = 1:maxit
         @inbounds for j = 1:Nz
-            aj = view(apol, :, j)
+            aj = @view apol[:, j]
             @views cont[:, j] .= 0.0
             @inbounds for jp = 1:Nz
-                vcol = view(V, :, jp)
+                vcol = @view V[:, jp]
                 interp_linear!(tmp, agrid, vcol, aj)
-                @. cont[:, j] += P[j, jp] * tmp
+                pjj = Float64(Π[j, jp])       # concrete scalar
+                @. cont[:, j] += pjj * tmp
             end
         end
         V_new = U.u(cpol) .+ βv .* cont
@@ -98,7 +74,5 @@ function compute_value_policy(p, g, S, U, policy; tol::Real = 1e-8, maxit::Int =
         end
         V .= V_new
     end
-    return V
 end
-
 end # module
