@@ -11,22 +11,32 @@ jobs:
     strategy:
       matrix:
         julia-version: ['1.11.6']
+
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
-      - run: pip install --upgrade pip pre-commit
+
       - uses: julia-actions/setup-julia@v2
         with:
           version: ${{ matrix.julia-version }}
-      - name: Instantiate
+
+      - name: Instantiate formatter env
+        run: julia --project=.formatter -e 'using Pkg; Pkg.instantiate()'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - run: pip install --upgrade pip pre-commit
+
+      - name: Instantiate project
         run: julia --project=. -e 'using Pkg; Pkg.instantiate()'
+
       - name: Run pre-commit (all files)
         run: pre-commit run --all-files --show-diff-on-failure
-        continue-on-error: true
+        # remove continue-on-error once you’ve committed all formatter changes
+
       - name: Run tests
         run: julia --project=. -e 'using Pkg; Pkg.test()'
+
       - name: Smoke (deterministic and stochastic)
-        run: |
-          julia --project=. scripts/smoke.jl
+        run: julia --project=. scripts/smoke.jl
