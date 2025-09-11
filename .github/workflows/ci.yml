@@ -62,6 +62,7 @@ jobs:
         with:
           files: lcov.info
           fail_ci_if_error: true
+          token : ${{ secrets.CODECOV_TOKEN }}
 
       - name: Smoke (deterministic and stochastic)
         run: julia --project=. scripts/smoke.jl
