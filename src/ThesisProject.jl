@@ -19,6 +19,7 @@ include("core/model_factory.jl")
 # common solver utilities
 include("solvers/common/interp.jl")
 include("solvers/common/value_fun.jl")
+include("solvers/common/chebyshev.jl")
 
 # egm specific
 include("solvers/egm/residuals.jl")
