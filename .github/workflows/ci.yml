@@ -39,6 +39,19 @@ jobs:
       - name: Run tests with coverage
         run: julia --project=. --code-coverage=user -e 'using Pkg; Pkg.test()'
 
+      - name: Tests + write lcov + debug
+        run: |
+          julia --project=. --code-coverage=user -e '
+            using Pkg; Pkg.test()
+            using Coverage
+            # List *.cov files found under src
+            covpaths = filter(p->endswith(p, ".cov"), readlines(`bash -lc "git ls-files src | sed -n s/\\\$/.cov/p"`))
+            println("COV files:\n", join(covpaths, "\n"))
+            cov = process_folder("src")
+            println("Summary before write: ", get_summary(cov))
+            LCOV.writefile("lcov.info", cov)
+          '
+
       - name: Generate coverage report
         uses: julia-actions/julia-processcoverage@v1
 
