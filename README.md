@@ -70,6 +70,23 @@ shocks:
   validate: false  # disable invariant distribution check
 ```
 
+## Running Simple Model Solvers
+
+Run the basic solver on a deterministic or stochastic config:
+
+- `using ThesisProject`
+- `cfg = load_config("config/simple_baseline.yaml")`  # or `config/simple_stochastic.yaml`
+- `validate_config(cfg)`
+- `model = build_model(cfg)`
+- `method = build_method(cfg)`
+- `sol = solve(model, method, cfg)`
+- Optional plotting (if `Plots` is available):
+  - `using Plots`
+  - `plot_policy(sol)`
+
+Switch to the stochastic setup by replacing the path in `load_config` with "config/simple_stochastic.yaml". Both configs can set `cfg.random.seed` to control randomness without calling `Random.seed!`.
+
+
 ---
 
 ## Smoke Checks
