@@ -38,5 +38,30 @@ jobs:
       - name: Run tests
         run: julia --project=. -e 'using Pkg; Pkg.test()'
 
+      - name: Run tests with coverage
+        run: julia -e 'using Pkg; Pkg.test(coverage=true)'
+      - name: Generate coverage report
+        uses: julia-actions/julia-processcoverage@v1
+
+      - name: Check coverage
+        run: |
+          julia -e '
+            using Pkg
+            Pkg.add("Coverage")
+            using Coverage
+            cov = LCOV.readfile("lcov.info")
+            covered, total = get_summary(cov)
+            pct = covered / total * 100
+            println("Coverage: ", pct)
+            if pct < 70
+                error("Coverage below 70%")
+            end
+          '
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: lcov.info
+          fail_ci_if_error: true
+
       - name: Smoke (deterministic and stochastic)
         run: julia --project=. scripts/smoke.jl

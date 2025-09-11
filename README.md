@@ -1,4 +1,5 @@
 # From_EGM_to_NN
+[![Coverage](https://codecov.io/gh/USER/From_EGM_to_NN/branch/main/graph/badge.svg)](https://codecov.io/gh/USER/From_EGM_to_NN)
 **Master’s Thesis – Master in Economics, IP Paris**
 Author: *Matthieu Grenier*
 
@@ -78,7 +79,7 @@ shocks:
   - Exit code is non-zero if any config fails (useful in CI).
   - You can pass specific configs: `julia --project scripts/smoke.jl config/smoke_config/smoke_config.yaml`
 
-CI is configured via `.github/workflows/ci.yml` to run tests and smoke checks on pushes and PRs.
+CI is configured via `.github/workflows/ci.yml` to run tests, smoke checks, and upload coverage reports to [Codecov](https://codecov.io/gh/USER/From_EGM_to_NN) on pushes and PRs.
 
 Validate early with `validate_config(cfg)`; the function throws if something is missing or inconsistent.
 
