@@ -45,7 +45,7 @@ jobs:
 
       - name: Check coverage
         run: |
-          julia -e '
+          julia --project=. -e '
             using Pkg
             Pkg.add("Coverage")
             using Coverage

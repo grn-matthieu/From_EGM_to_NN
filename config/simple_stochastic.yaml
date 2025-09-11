@@ -1,19 +1,26 @@
+model:
+  name: cs
+
 experiment:
   name: "simple_stochastic_egm"
   seed: 1234
 
-model:
+params:
   β: 0.96
   σ: 2.0
   r: 0.02
   y: 1.0
 
-grid:
+grids:
   Na: 100
   a_min: 0.0
   a_max: 20.0
 
+utility:
+  u_type: CRRA
+
 solver:
+  method: EGM
   tol: 1.0e-6
   maxit: 10000  # Temporary, update when algs are stabilized
   verbose: true
