@@ -21,15 +21,22 @@ include("solvers/common/interp.jl")
 include("solvers/common/value_fun.jl")
 include("solvers/common/chebyshev.jl")
 
+# projection solver
+include("solvers/projection/coefficients.jl")
+
 # egm specific
 include("solvers/egm/residuals.jl")
 include("solvers/egm/kernel.jl")
 
 # 5) methods (adapters)
 include("methods/EGM.jl")
+include("methods/Projection.jl")
 # include("methods/NN.jl")   # ok if stub
 
-# 6) simulation
+# 6) method factory
+include("core/method_factory.jl")
+
+# 7) simulation
 include("sim/panel.jl")
 using .SimPanel: simulate_panel
 

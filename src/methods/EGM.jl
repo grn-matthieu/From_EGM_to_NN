@@ -1,7 +1,7 @@
 module EGM
 
 using ..API
-import ..API: build_method, solve
+import ..API: solve
 
 using ..EGMKernel: solve_egm_det, solve_egm_stoch
 using ..ValueFunction: compute_value_policy
@@ -15,29 +15,22 @@ struct EGMMethod <: AbstractMethod
 end
 
 """
-    build_method(cfg::AbstractDict) -> EGMMethod
+    build_egm_method(cfg::AbstractDict) -> EGMMethod
 
-Accepts either cfg[:method] or cfg[:solver] and returns an EGMMethod.
+Construct an `EGMMethod` using solver options contained in `cfg`.
 """
-function build_method(cfg::AbstractDict)
-    method_name = haskey(cfg, :method) ? cfg[:method] : cfg[:solver][:method]
-    if method_name != "EGM"
-        error(
-            "Method builder received cfg with method = $method_name. It has not been implemented.",
-        )
-    else
-        ik = get(cfg[:solver], :interp_kind, :linear)
-        ik = ik isa Symbol ? ik : Symbol(ik)
-        return EGMMethod((
-            name = method_name,
-            tol = get(cfg[:solver], :tol, 1e-6),
-            tol_pol = get(cfg[:solver], :tol_pol, 1e-6),
-            maxit = get(cfg[:solver], :maxit, 1000),
-            interp_kind = ik,
-            verbose = get(cfg[:solver], :verbose, false),
-            warm_start = get(cfg[:solver], :warm_start, :default),
-        ))
-    end
+function build_egm_method(cfg::AbstractDict)
+    ik = get(cfg[:solver], :interp_kind, :linear)
+    ik = ik isa Symbol ? ik : Symbol(ik)
+    return EGMMethod((
+        name = haskey(cfg, :method) ? cfg[:method] : cfg[:solver][:method],
+        tol = get(cfg[:solver], :tol, 1e-6),
+        tol_pol = get(cfg[:solver], :tol_pol, 1e-6),
+        maxit = get(cfg[:solver], :maxit, 1000),
+        interp_kind = ik,
+        verbose = get(cfg[:solver], :verbose, false),
+        warm_start = get(cfg[:solver], :warm_start, :default),
+    ))
 end
 
 """
