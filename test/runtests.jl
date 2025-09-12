@@ -3,7 +3,7 @@ ENV["GKSwstype"] = "100"        # headless GR on CI
 using ThesisProject       # Plots triggers ThesisProjectPlotsExt
 
 include("test_core.jl")
-#include("test_shocks.jl")
+include("test_shocks.jl")
 include("test_residuals.jl")
 include("test_sim.jl")
 include("test_egm_stoch.jl")

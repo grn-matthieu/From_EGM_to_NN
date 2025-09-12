@@ -50,22 +50,16 @@ Compute Chebyshev basis up to order `N` at points `x` on `[a,b]`.
 Returns a matrix where column `j+1` corresponds to `T_j`.
 """
 function chebyshev_basis(x::AbstractVector{<:Real}, N::Integer, a::Real, b::Real)
-    @assert N ≥ 0
-    Ni = Int(N)                              # concrete range
-    T = promote_type(float(eltype(x)), float(typeof(a)), float(typeof(b)))
     M = length(x)
-
-    # map to [-1,1] in concrete T
-    ξ = @. T(2) * (T(x) - T(a)) / (T(b) - T(a)) - T(1)
-
-    B = ones(T, M, Ni + 1)
-    if Ni == 0
+    ξ = scale_to_chebyshev.(x, a, b)
+    B = ones(M, N + 1)
+    if N == 0
         return B
     end
-
     @views B[:, 2] .= ξ
-    @inbounds for n::Int = 2:Ni
-        @views @. B[:, n+1] = T(2) * ξ * B[:, n] - B[:, n-1]
+    @inbounds for n = 2:N
+        # recurrence: T_n = 2ξ T_{n-1} - T_{n-2}
+        @views B[:, n+1] .= 2 .* ξ .* B[:, n] .- B[:, n-1]
     end
     return B
 end

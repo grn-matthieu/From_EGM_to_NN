@@ -83,24 +83,16 @@ end
 function _validate_invariant(
     π::AbstractVector{<:Real},
     Π::AbstractMatrix{<:Real};
-    tol::Real = 1e-10,
+    tol = 1e-10,
 )
-    # promote to a concrete float type
-    T = promote_type(float(eltype(π)), float(eltype(Π)))
-    πf = T.(π)
-    Πf = T.(Π)
-    v = vec(πf' * Πf)
-
-    # rtol = 0 and ∞-norm avoid generic norm paths
-    if !isapprox(πf, v; atol = tol, rtol = zero(T), norm = x -> norm(x, Inf))
-        max_dev = maximum(abs.(πf .- v))
+    if !(isapprox(π, vec(π' * Π); atol = tol))
+        max_dev = maximum(abs.(π .- vec(π' * Π)))
         error(
             "Invariant distribution check failed: maximum deviation $max_dev exceeds tolerance $tol",
         )
     end
     return nothing
 end
-
 
 function get_shock_params(shocks::AbstractDict)
     ρ = get(shocks, :ρ_shock, 0.0)

@@ -1,7 +1,7 @@
 using Test
 using LinearAlgebra
 using ThesisProject
-using ThesisProject.ValueFunction: compute_value, compute_value_policy
+using ThesisProject.ValueFunction: compute_value_policy
 using ThesisProject.Shocks: ShockOutput
 
 @testset "Value function deterministic" begin
@@ -17,7 +17,7 @@ using ThesisProject.Shocks: ShockOutput
     apol = fill(0.0, length(agrid))
     policy = Dict(:c => (; value = cpol), :a => (; value = apol))
 
-    V = compute_value(p, g, nothing, U, policy)
+    V = compute_value_policy(p, g, nothing, U, policy)
     V_ss = fill(log(2.0) / (1 - β), length(agrid))
     @test all(isapprox(V, V_ss; atol = 1e-6))
 end

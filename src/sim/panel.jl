@@ -36,9 +36,9 @@ function simulate_panel(
     agrid = g[:a].grid
     R = 1 + p.r
 
-    zgrid = Float64[0.0]
-    Π = ones(Float64, 1, 1)
-    π0 = Float64[]                 # empty, unused in deterministic case
+    zgrid = [0.0]
+    Π = ones(1, 1)
+    π0 = [1.0]
 
     # Care : cpol can be a matrix (a,z) or a vector (a) depending on shocks
     cpol = sol.policy[:c].value
@@ -61,16 +61,19 @@ function simulate_panel(
     end
     master_rng = make_rng(master_seed)
 
-    if S !== nothing
-        zgrid = Float64.(S.zgrid)
-        Π = Float64.(S.Π)
-        π0 = Float64.(S.π)
+    π0 = fill(nothing, N)  # placeholder if no shocks
+    if S === nothing
+        # Deterministic model: document shocks as zeros in the output
+        zdraws .= 0.0
+    else
+        zgrid = S.zgrid
+        Π = S.Π
+        π0 = S.π
 
-        @inline function sample_row(
-            Π::AbstractMatrix{<:Real},
-            i::Int,
-            rng::AbstractRNG,
-        )::Int
+        # Fun to sample from a row of a transition matrix Π
+        # In the sim, useful bc we need to sample T times per agent
+        # Note: Π assumed to be row-stochastic
+        @inline function sample_row(Π::AbstractMatrix{<:Real}, i::Int, rng)
             u = rand(rng)
             s = 0.0
             @inbounds for j in axes(Π, 2)
@@ -81,19 +84,10 @@ function simulate_panel(
             end
             return last(axes(Π, 2))
         end
-
-        @inline function sample_vec(π::AbstractVector{<:Real}, rng::AbstractRNG)::Int
-            u = rand(rng)
-            s = 0.0
-            @inbounds for j in eachindex(π)
-                s += π[j]
-                if u <= s
-                    return j
-                end
-            end
-            return lastindex(π)
-        end
     end
+
+    # simple scalar linear interpolation over agrid
+    # basically the same fun as in interp, but inlined and not needing extraction
     @inline function lin1(x::AbstractVector{<:Real}, y::AbstractVector{<:Real}, ξ::Real)
         n = length(x)
         if ξ <= x[1]
@@ -118,11 +112,14 @@ function simulate_panel(
         arng = make_rng(agent_seed)
 
         if S !== nothing
-            idx = sample_vec(π0, arng)  # was: sample_row(reshape(π0,1,:), 1, arng)
+            # shocks indices and values
+            idx = sample_row(reshape(π0, 1, :), 1, arng)  # sample initial state from π0
             for t in axes(assets, 2)
                 zdraws[n, t] = zgrid[idx]
                 idx = sample_row(Π, idx, arng)
             end
+            # Note : the zdraws are now fixed !
+            # shocks must be drawn before starting the asset loop
         end
 
 
@@ -167,4 +164,4 @@ function simulate_panel(
     return (; assets, consumption = cons, shocks = zdraws, seeds, diagnostics)
 end
 
-end # module
+end

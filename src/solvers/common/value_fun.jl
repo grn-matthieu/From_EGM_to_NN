@@ -2,40 +2,40 @@ module ValueFunction
 
 using ..CommonInterp: interp_linear!
 
-export compute_value
+export compute_value_policy
 
 """
-    compute_value(sol, p; tol=1e-8, maxit=1_000)
+    compute_value_policy(p, g, S, U, policy; tol=1e-8, maxit=1_000)
 
-Evaluate the value function V(a) for a fixed policy (sol.c, sol.a_next) using policy
-evaluation:
-    V(a_i) = u(c(a_i)) + β * V(a'(a_i)).
-
-Output: `Vector{Float64}` of length `length(sol.agrid) : policy fun`.
+Stability-robust value evaluation that supports both deterministic (vector) and
+stochastic (matrix over shocks) policies. Prefer this over `compute_value` in solvers.
 """
 function compute_value_policy(p, g, S, U, policy; tol::Real = 1e-8, maxit::Int = 1_000)
-    agrid = g[:a].grid::AbstractVector{<:Real}
-    Na = g[:a].N::Int
+    agrid = g[:a].grid
+    Na = g[:a].N
 
-    cpol_any = policy[:c].value
-    apol_any = policy[:a].value
+    cpol = policy[:c].value
+    apol = policy[:a].value
 
-    βv =
-        hasproperty(p, :β) ? getfield(p, :β) :
-        hasproperty(p, :beta) ? getfield(p, :beta) :
-        throw(ArgumentError("Parameter β/beta not found"))
+    # Determine discount factor β robustly (allow ASCII fallback)
+    βv = begin
+        nms = propertynames(p)
+        if :β in nms
+            getfield(p, :β)
+        elseif :beta in nms
+            getfield(p, :beta)
+        else
+            error("Parameter β (or beta) not found in params")
+        end
+    end
 
     # Deterministic
-    if cpol_any isa AbstractVector{<:Real} && apol_any isa AbstractVector{<:Real}
-        cpol = cpol_any::AbstractVector{<:Real}
-        apol = apol_any::AbstractVector{<:Real}
-
-        V = zeros(Float64, Na)
-        tmp = similar(agrid, Float64)
-
+    if cpol isa AbstractVector && apol isa AbstractVector
+        V = zeros(Na)
+        tmp = similar(V)
         for _ = 1:maxit
-            interp_linear!(tmp, agrid, V, apol)
-            V_new = U.u(cpol) .+ βv .* tmp
+            cont = interp_linear!(tmp, agrid, V, apol)
+            V_new = U.u(cpol) .+ βv .* cont
             if maximum(abs.(V_new .- V)) < tol
                 return V_new
             end
@@ -45,27 +45,23 @@ function compute_value_policy(p, g, S, U, policy; tol::Real = 1e-8, maxit::Int =
     end
 
     # Stochastic
-    cpol = (cpol_any::AbstractMatrix{<:Real})
-    apol = (apol_any::AbstractMatrix{<:Real})
+    @assert cpol isa AbstractMatrix && apol isa AbstractMatrix "Stochastic value evaluation expects matrix policies"
     Nz = size(cpol, 2)
-    V = zeros(Float64, Na, Nz)
-    cont = zeros(Float64, Na, Nz)
-    tmp = similar(agrid, Float64)
+    V = zeros(Na, Nz)
+    cont = similar(V)
+    tmp = similar(agrid)
 
-    Π = S === nothing ? nothing : getfield(S, 2)
-    @assert Π !== nothing "Missing shocks transition matrix for stochastic value evaluation"
-    @assert Π isa AbstractMatrix "Π must be a matrix"
-    @assert eltype(Π) <: Real "Π must be numeric"
+    P = S === nothing ? nothing : getfield(S, 2)  # (zgrid, Π, π, diagnostics)
+    @assert P !== nothing "Missing shocks transition matrix for stochastic value evaluation"
 
     for _ = 1:maxit
         @inbounds for j = 1:Nz
-            aj = @view apol[:, j]
+            aj = view(apol, :, j)
             @views cont[:, j] .= 0.0
             @inbounds for jp = 1:Nz
-                vcol = @view V[:, jp]
+                vcol = view(V, :, jp)
                 interp_linear!(tmp, agrid, vcol, aj)
-                pjj = Float64(Π[j, jp])       # concrete scalar
-                @. cont[:, j] += pjj * tmp
+                @. cont[:, j] += P[j, jp] * tmp
             end
         end
         V_new = U.u(cpol) .+ βv .* cont
@@ -74,5 +70,7 @@ function compute_value_policy(p, g, S, U, policy; tol::Real = 1e-8, maxit::Int =
         end
         V .= V_new
     end
+    return V
 end
+
 end # module
