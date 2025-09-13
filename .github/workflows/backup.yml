@@ -15,7 +15,7 @@ jobs:
 
       - name: Compress repository
         run: |
-          tar -czf repo-backup.tar.gz .
+          tar --exclude='./repo-backup.tar.gz' --exclude='.git' --exclude='./.github' -czf repo-backup.tar.gz .
 
       - name: Upload backup to draft release
         uses: softprops/action-gh-release@v1
