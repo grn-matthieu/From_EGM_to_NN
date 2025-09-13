@@ -1,7 +1,7 @@
 module Projection
 using ..API
 import ..API: solve
-using ..ProjectionKernel: solve_projection_det
+using ..ProjectionKernel: solve_projection_det, solve_projection_stoch
 using ..ValueFunction: compute_value_policy
 using ..Determinism: canonicalize_cfg, hash_hex
 export ProjectionMethod
@@ -32,18 +32,21 @@ function solve(
     S = get_shocks(model)
     U = get_utility(model)
 
-    if S !== nothing
-        error("Projection solver currently supports only deterministic models")
-    end
+    sol =
+        S === nothing ?
+        solve_projection_det(p, g, U; tol = method.opts.tol, maxit = method.opts.maxit) :
+        solve_projection_stoch(p, g, S, U; tol = method.opts.tol, maxit = method.opts.maxit)
 
-    sol = solve_projection_det(p, g, U; tol = method.opts.tol, maxit = method.opts.maxit)
+    ee = sol.resid
+    ee_vec = ee isa AbstractMatrix ? vec(maximum(ee, dims = 2)) : ee
+    ee_mat = ee isa AbstractMatrix ? ee : nothing
 
     policy = Dict{Symbol,Any}(
         :c => (;
             value = sol.c,
             grid = g[:a].grid,
-            euler_errors = sol.resid,
-            euler_errors_mat = nothing,
+            euler_errors = ee_vec,
+            euler_errors_mat = ee_mat,
         ),
         :a => (; value = sol.a_next, grid = g[:a].grid),
     )

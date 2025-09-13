@@ -1,0 +1,25 @@
+using Test
+using ThesisProject
+
+@testset "Projection stochastic smoke" begin
+    cfg_path =
+        joinpath(@__DIR__, "..", "config", "smoke_config", "smoke_config_stochastic.yaml")
+    cfg = load_config(cfg_path)
+    cfg[:solver][:method] = "Projection"
+    model = build_model(cfg)
+    method = build_method(cfg)
+    sol = solve(model, method, cfg)
+
+    @test sol.metadata[:converged] === true
+    @test maximum(sol.policy[:c].euler_errors[min(2, end):end]) < sol.metadata[:tol]
+
+    grids = get_grids(model)
+    S = get_shocks(model)
+    Na = grids[:a].N
+    Nz = length(S.zgrid)
+    policy_c = sol.policy[:c].value
+    policy_a = sol.policy[:a].value
+
+    @test size(policy_c) == (Na, Nz)
+    @test all(j -> all(diff(view(policy_a, :, j)) .>= -1e-8), 1:Nz)
+end

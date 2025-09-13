@@ -51,7 +51,8 @@ Returns a matrix where column `j+1` corresponds to `T_j`.
 """
 function chebyshev_basis(x::AbstractVector{<:Real}, N::Integer, a::Real, b::Real)
     M = length(x)
-    ξ = scale_to_chebyshev.(x, a, b)
+    x_clamped = clamp.(x, a, b)
+    ξ = scale_to_chebyshev.(x_clamped, a, b)
     B = ones(M, N + 1)
     if N == 0
         return B
