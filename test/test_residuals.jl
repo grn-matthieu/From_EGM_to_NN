@@ -1,5 +1,5 @@
 using Test
-using ThesisProject.EGMResiduals: euler_resid_det, euler_resid_stoch, euler_resid_det_2
+using ThesisProject.EulerResiduals: euler_resid_det, euler_resid_stoch, euler_resid_det_2
 
 @testset "euler_resid_det" begin
     params = (; β = 0.96, σ = 2.0, r = 0.04)

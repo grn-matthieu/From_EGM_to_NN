@@ -20,12 +20,13 @@ include("core/model_factory.jl")
 include("solvers/common/interp.jl")
 include("solvers/common/value_fun.jl")
 include("solvers/common/chebyshev.jl")
+include("solvers/common/residuals.jl")
 
 # projection solver
 include("solvers/projection/coefficients.jl")
+include("solvers/projection/kernel.jl")
 
 # egm specific
-include("solvers/egm/residuals.jl")
 include("solvers/egm/kernel.jl")
 
 # 5) methods (adapters)

@@ -1,4 +1,4 @@
-module EGMResiduals
+module EulerResiduals
 
 export euler_resid_det, euler_resid_stoch, euler_resid_det_2
 
@@ -139,4 +139,4 @@ function euler_resid_stoch(
     return res
 end
 
-end #module
+end # module

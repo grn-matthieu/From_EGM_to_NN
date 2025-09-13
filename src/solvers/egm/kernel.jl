@@ -2,7 +2,7 @@ module EGMKernel
 
 using ..CommonInterp:
     interp_linear!, interp_pchip!, InterpKind, LinearInterp, MonotoneCubicInterp
-using ..EGMResiduals: euler_resid_det, euler_resid_stoch
+using ..EulerResiduals: euler_resid_det, euler_resid_stoch
 
 export solve_egm_det, solve_egm_stoch
 
