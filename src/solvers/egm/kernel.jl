@@ -109,6 +109,15 @@ function solve_egm_det(
     # Final consistency
     @. a_next = R * a_grid + model_params.y - c
     @. a_next = clamp(a_next, a_min, a_max)
+    if interp_kind isa LinearInterp
+        interp_linear!(cnext, a_grid, c, a_next)
+    elseif interp_kind isa MonotoneCubicInterp
+        interp_pchip!(cnext, a_grid, c, a_next)
+    else
+        @error "Unknown interpolation kind: $interp_kind"
+    end
+    euler_resid_det!(resid, model_params, c, cnext)
+    max_resid = maximum(resid[min(2, end):end])
 
     runtime = (time_ns() - start_time) / 1e9
     opts = (;

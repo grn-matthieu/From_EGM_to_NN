@@ -1,5 +1,7 @@
 module EulerResiduals
 
+using ..CommonInterp: interp_linear!
+
 export euler_resid_det,
     euler_resid_stoch, euler_resid_det_2, euler_resid_det!, euler_resid_stoch!
 
@@ -62,39 +64,20 @@ function euler_resid_det_2(
     Na = length(a_grid)
     @assert length(c) == Na
 
-    β = model_params.β
-    σ = model_params.σ
     R = 1 + model_params.r
     y = getfield(model_params, :y)
 
+    a_min = first(a_grid)
+    a_max = last(a_grid)
+
+    a_next = similar(c)
+    @. a_next = clamp(R * a_grid + y - c, a_min, a_max)
+
+    c_next = similar(c)
+    interp_linear!(c_next, a_grid, c, a_next)
+
     res = similar(c, Float64)
-
-    # linear interpolation helper over a_grid
-    lin1(x::AbstractVector{<:Real}, y::AbstractVector{<:Real}, xq::Real) = begin
-        n = length(x)
-        if xq <= x[1]
-            return y[1]
-        elseif xq >= x[end]
-            return y[end]
-        else
-            j = searchsortedfirst(x, xq)
-            j = clamp(j, 2, n)
-            x0 = x[j-1]
-            x1 = x[j]
-            y0 = y[j-1]
-            y1 = y[j]
-            t = (xq - x0) / (x1 - x0)
-            return (1 - t) * y0 + t * y1
-        end
-    end
-
-    @inbounds for i = 1:Na
-        c_i = max(c[i], 1e-12)
-        ap = R * a_grid[i] + y - c_i
-        cp = lin1(a_grid, c, ap)
-        cp = max(cp, 1e-12)
-        res[i] = abs(1.0 - β * R * (c_i / cp)^σ)
-    end
+    euler_resid_det!(res, model_params, c, c_next)
     return res
 end
 
