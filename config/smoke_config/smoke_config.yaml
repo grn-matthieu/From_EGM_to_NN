@@ -6,8 +6,6 @@ params:
   σ: 2.0
   r: 0.02
   y: 1.0
-  ρ_shock: 0.95
-  σ_shock: 0.10
 
 grids:
   Na: 50

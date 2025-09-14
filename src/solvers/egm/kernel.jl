@@ -70,6 +70,8 @@ function solve_egm_det(
             @error "Unknown interpolation kind: $interp_kind"
         end
 
+        @. cnext = max(cnext, cmin)
+
         @. cnew = model_utility.u_prime_inv(βR * cnext .^ (-model_params.σ))
         cmax = @. model_params.y + R * a_grid - a_min
         @. cnew = clamp(cnew, cmin, cmax)
@@ -116,6 +118,7 @@ function solve_egm_det(
     else
         @error "Unknown interpolation kind: $interp_kind"
     end
+    @. cnext = max(cnext, cmin)
     euler_resid_det!(resid, model_params, c, cnext)
     max_resid = maximum(resid[min(2, end):end])
 
@@ -207,6 +210,7 @@ function solve_egm_stoch(
                 else
                     @error "Unknown interpolation kind: $interp_kind"
                 end
+                @. cnext = max(cnext, cmin)
                 @. EUprime += Π[j, jp] * (cnext^(-σ))
             end
 
