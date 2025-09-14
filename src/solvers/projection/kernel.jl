@@ -4,8 +4,31 @@ using LinearAlgebra: mul!, cond
 using ..Chebyshev: chebyshev_basis, chebyshev_nodes
 using ..ProjectionCoefficients: solve_coefficients
 using ..EulerResiduals: euler_resid_det_2, euler_resid_stoch
+using ..CommonInterp: interp_pchip!
 
 export solve_projection_det, solve_projection_stoch
+
+@inline function is_nondec(x::AbstractVector{<:Real}; tol::Real = 1e-12)
+    n = length(x)
+    @inbounds for i = 1:(n-1)
+        if x[i+1] < x[i] - tol
+            return false
+        end
+    end
+    return true
+end
+
+@inline function is_nondec(x::AbstractMatrix{<:Real}; tol::Real = 1e-12)
+    nrow, ncol = size(x)
+    @inbounds for j = 1:ncol
+        for i = 1:(nrow-1)
+            if x[i+1, j] < x[i, j] - tol
+                return false
+            end
+        end
+    end
+    return true
+end
 
 """
     solve_projection_det(
@@ -118,18 +141,29 @@ function solve_projection_det(
         end
     end
 
+    a_out = model_grids[:a].grid
+    B_out = chebyshev_basis(a_out, best_order, a_min, a_max)
+    c_out = B_out * best_coeffs
+    if !is_nondec(c_out)
+        interp_pchip!(c_out, a_grid, best_c, a_out)
+    end
+    a_next_out = similar(c_out)
+    @. a_next_out = clamp(R * a_out + y - c_out, a_min, a_max)
+    resid_out = euler_resid_det_2(model_params, a_out, c_out)
+    max_resid_out = maximum(resid_out[min(2, end):end])
+
     runtime = (time_ns() - start_time) / 1e9
     opts =
         (; tol = tol, maxit = maxit, order = best_order, runtime = runtime, seed = nothing)
 
     return (;
-        a_grid,
-        c = best_c,
-        a_next = best_a_next,
-        resid = best_resid,
+        a_grid = a_out,
+        c = c_out,
+        a_next = a_next_out,
+        resid = resid_out,
         iters = best_iters,
         converged = best_converged,
-        max_resid = best_max_resid,
+        max_resid = max_resid_out,
         coeffs = best_coeffs,
         model_params,
         opts,
@@ -269,19 +303,35 @@ function solve_projection_stoch(
         end
     end
 
+    a_out = model_grids[:a].grid
+    B_out = chebyshev_basis(a_out, best_order, a_min, a_max)
+    c_out = B_out * best_coeffs
+    if !is_nondec(c_out)
+        for j = 1:Nz
+            interp_pchip!(view(c_out, :, j), a_grid, view(best_c, :, j), a_out)
+        end
+    end
+    a_next_out = similar(c_out)
+    for j = 1:Nz
+        y = exp(z_grid[j])
+        @views @. a_next_out[:, j] = clamp(R * a_out + y - c_out[:, j], a_min, a_max)
+    end
+    resid_out = euler_resid_stoch(model_params, a_out, z_grid, Π, c_out)
+    max_resid_out = maximum(resid_out[min(2, end):end, :])
+
     runtime = (time_ns() - start_time) / 1e9
     opts =
         (; tol = tol, maxit = maxit, order = best_order, runtime = runtime, seed = nothing)
 
     return (;
-        a_grid,
+        a_grid = a_out,
         z_grid,
-        c = best_c,
-        a_next = best_a_next,
-        resid = best_resid,
+        c = c_out,
+        a_next = a_next_out,
+        resid = resid_out,
         iters = best_iters,
         converged = best_converged,
-        max_resid = best_max_resid,
+        max_resid = max_resid_out,
         coeffs = best_coeffs,
         model_params,
         opts,

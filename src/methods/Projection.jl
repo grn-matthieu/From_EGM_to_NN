@@ -63,11 +63,11 @@ function solve(
     policy = Dict{Symbol,Any}(
         :c => (;
             value = sol.c,
-            grid = g[:a].grid,
+            grid = sol.a_grid,
             euler_errors = ee_vec,
             euler_errors_mat = ee_mat,
         ),
-        :a => (; value = sol.a_next, grid = g[:a].grid),
+        :a => (; value = sol.a_next, grid = sol.a_grid),
     )
 
     value = compute_value_policy(p, g, S, U, policy)
