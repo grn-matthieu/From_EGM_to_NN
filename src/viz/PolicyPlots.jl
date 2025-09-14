@@ -1,5 +1,9 @@
 import ThesisProject: plot_policy, plot_euler_errors
 
+const LINE_KW = (; lw = 2)
+
+styled_plot() = plot(; legend = :best)
+
 """
     plot_policy(sol; vars=nothing, labels=nothing, mean=false, shock_weights=nothing, surface=false)
 
@@ -24,7 +28,7 @@ function plot_policy(
 )
 
     vars_to_plot = isnothing(vars) ? collect(keys(sol.policy)) : collect(vars)
-    plt = plot()
+    plt = styled_plot()
 
     # Try to pull z-grid and invariant weights for stochastic labeling when needed
     zgrid = try
@@ -67,7 +71,7 @@ function plot_policy(
             isnothing(labels) ? String(k) : (i <= length(labels) ? labels[i] : String(k))
 
         if y isa AbstractVector # Deterministic policy or 1 sim
-            plot!(plt, x, y, label = base_lab)
+            plot!(plt, x, y, label = base_lab, LINE_KW...)
         elseif y isa AbstractMatrix
             nseries = size(y, 2)
             # Build per-shock labels if we have zgrid; otherwise index-based
@@ -89,13 +93,13 @@ function plot_policy(
                 else
                     # unknown value → default to lines
                     for j = 1:nseries
-                        plot!(plt, x, view(y, :, j), label = series_labels[j])
+                        plot!(plt, x, view(y, :, j), label = series_labels[j], LINE_KW...)
                     end
                 end
             else
                 # Plot one line per shock column
                 for j = 1:nseries
-                    plot!(plt, x, view(y, :, j), label = series_labels[j])
+                    plot!(plt, x, view(y, :, j), label = series_labels[j], LINE_KW...)
                 end
             end
 
@@ -116,8 +120,8 @@ function plot_policy(
         end
     end
 
-    xlabel!(plt, "state")
-    ylabel!(plt, "policy")
+    xlabel!(plt, "State")
+    ylabel!(plt, "Policy")
     title!(plt, "Policy Functions")
     return plt
 end
@@ -135,7 +139,7 @@ Plot Euler errors. For stochastic models, supports aggregating across shocks if 
 Returns a `Plots.Plot` object.
 """
 function plot_euler_errors(sol::ThesisProject.API.Solution; by::Symbol = :auto)
-    plt = plot()
+    plt = styled_plot()
     x = sol.policy[:a].grid
     cpol = sol.policy[:c]
 
@@ -190,15 +194,10 @@ function plot_euler_errors(sol::ThesisProject.API.Solution; by::Symbol = :auto)
             "(max across shocks)" : ""
     end
 
-    plot!(
-        plt,
-        x,
-        y,
-        yscale = :log10,
-        label = isempty(label_suffix) ? nothing : label_suffix,
-    )
+    label = isempty(label_suffix) ? "Euler Error" : "Euler Error $(label_suffix)"
+    plot!(plt, x, y; yscale = :log10, label = label, LINE_KW...)
     xlabel!(plt, "State")
-    ylabel!(plt, "Abs. EErr (log10)")
+    ylabel!(plt, "Absolute Euler Error (log10)")
     title!(plt, "Euler Errors (method: $(sol.diagnostics.method))")
     return plt
 end
