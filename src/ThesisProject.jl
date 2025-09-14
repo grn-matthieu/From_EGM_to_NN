@@ -29,10 +29,12 @@ include("solvers/projection/kernel.jl")
 
 # egm specific
 include("solvers/egm/kernel.jl")
+include("solvers/perturbation/kernel.jl")
 
 # 5) methods (adapters)
 include("methods/EGM.jl")
 include("methods/Projection.jl")
+include("methods/Perturbation.jl")
 # include("methods/NN.jl")   # ok if stub
 
 # 6) method factory
@@ -41,6 +43,10 @@ include("core/method_factory.jl")
 # 7) simulation
 include("sim/panel.jl")
 using .SimPanel: simulate_panel
+
+# 8) analysis
+include("analysis/SteadyState.jl")
+using .SteadyState: steady_state_analytic, steady_state_from_policy
 
 using .API:
     AbstractModel,
@@ -67,7 +73,9 @@ export load_config,
     get_grids,
     get_shocks,
     get_utility,
-    simulate_panel
+    simulate_panel,
+    steady_state_analytic,
+    steady_state_from_policy
 
 # --- Extensions ---
 include("viz/api.jl")      # stubs only
