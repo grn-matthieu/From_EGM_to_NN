@@ -3,25 +3,24 @@ set -euo pipefail
 
 # ---------- repo root & paths ----------
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-cd "$REPO_ROOT" || exit 1
-
-# choose sysimage extension by OS
-case "${OSTYPE:-}" in
-  darwin*) SYS_EXT="dylib" ;;
-  msys*|cygwin*|win32*) SYS_EXT="dll" ;;
-  *) SYS_EXT="so" ;;
-esac
-
-SYSIMG_PATH="$REPO_ROOT/ThesisDeps.$SYS_EXT"   # <-- use your sysimage
+cd "$REPO_ROOT" || exit 1       # ensure hook runs from repo root
+SYSIMG_PATH="$REPO_ROOT/LocalSysImage.so"
+STAMP="$REPO_ROOT/.git/sysimage.stamp"
 JULIA_BIN="${JULIA_BIN:-julia}"
 
 # ---------- minimal utils ----------
 step(){ echo "[$(date +%H:%M:%S)] $*"; }
+hash_files(){
+  if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$@" | awk '{print $1}'
+  else openssl dgst -sha256 "$@" | awk '{print $2}'
+  fi
+}
 
 # ---------- format only staged .jl ----------
 mapfile -t JLFILES < <(git diff --cached --name-only --diff-filter=ACMRT | grep -E '\.jl$' || true)
 if [ ${#JLFILES[@]} -gt 0 ]; then
   step "Formatting staged Julia files..."
+  # Use external Julia env; do not activate project. Use local sysimage if present.
   unset JULIA_PROJECT
   if [ -f "$SYSIMG_PATH" ]; then
     "$JULIA_BIN" -q -J "$SYSIMG_PATH" -e '
@@ -62,8 +61,17 @@ if $DOC_ONLY; then
   exit 0
 fi
 
-# ---------- run package tests ----------
+# ---------- run package tests (use local sysimage if present) ----------
 step "Running tests for ThesisProject (dev mode, external Julia env)..."
+
 unset JULIA_PROJECT
 if [ -f "$SYSIMG_PATH" ]; then
-  step "Using sysi
+  step "Using local sysimage: $SYSIMG_PATH"
+  "$JULIA_BIN" -q -J "$SYSIMG_PATH" -e 'using Pkg; Pkg.test("ThesisProject")'
+else
+  step "Local sysimage not found; running without sysimage"
+  "$JULIA_BIN" -q -e 'using Pkg; Pkg.test("ThesisProject")'
+fi
+
+step "All checks passed."
+exit 0

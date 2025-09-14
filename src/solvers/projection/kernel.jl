@@ -16,6 +16,7 @@ export solve_projection_det, solve_projection_stoch
         maxit=1000,
         orders=Int[],
         Nval=model_grids[:a].N,
+        λ=0.0,
     )
 
 Deterministic projection solver for the consumption-saving model. Approximates
@@ -33,6 +34,7 @@ function solve_projection_det(
     maxit::Int = 1000,
     orders::AbstractVector{Int} = Int[],
     Nval::Int = model_grids[:a].N,
+    λ::Real = 0.0,
 )::NamedTuple
     start_time = time_ns()
 
@@ -64,7 +66,7 @@ function solve_projection_det(
         cmax = @. y + R * a_grid - a_min
         c = @. clamp(0.5 * (y + R * a_grid - a_min), cmin, cmax)
 
-        coeffs = solve_coefficients(B, c)
+        coeffs = solve_coefficients(B, c; λ = λ)
         a_next = similar(c)
         c_next = similar(c)
         c_new = similar(c)
@@ -83,7 +85,7 @@ function solve_projection_det(
             @. c_new = model_utility.u_prime_inv(β * R * model_utility.u_prime(c_next))
             @. c_new = clamp(c_new, cmin, cmax)
 
-            coeffs_new = solve_coefficients(B, c_new)
+            coeffs_new = solve_coefficients(B, c_new; λ = λ)
             Δ = maximum(abs.(c_new - c))
             coeffs = coeffs_new
             c .= c_new
@@ -144,6 +146,7 @@ end
         maxit=1000,
         orders=Int[],
         Nval=model_grids[:a].N,
+        λ=0.0,
     )
 
 Stochastic projection solver for the consumption-saving model with discrete income shocks.
@@ -161,6 +164,7 @@ function solve_projection_stoch(
     maxit::Int = 1000,
     orders::AbstractVector{Int} = Int[],
     Nval::Int = model_grids[:a].N,
+    λ::Real = 0.0,
 )::NamedTuple
     start_time = time_ns()
 
@@ -199,7 +203,7 @@ function solve_projection_stoch(
             @. c[:, j] = clamp(0.5 * (y + R * a_grid - a_min), cmin, cmax)
         end
 
-        coeffs = solve_coefficients(B, c)
+        coeffs = solve_coefficients(B, c; λ = λ)
         a_next = similar(c)
         c_new = similar(c)
         Emu = similar(a_grid)
@@ -227,7 +231,7 @@ function solve_projection_stoch(
                 @views @. c_new[:, j] = clamp(c_new[:, j], cmin, cmax)
             end
 
-            coeffs_new = solve_coefficients(B, c_new)
+            coeffs_new = solve_coefficients(B, c_new; λ = λ)
             Δ = maximum(abs.(c_new .- c))
             coeffs = coeffs_new
             c .= c_new

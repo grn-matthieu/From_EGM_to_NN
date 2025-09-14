@@ -9,4 +9,7 @@ using ThesisProject.ProjectionCoefficients: solve_coefficients
     y = B * coeff_true
     coeff_est = solve_coefficients(B, y)
     @test isapprox(coeff_est, coeff_true; atol = 1e-12)
+
+    coeff_reg = solve_coefficients(B, y; λ = 1e-4)
+    @test isapprox(coeff_reg, coeff_true; atol = 1e-4)
 end
