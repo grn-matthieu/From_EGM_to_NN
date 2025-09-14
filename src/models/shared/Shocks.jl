@@ -1,7 +1,7 @@
 module Shocks
 
 using SpecialFunctions: erf
-using LinearAlgebra: norm
+using LinearAlgebra: norm, mul!
 
 export discretize, ShockOutput
 
@@ -69,13 +69,15 @@ end
 function find_invariant(Π::AbstractMatrix{<:Real}; tol = 1e-12, maxit = 1_000)
     # Power iteration method to find the invariant distribution
     π = fill(1.0 / size(Π, 1), size(Π, 1))
+    π_new = similar(π)
+    Πt = transpose(Π)
     for _ = 1:maxit
-        π_new = π' * Π
+        mul!(π_new, Πt, π)
         π_new ./= sum(π_new)
-        if maximum(abs.(π_new .- π')) < tol
+        if maximum(abs.(π_new .- π)) < tol
             return vec(π_new)
         end
-        π .= vec(π_new)
+        π .= π_new
     end
     error("Power iteration did not converge")
 end
