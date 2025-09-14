@@ -21,6 +21,7 @@ include("solvers/common/interp.jl")
 include("solvers/common/value_fun.jl")
 include("solvers/common/chebyshev.jl")
 include("solvers/common/residuals.jl")
+include("solvers/common/validators.jl")
 
 # projection solver
 include("solvers/projection/coefficients.jl")

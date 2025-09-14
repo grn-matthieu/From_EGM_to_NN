@@ -74,8 +74,8 @@ function pchip_slopes(x::AbstractVector{<:Real}, y::AbstractVector{<:Real})
         elseif Δ[i-1] * Δ[i] < 0
             d[i] = 0.0
         else
-            w1 = 2h[i] + h[i-1]
-            w2 = h[i] + 2h[i-1]
+            w1 = 2 * h[i] + h[i-1]
+            w2 = h[i] + 2 * h[i-1]
             d[i] = (w1 + w2) / (w1 / Δ[i-1] + w2 / Δ[i])
         end
     end

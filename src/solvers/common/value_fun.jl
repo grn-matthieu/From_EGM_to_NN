@@ -33,10 +33,19 @@ function compute_value_policy(p, g, S, U, policy; tol::Real = 1e-8, maxit::Int =
     if cpol isa AbstractVector && apol isa AbstractVector
         V = zeros(Na)
         tmp = similar(V)
+        V_new = similar(V)
+        u_c = U.u(cpol)
         for _ = 1:maxit
             cont = interp_linear!(tmp, agrid, V, apol)
-            V_new = U.u(cpol) .+ βv .* cont
-            if maximum(abs.(V_new .- V)) < tol
+            @. V_new = u_c + βv * cont
+            δ = 0.0
+            @inbounds @simd for i in eachindex(V)
+                d = abs(V_new[i] - V[i])
+                if d > δ
+                    δ = d
+                end
+            end
+            if δ < tol
                 return V_new
             end
             V .= V_new
@@ -54,6 +63,8 @@ function compute_value_policy(p, g, S, U, policy; tol::Real = 1e-8, maxit::Int =
     P = S === nothing ? nothing : S.Π  # transition matrix Π from ShockOutput
     @assert P !== nothing "Missing shocks transition matrix for stochastic value evaluation"
 
+    V_new = similar(V)
+    u_c = U.u(cpol)
     for _ = 1:maxit
         @inbounds for j = 1:Nz
             aj = view(apol, :, j)
@@ -64,8 +75,15 @@ function compute_value_policy(p, g, S, U, policy; tol::Real = 1e-8, maxit::Int =
                 @. cont[:, j] += P[j, jp] * tmp
             end
         end
-        V_new = U.u(cpol) .+ βv .* cont
-        if maximum(abs.(V_new .- V)) < tol
+        @. V_new = u_c + βv * cont
+        δ = 0.0
+        @inbounds @simd for i in eachindex(V)
+            d = abs(V_new[i] - V[i])
+            if d > δ
+                δ = d
+            end
+        end
+        if δ < tol
             return V_new
         end
         V .= V_new

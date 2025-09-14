@@ -132,7 +132,11 @@ function simulate_panel(
             assets[n, t] = a_t
         end
     end
-    log_growth = diff(log.(cons); dims = 2)
+    # Manual computation of log consumption growth over time
+    log_growth = Matrix{Float64}(undef, N, T - 1)
+    @inbounds for t = 1:(T-1)
+        log_growth[:, t] .= log.(cons[:, t+1]) .- log.(cons[:, t])
+    end
     mean_log_c_growth = mean(log_growth)
 
     final_assets = view(assets, :, size(assets, 2))

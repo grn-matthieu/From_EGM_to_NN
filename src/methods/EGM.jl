@@ -7,6 +7,7 @@ using ..EGMKernel: solve_egm_det, solve_egm_stoch
 using ..ValueFunction: compute_value_policy
 using ..Determinism: canonicalize_cfg, hash_hex
 using ..CommonInterp: LinearInterp, MonotoneCubicInterp
+using ..CommonValidators: is_nondec, is_positive, respects_amin
 
 export EGMMethod
 
@@ -160,28 +161,6 @@ function solve(
     )
 
     # Validation: monotonicity and positivity
-    function is_nondec(x::AbstractVector; tol = 1e-12)
-        n = length(x)
-        @inbounds for i = 1:(n-1)
-            if x[i+1] < x[i] - tol
-                return false
-            end
-        end
-        return true
-    end
-    function is_nondec(x::AbstractMatrix; tol = 1e-12)
-        nrow, ncol = size(x)
-        @inbounds for j = 1:ncol
-            for i = 1:(nrow-1)
-                if x[i+1, j] < x[i, j] - tol
-                    return false
-                end
-            end
-        end
-        return true
-    end
-    is_positive(x; tol = 1e-12) = all(x .>= tol)
-    respects_amin(x, amin; tol = 1e-12) = all(x .>= (amin - tol))
 
     c_val = policy[:c].value
     a_val = policy[:a].value
