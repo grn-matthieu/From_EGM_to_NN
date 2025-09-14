@@ -8,6 +8,7 @@ using ..Determinism: make_rng, derive_seed
 
 using ..API:
     Solution, AbstractModel, AbstractMethod, get_params, get_grids, get_shocks, solve
+using ..CommonInterp: interp_linear!
 
 
 """
@@ -47,6 +48,8 @@ function simulate_panel(
     cons = Matrix{Float64}(undef, N, T)
     zdraws = Matrix{Float64}(undef, N, T)
     seeds = Vector{UInt64}(undef, N)
+    interp_out = Vector{Float64}(undef, 1)
+    interp_xq = Vector{Float64}(undef, 1)
 
 
     # --- Seed handling ---
@@ -86,25 +89,6 @@ function simulate_panel(
         end
     end
 
-    # simple scalar linear interpolation over agrid
-    # basically the same fun as in interp, but inlined and not needing extraction
-    @inline function lin1(x::AbstractVector{<:Real}, y::AbstractVector{<:Real}, ξ::Real)
-        n = length(x)
-        if ξ <= x[1]
-            return y[1]
-        elseif ξ >= x[end]
-            return y[end]
-        else
-            j = searchsortedfirst(x, ξ)
-            j = clamp(j, 2, n)
-            x0 = x[j-1]
-            x1 = x[j]
-            y0 = y[j-1]
-            y1 = y[j]
-            t = (ξ - x0) / (x1 - x0)
-            return (1 - t) * y0 + t * y1
-        end
-    end
     @inbounds for n in axes(assets, 1)
         # independent rng per agent derived from the master rng
         agent_seed = derive_seed(master_rng, n)
@@ -132,13 +116,17 @@ function simulate_panel(
                 zval = zdraws[n, t]
                 zj = searchsortedfirst(zgrid, zval)
                 zj = clamp(zj, firstindex(zgrid), lastindex(zgrid))
-                c_t = lin1(agrid, view(cpol, :, zj), a_prev)
+                interp_xq[1] = a_prev
+                interp_linear!(interp_out, agrid, view(cpol, :, zj), interp_xq)
+                c_t = interp_out[1]
                 cons[n, t] = c_t
                 y_t = p.y * exp(zval)
                 a_t = clamp(R * a_prev + y_t - c_t, g[:a].min, g[:a].max)
             else
                 # deterministic: linear in a
-                c_t = lin1(agrid, cpol, a_prev)
+                interp_xq[1] = a_prev
+                interp_linear!(interp_out, agrid, cpol, interp_xq)
+                c_t = interp_out[1]
                 cons[n, t] = c_t
                 y_t = p.y
                 a_t = clamp(R * a_prev + y_t - c_t, g[:a].min, g[:a].max)
