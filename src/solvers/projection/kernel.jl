@@ -72,6 +72,13 @@ function solve_projection_det(
 
     orders = isempty(orders) ? Int[Na-1] : orders
 
+    max_order = maximum(orders)
+    a_val = chebyshev_nodes(Nval, a_min, a_max)
+    a_out = model_grids[:a].grid
+    B_cache = chebyshev_basis(a_grid, max_order, a_min, a_max)
+    B_val_cache = chebyshev_basis(a_val, max_order, a_min, a_max)
+    B_out_cache = chebyshev_basis(a_out, max_order, a_min, a_max)
+
     best_coeffs = nothing
     best_c = nothing
     best_a_next = nothing
@@ -83,7 +90,7 @@ function solve_projection_det(
     best_order = orders[1]
 
     for order in orders
-        B = chebyshev_basis(a_grid, order, a_min, a_max)
+        @views B = B_cache[:, 1:(order+1)]
 
         cmin = 1e-12
         cmax = @. y + R * a_grid - a_min
@@ -121,8 +128,7 @@ function solve_projection_det(
         @. a_next = R * a_grid + y - c
         @. a_next = clamp(a_next, a_min, a_max)
 
-        a_val = chebyshev_nodes(Nval, a_min, a_max)
-        B_val = chebyshev_basis(a_val, order, a_min, a_max)
+        @views B_val = B_val_cache[:, 1:(order+1)]
         c_val = B_val * coeffs
         resid_val = euler_resid_det_2(model_params, a_val, c_val)
         max_resid_val = maximum(resid_val[min(2, end):end])
@@ -141,8 +147,7 @@ function solve_projection_det(
         end
     end
 
-    a_out = model_grids[:a].grid
-    B_out = chebyshev_basis(a_out, best_order, a_min, a_max)
+    @views B_out = B_out_cache[:, 1:(best_order+1)]
     c_out = B_out * best_coeffs
     if !is_nondec(c_out)
         interp_pchip!(c_out, a_grid, best_c, a_out)
@@ -216,6 +221,13 @@ function solve_projection_stoch(
 
     orders = isempty(orders) ? Int[Na-1] : orders
 
+    max_order = maximum(orders)
+    a_val = chebyshev_nodes(Nval, a_min, a_max)
+    a_out = model_grids[:a].grid
+    B_cache = chebyshev_basis(a_grid, max_order, a_min, a_max)
+    B_val_cache = chebyshev_basis(a_val, max_order, a_min, a_max)
+    B_out_cache = chebyshev_basis(a_out, max_order, a_min, a_max)
+
     best_coeffs = nothing
     best_c = nothing
     best_a_next = nothing
@@ -227,7 +239,7 @@ function solve_projection_stoch(
     best_order = orders[1]
 
     for order in orders
-        B = chebyshev_basis(a_grid, order, a_min, a_max)
+        @views B = B_cache[:, 1:(order+1)]
 
         c = Matrix{Float64}(undef, Na, Nz)
         cmin = 1e-12
@@ -283,8 +295,7 @@ function solve_projection_stoch(
             @views @. a_next[:, j] = clamp(a_next[:, j], a_min, a_max)
         end
 
-        a_val = chebyshev_nodes(Nval, a_min, a_max)
-        B_val = chebyshev_basis(a_val, order, a_min, a_max)
+        @views B_val = B_val_cache[:, 1:(order+1)]
         c_val = B_val * coeffs
         resid_val = euler_resid_stoch(model_params, a_val, z_grid, Π, c_val)
         max_resid_val = maximum(resid_val[min(2, end):end, :])
@@ -303,8 +314,7 @@ function solve_projection_stoch(
         end
     end
 
-    a_out = model_grids[:a].grid
-    B_out = chebyshev_basis(a_out, best_order, a_min, a_max)
+    @views B_out = B_out_cache[:, 1:(best_order+1)]
     c_out = B_out * best_coeffs
     if !is_nondec(c_out)
         for j = 1:Nz
