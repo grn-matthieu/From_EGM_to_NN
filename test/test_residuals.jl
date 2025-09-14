@@ -99,3 +99,43 @@ end
     Pz_bad = ones(2, 3) / 3
     @test_throws AssertionError euler_resid_stoch(params, a_grid, z_grid, Pz_bad, c)
 end
+
+@testset "residual size assertions" begin
+    params = (; β = 0.96, σ = 2.0, r = 0.04)
+
+    c = [1.0, 2.0]
+    c_next = [1.1, 2.2]
+    res_bad = zeros(3)
+    @test_throws AssertionError euler_resid_det!(res_bad, params, c, c_next)
+
+    c_next_bad = [1.1]
+    @test_throws AssertionError euler_resid_det(params, c, c_next_bad)
+
+    params_interp = (; β = 0.96, σ = 2.0, r = 0.04, y = 1.0)
+    a_grid = [0.0, 1.0]
+    c_bad = [0.5]
+    @test_throws AssertionError euler_resid_det_2(params_interp, a_grid, c_bad)
+
+    z_grid = [0.0, 0.0]
+    Pz = [0.7 0.3; 0.4 0.6]
+    c_mat = [0.5 0.0; 0.6 0.5]
+    res_mat_bad = zeros(3, 2)
+    @test_throws AssertionError euler_resid_stoch!(
+        res_mat_bad,
+        params,
+        a_grid,
+        z_grid,
+        Pz,
+        c_mat,
+    )
+
+    a_grid_bad = [0.0]
+    @test_throws AssertionError euler_resid_stoch!(
+        similar(c_mat),
+        params,
+        a_grid_bad,
+        z_grid,
+        Pz,
+        c_mat,
+    )
+end
