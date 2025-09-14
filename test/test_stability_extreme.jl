@@ -4,8 +4,7 @@ using ThesisProject.Determinism: make_rng
 
 @testset "Extreme parameter stability" begin
     # Deterministic case
-    cfg_det_path = joinpath(@__DIR__, "..", "config", "smoke_config", "smoke_config.yaml")
-    cfg_det = load_config(cfg_det_path)
+    cfg_det = deepcopy(SMOKE_CFG)
     cfg_det[:solver][:method] = "EGM"
     cfg_det[:params][:β] = 0.999
     cfg_det[:params][:σ] = 10.0
@@ -18,9 +17,7 @@ using ThesisProject.Determinism: make_rng
     @test all(isfinite, sol_det.policy[:c].euler_errors)
 
     # Stochastic case
-    cfg_stoch_path =
-        joinpath(@__DIR__, "..", "config", "smoke_config", "smoke_config_stochastic.yaml")
-    cfg_stoch = load_config(cfg_stoch_path)
+    cfg_stoch = deepcopy(SMOKE_STOCH_CFG)
     cfg_stoch[:solver][:method] = "EGM"
     cfg_stoch[:params][:β] = 0.999
     cfg_stoch[:params][:σ] = 10.0

@@ -1,15 +1,7 @@
 using Statistics
 
 @testset "SimPanel smoke" begin
-    cfg_path =
-        joinpath(@__DIR__, "..", "config", "smoke_config", "smoke_config_stochastic.yaml")
-    @test isfile(cfg_path) || begin
-        @warn("Config not found; skipping SimPanel tests", path = cfg_path)
-        @test true
-        return
-    end
-
-    cfg = ThesisProject.load_config(cfg_path)
+    cfg = deepcopy(SMOKE_STOCH_CFG)
 
     model = ThesisProject.build_model(cfg)
     method = ThesisProject.build_method(cfg)
@@ -114,14 +106,7 @@ using Statistics
 end
 
 @testset "SimPanel deterministic" begin
-    cfg_path = joinpath(@__DIR__, "..", "config", "smoke_config", "smoke_config.yaml")
-    @test isfile(cfg_path) || begin
-        @warn("Config not found; skipping deterministic SimPanel tests", path = cfg_path)
-        @test true
-        return
-    end
-
-    cfg = ThesisProject.load_config(cfg_path)
+    cfg = deepcopy(SMOKE_CFG)
 
     model = ThesisProject.build_model(cfg)
     method = ThesisProject.build_method(cfg)

@@ -1,10 +1,7 @@
 # Main testset to assess if the core of the code is stable
 @testset "Core stability" begin
-    cfg_path = joinpath(@__DIR__, "..", "config", "smoke_config", "smoke_config.yaml")
-    @test isfile(cfg_path) || @warn("config file not found: $cfg_path")
-
     # Test loading side
-    config = load_config(cfg_path)
+    config = deepcopy(SMOKE_CFG)
     @test config isa AbstractDict
     @test all(k -> haskey(config, k), (:model, :params, :grids)) # Fundamental keys in the config
     @test begin # Test to validate a config we know to be stable

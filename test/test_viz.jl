@@ -7,10 +7,8 @@
         false
     end
 
-    cfg_path = joinpath(@__DIR__, "..", "config", "smoke_config", "smoke_config.yaml")
-
     if has_plots
-        cfg = load_config(cfg_path)
+        cfg = deepcopy(SMOKE_CFG)
         model = build_model(cfg)
         method = build_method(cfg)
         sol = solve(model, method, cfg)

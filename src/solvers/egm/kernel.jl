@@ -11,10 +11,10 @@ export solve_egm_det, solve_egm_stoch
 """
     solve_egm_det(model_params, model_grids, model_utility; ...)
 
-Vectorized EGM with a deterministic income (eq. to log normal income with eps = 0).
-Stopping criteria : max euler errors + policy change.
-Returns a NamedTuple with fields (a_grid, c, a_next, resid, iters, converged, max_resid, model_params, opts). To be
-converted later into a Solution object.
+Vectorized EGM solver for deterministic income (equivalent to log-normal income with zero variance).
+Stops when Euler equation errors and policy changes fall below their respective tolerances.
+Returns a `NamedTuple` with fields `(a_grid, c, a_next, resid, iters, converged, max_resid, model_params, opts)`
+which is later converted into a `Solution`.
 """
 function solve_egm_det(
     model_params,
@@ -143,9 +143,8 @@ end
     solve_egm_stoch(model_params, model_grids, model_shocks, model_utility; ...)
 
 Vectorized EGM solver for the CS model with an AR(1) income process.
-Stopping criteria : max euler errors + policy change (in expectation, evaluated at disc nodes).
-Returns a NamedTuple with fields (a_grid, z_grid, c, a_next, resid, iters, converged, max_resid, model_params, opts). Output is to be converted
-later in a Solution object.
+Stops when expected Euler equation errors and policy changes (evaluated at discretized nodes) meet tolerance.
+Returns a `NamedTuple` with fields `(a_grid, z_grid, c, a_next, resid, iters, converged, max_resid, model_params, opts)` that is later converted into a `Solution`.
 """
 function solve_egm_stoch(
     model_params,

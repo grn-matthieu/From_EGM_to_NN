@@ -5,8 +5,7 @@ using ThesisProject.Chebyshev: chebyshev_basis, chebyshev_nodes
 using ThesisProject.EulerResiduals: euler_resid_det_2, euler_resid_stoch
 
 @testset "projection order selection deterministic" begin
-    cfg_path = joinpath(@__DIR__, "..", "config", "smoke_config", "smoke_config.yaml")
-    cfg = load_config(cfg_path)
+    cfg = deepcopy(SMOKE_CFG)
     cfg[:solver][:method] = "Projection"
     cfg[:solver][:orders] = [2, 3]
     cfg[:solver][:Nval] = 21
@@ -44,9 +43,7 @@ using ThesisProject.EulerResiduals: euler_resid_det_2, euler_resid_stoch
 end
 
 @testset "projection order selection stochastic" begin
-    cfg_path =
-        joinpath(@__DIR__, "..", "config", "smoke_config", "smoke_config_stochastic.yaml")
-    cfg = load_config(cfg_path)
+    cfg = deepcopy(SMOKE_STOCH_CFG)
     cfg[:solver][:method] = "Projection"
     cfg[:solver][:orders] = [2, 3]
     cfg[:solver][:Nval] = 21

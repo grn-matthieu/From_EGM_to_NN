@@ -2,9 +2,7 @@ using Test
 using ThesisProject
 
 @testset "EGM stochastic smoke" begin
-    cfg_path =
-        joinpath(@__DIR__, "..", "config", "smoke_config", "smoke_config_stochastic.yaml")
-    cfg = load_config(cfg_path)
+    cfg = deepcopy(SMOKE_STOCH_CFG)
     model = build_model(cfg)
     method = build_method(cfg)
     sol = solve(model, method, cfg)

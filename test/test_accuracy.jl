@@ -4,8 +4,7 @@ using ThesisProject.EulerResiduals: euler_resid_det_2
 using ThesisProject.Determinism: make_rng
 
 @testset "Euler error grids" begin
-    cfg_path = joinpath(@__DIR__, "..", "config", "smoke_config", "smoke_config.yaml")
-    cfg_base = load_config(cfg_path)
+    cfg_base = deepcopy(SMOKE_CFG)
 
     # EGM solution
     cfg_egm = deepcopy(cfg_base)
