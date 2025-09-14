@@ -160,9 +160,26 @@ function solve(
     )
 
     # Validation: monotonicity and positivity
-    is_nondec(x; tol = 1e-12) =
-        x isa AbstractMatrix ? all(j -> all(diff(view(x, :, j)) .>= -tol), axes(x, 2)) :
-        all(diff(x) .>= -tol)
+    function is_nondec(x::AbstractVector; tol = 1e-12)
+        n = length(x)
+        @inbounds for i = 1:(n-1)
+            if x[i+1] < x[i] - tol
+                return false
+            end
+        end
+        return true
+    end
+    function is_nondec(x::AbstractMatrix; tol = 1e-12)
+        nrow, ncol = size(x)
+        @inbounds for j = 1:ncol
+            for i = 1:(nrow-1)
+                if x[i+1, j] < x[i, j] - tol
+                    return false
+                end
+            end
+        end
+        return true
+    end
     is_positive(x; tol = 1e-12) = all(x .>= tol)
     respects_amin(x, amin; tol = 1e-12) = all(x .>= (amin - tol))
 

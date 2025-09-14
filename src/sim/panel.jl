@@ -39,7 +39,6 @@ function simulate_panel(
 
     zgrid = [0.0]
     Π = ones(1, 1)
-    π0 = [1.0]
 
     # Care : cpol can be a matrix (a,z) or a vector (a) depending on shocks
     cpol = sol.policy[:c].value
@@ -64,7 +63,6 @@ function simulate_panel(
     end
     master_rng = make_rng(master_seed)
 
-    π0 = fill(nothing, N)  # placeholder if no shocks
     if S === nothing
         # Deterministic model: document shocks as zeros in the output
         zdraws .= 0.0

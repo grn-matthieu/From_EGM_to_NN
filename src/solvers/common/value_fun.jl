@@ -51,7 +51,7 @@ function compute_value_policy(p, g, S, U, policy; tol::Real = 1e-8, maxit::Int =
     cont = similar(V)
     tmp = similar(agrid)
 
-    P = S === nothing ? nothing : getfield(S, 2)  # (zgrid, Π, π, diagnostics)
+    P = S === nothing ? nothing : S.Π  # transition matrix Π from ShockOutput
     @assert P !== nothing "Missing shocks transition matrix for stochastic value evaluation"
 
     for _ = 1:maxit

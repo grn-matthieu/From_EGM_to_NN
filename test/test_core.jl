@@ -48,7 +48,7 @@
             @test all(sol.policy[:a].value .>= grids[:a].min)
             @test all(sol.policy[:a].value .<= grids[:a].max)
             # Monotonicity check
-            @test all(diff(sol.policy[:a].value) .>= -1e-8)
+            @test is_nondec(sol.policy[:a].value; tol = 1e-8)
         catch err
             @warn "solve failed" err = (err, catch_backtrace())
             @test false

@@ -19,5 +19,5 @@ using ThesisProject
     policy_a = sol.policy[:a].value
 
     @test size(policy_a) == (Na, Nz)
-    @test all(j -> all(diff(view(policy_a, :, j)) .>= -1e-8), 1:Nz)
+    @test is_nondec(policy_a; tol = 1e-8)
 end

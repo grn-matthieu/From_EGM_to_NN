@@ -13,8 +13,8 @@ using Test
     @test sol.metadata[:converged] === true
     @test sol.metadata[:max_resid] < 1e-5
     # monotonicity on policies
-    @test all(diff(sol.policy[:c].value) .>= -1e-8)
-    @test all(diff(sol.policy[:a].value) .>= -1e-8)
+    @test is_nondec(sol.policy[:c].value; tol = 1e-8)
+    @test is_nondec(sol.policy[:a].value; tol = 1e-8)
 
     # (Optional) a stochastic smoke test can be added once configs align
 end
