@@ -1,27 +1,48 @@
 module EulerResiduals
 
-export euler_resid_det, euler_resid_stoch, euler_resid_det_2
+export euler_resid_det,
+    euler_resid_stoch, euler_resid_det_2, euler_resid_det!, euler_resid_stoch!
 
 # --- Functions ---
 
 """
-    euler_resid_det(model_params, c, c_next)
+    euler_resid_det!(resid, model_params, c, c_next)
 
-Compute absolute Euler equation residuals for the deterministic model. Computations are based on the CRRA utility function.
+Write absolute Euler equation residuals for the deterministic model into `resid`.
+Computations are based on the CRRA utility function.
 """
-function euler_resid_det(model_params, c::Vector{Float64}, c_next::Vector{Float64})
-    resid = similar(c)
-
-    # Clamping to avoid division by zero
-    c_clamped = clamp.(c, 1e-12, Inf)
-    c_next_clamped = clamp.(c_next, 1e-12, Inf)
+function euler_resid_det!(
+    resid::AbstractVector{<:Real},
+    model_params,
+    c::AbstractVector{<:Real},
+    c_next::AbstractVector{<:Real},
+)
+    @assert length(resid) == length(c) == length(c_next)
 
     β = model_params.β
     σ = model_params.σ
     R = 1 + model_params.r
 
-    @. resid = abs(1 - β * R * (c_clamped / c_next_clamped)^σ)
+    @inbounds for i in eachindex(resid)
+        c_i = clamp(c[i], 1e-12, Inf)
+        c_next_i = clamp(c_next[i], 1e-12, Inf)
+        resid[i] = abs(1 - β * R * (c_i / c_next_i)^σ)
+    end
     return resid
+end
+
+"""
+    euler_resid_det(model_params, c, c_next)
+
+Allocate and return absolute Euler equation residuals for the deterministic model.
+"""
+function euler_resid_det(
+    model_params,
+    c::AbstractVector{<:Real},
+    c_next::AbstractVector{<:Real},
+)
+    resid = similar(c, Float64)
+    return euler_resid_det!(resid, model_params, c, c_next)
 end
 
 """
@@ -79,14 +100,14 @@ end
 
 
 """
-    euler_resid_stoch(model_params, a_grid, z_grid, Pz, c)
+    euler_resid_stoch!(resid, model_params, a_grid, z_grid, Pz, c)
 
-Compute absolute Euler equation residuals for the stochastic savings model on a grid of assets `a_grid`
-and shocks `z_grid` with transition matrix `Pz`. The policy `c` is a Na x Nz matrix of consumption. When residuals
-are computed, linear interpolation is used on the asset grid.
-Outputs a Na x Nz matrix of absolute Euler equation residuals.
+Write absolute Euler equation residuals for the stochastic savings model into `resid`.
+The policy `c` is a Na x Nz matrix of consumption. When residuals are computed,
+linear interpolation is used on the asset grid.
 """
-function euler_resid_stoch(
+function euler_resid_stoch!(
+    resid::AbstractMatrix{<:Real},
     model_params,
     a_grid::AbstractVector{<:Real},
     z_grid::AbstractVector{<:Real},
@@ -94,6 +115,7 @@ function euler_resid_stoch(
     c::AbstractMatrix{<:Real},
 )
     Na, Nz = size(c)
+    @assert size(resid, 1) == Na && size(resid, 2) == Nz
     @assert length(a_grid) == Na
     @assert length(z_grid) == Nz
     @assert size(Pz, 1) == Nz && size(Pz, 2) == Nz
@@ -101,8 +123,6 @@ function euler_resid_stoch(
     β = model_params.β
     σ = model_params.σ
     R = (1 + model_params.r)
-
-    res = similar(c, Float64)
 
     # simple scalar linear interpolation helper over a_grid
     lin1(x::AbstractVector{<:Real}, y::AbstractVector{<:Real}, xq::Real) = begin
@@ -133,10 +153,26 @@ function euler_resid_stoch(
                 cp = lin1(a_grid, view(c, :, jp), ap)
                 Emu += Pz[j, jp] * (max(cp, 1e-12) / c_ij)^(-σ)
             end
-            res[i, j] = abs(1.0 - β * R * Emu)
+            resid[i, j] = abs(1.0 - β * R * Emu)
         end
     end
-    return res
+    return resid
+end
+
+"""
+    euler_resid_stoch(model_params, a_grid, z_grid, Pz, c)
+
+Allocate and return absolute Euler equation residuals for the stochastic savings model.
+"""
+function euler_resid_stoch(
+    model_params,
+    a_grid::AbstractVector{<:Real},
+    z_grid::AbstractVector{<:Real},
+    Pz::AbstractMatrix{<:Real},
+    c::AbstractMatrix{<:Real},
+)
+    res = similar(c, Float64)
+    return euler_resid_stoch!(res, model_params, a_grid, z_grid, Pz, c)
 end
 
 end # module

@@ -2,7 +2,8 @@ module EGMKernel
 
 using ..CommonInterp:
     interp_linear!, interp_pchip!, InterpKind, LinearInterp, MonotoneCubicInterp
-using ..EulerResiduals: euler_resid_det, euler_resid_stoch
+using ..EulerResiduals:
+    euler_resid_det, euler_resid_stoch, euler_resid_det!, euler_resid_stoch!
 
 export solve_egm_det, solve_egm_stoch
 
@@ -85,7 +86,7 @@ function solve_egm_det(
         Δpol = maximum(abs.(c - cnew))
         c .= (1 - relax) .* c .+ relax .* cnew
 
-        resid = euler_resid_det(model_params, c, cnext)
+        euler_resid_det!(resid, model_params, c, cnext)
         max_resid = maximum(resid[min(2, end):end])
 
         if (best_resid - max_resid < ϵ) && (Δpol < ϵ)
@@ -177,6 +178,7 @@ function solve_egm_stoch(
     cnew = similar(c)
     a_next = similar(c)
     EUprime = similar(a_grid)
+    resid_mat = similar(c)
 
     for it = 1:maxit
         iters = it
@@ -218,7 +220,7 @@ function solve_egm_stoch(
         Δpol = maximum(abs.(c - cnew))
         @. c = (1 - relax) * c + relax * cnew
 
-        resid_mat = euler_resid_stoch(model_params, a_grid, z_grid, Π, c)
+        euler_resid_stoch!(resid_mat, model_params, a_grid, z_grid, Π, c)
         max_resid = maximum(resid_mat[min(2, end):end, :])
 
         if max_resid < tol && Δpol < tol_pol
@@ -237,6 +239,7 @@ function solve_egm_stoch(
             break
         end
     end
+    euler_resid_stoch!(resid_mat, model_params, a_grid, z_grid, Π, c)
 
     runtime = (time_ns() - start_time) / 1e9
     opts = (;
@@ -256,7 +259,7 @@ function solve_egm_stoch(
         z_grid,
         c,
         a_next,
-        resid = euler_resid_stoch(model_params, a_grid, z_grid, Π, c),
+        resid = resid_mat,
         iters,
         converged,
         max_resid,

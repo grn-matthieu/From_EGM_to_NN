@@ -1,5 +1,10 @@
 using Test
-using ThesisProject.EulerResiduals: euler_resid_det, euler_resid_stoch, euler_resid_det_2
+using ThesisProject.EulerResiduals:
+    euler_resid_det,
+    euler_resid_stoch,
+    euler_resid_det_2,
+    euler_resid_det!,
+    euler_resid_stoch!
 
 @testset "euler_resid_det" begin
     params = (; β = 0.96, σ = 2.0, r = 0.04)
@@ -10,12 +15,20 @@ using ThesisProject.EulerResiduals: euler_resid_det, euler_resid_stoch, euler_re
     expected = @. abs(1 - params.β * R * (c / c_next)^params.σ)
     @test res ≈ expected
 
+    res_buf = similar(c)
+    @test euler_resid_det!(res_buf, params, c, c_next) === res_buf
+    @test res_buf ≈ expected
+
     # zero consumption is clamped internally
     c0 = [0.0]
     c_next0 = [1.0]
     res0 = euler_resid_det(params, c0, c_next0)
     expected0 = abs(1 - params.β * R * ((1e-12) / c_next0[1])^params.σ)
     @test res0[1] ≈ expected0
+
+    res0_buf = similar(c0)
+    euler_resid_det!(res0_buf, params, c0, c_next0)
+    @test res0_buf[1] ≈ expected0
 end
 
 @testset "euler_resid_det_interp" begin
@@ -77,6 +90,10 @@ end
         end
     end
     @test res ≈ expected
+
+    res_buf = similar(c)
+    @test euler_resid_stoch!(res_buf, params, a_grid, z_grid, Pz, c) === res_buf
+    @test res_buf ≈ expected
 
     # invalid transition matrix dimensions
     Pz_bad = ones(2, 3) / 3
