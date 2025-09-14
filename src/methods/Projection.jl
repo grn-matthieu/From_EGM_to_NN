@@ -19,6 +19,8 @@ function build_projection_method(cfg::AbstractDict)
         tol = get(cfg[:solver], :tol, 1e-6),
         maxit = get(cfg[:solver], :maxit, 1000),
         verbose = get(cfg[:solver], :verbose, false),
+        orders = get(cfg[:solver], :orders, [cfg[:grids][:Na] - 1]),
+        Nval = get(cfg[:solver], :Nval, cfg[:grids][:Na]),
     ))
 end
 function solve(
@@ -34,8 +36,25 @@ function solve(
 
     sol =
         S === nothing ?
-        solve_projection_det(p, g, U; tol = method.opts.tol, maxit = method.opts.maxit) :
-        solve_projection_stoch(p, g, S, U; tol = method.opts.tol, maxit = method.opts.maxit)
+        solve_projection_det(
+            p,
+            g,
+            U;
+            tol = method.opts.tol,
+            maxit = method.opts.maxit,
+            orders = method.opts.orders,
+            Nval = method.opts.Nval,
+        ) :
+        solve_projection_stoch(
+            p,
+            g,
+            S,
+            U;
+            tol = method.opts.tol,
+            maxit = method.opts.maxit,
+            orders = method.opts.orders,
+            Nval = method.opts.Nval,
+        )
 
     ee = sol.resid
     ee_vec = ee isa AbstractMatrix ? vec(maximum(ee, dims = 2)) : ee
@@ -67,6 +86,7 @@ function solve(
         :converged => sol.converged,
         :max_resid => sol.max_resid,
         :tol => sol.opts.tol,
+        :order => sol.opts.order,
         :julia_version => string(VERSION),
     )
 

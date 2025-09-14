@@ -21,6 +21,8 @@ solver:
   maxit: 10000
   verbose: true
   interp_kind: linear
+  orders: [5]
+  Nval: 50
 
 shocks:
   active: true

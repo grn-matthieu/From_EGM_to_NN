@@ -24,6 +24,8 @@ solver:
   tol: 1.0e-6
   maxit: 10000  # Temporary, update when algs are stabilized
   verbose: true
+  orders: [5]
+  Nval: 50
 
 shocks:
   active: true
