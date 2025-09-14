@@ -26,6 +26,11 @@ function build_perturbation_method(cfg::AbstractDict)
         name = haskey(cfg, :method) ? cfg[:method] : cfg[:solver][:method],
         a_bar = get(cfg[:solver], :a_bar, nothing),
         verbose = get(cfg[:solver], :verbose, false),
+        order = get(cfg[:solver], :order, 1),
+        h_a = get(cfg[:solver], :h_a, nothing),
+        h_z = get(cfg[:solver], :h_z, nothing),
+        tol_fit = get(cfg[:solver], :tol_fit, 1e-8),
+        maxit_fit = get(cfg[:solver], :maxit_fit, 25),
     ))
 end
 
@@ -41,8 +46,29 @@ function solve(
     U = get_utility(model)
 
     sol =
-        S === nothing ? solve_perturbation_det(p, g, U; a_bar = method.opts.a_bar) :
-        solve_perturbation_stoch(p, g, S, U; a_bar = method.opts.a_bar)
+        S === nothing ?
+        solve_perturbation_det(
+            p,
+            g,
+            U;
+            a_bar = method.opts.a_bar,
+            order = method.opts.order,
+            h_a = method.opts.h_a,
+            tol_fit = method.opts.tol_fit,
+            maxit_fit = method.opts.maxit_fit,
+        ) :
+        solve_perturbation_stoch(
+            p,
+            g,
+            S,
+            U;
+            a_bar = method.opts.a_bar,
+            order = method.opts.order,
+            h_a = method.opts.h_a,
+            h_z = method.opts.h_z,
+            tol_fit = method.opts.tol_fit,
+            maxit_fit = method.opts.maxit_fit,
+        )
 
     ee = sol.resid
     ee_vec = ee isa AbstractMatrix ? vec(maximum(ee, dims = 2)) : ee
@@ -75,6 +101,9 @@ function solve(
         :max_resid => sol.max_resid,
         :julia_version => string(VERSION),
         :a_bar => method.opts.a_bar,
+        :order => get(method.opts, :order, 1),
+        :fit_ok => get(sol.opts, :fit_ok, false),
+        :quad_coeffs => get(sol.opts, :quad_coeffs, nothing),
     )
 
     # Basic validations
