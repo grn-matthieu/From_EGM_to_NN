@@ -31,6 +31,7 @@ include("solvers/projection/kernel.jl")
 include("solvers/egm/kernel.jl")
 include("solvers/perturbation/kernel.jl")
 include("solvers/nn/kernel.jl")
+include("solvers/nn/init.jl")
 
 # 5) methods (adapters)
 include("methods/EGM.jl")
