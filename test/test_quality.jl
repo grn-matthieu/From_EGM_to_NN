@@ -8,7 +8,7 @@ using Test
             Aqua.test_all(ThesisProject)
             @test true
         catch err
-            @warn "Aqua.jl not available; skipping Aqua checks" err
+            @info "Aqua.jl not available; skipping Aqua checks" err
             @test true
         end
     end
@@ -20,7 +20,7 @@ using Test
             JET.report_package(ThesisProject; target_modules = (ThesisProject,))
             @test true
         catch err
-            @warn "JET.jl not available; skipping JET checks" err
+            @info "JET.jl not available; skipping JET checks" err
             @test true
         end
     end
