@@ -5,7 +5,7 @@
   - Local CI runner: `scripts/ci/ci_local.sh`.
 
 - experiments: Julia scripts that run models, generate figures, or CSVs.
-  - Examples: `compare_egm_projection.jl`, `robustness_sweep.jl`, `steady_state.jl`.
+  - Examples: `compare_egm_projection.jl`, `robustness_sweep.jl`, `stress_all_methods.jl`, `steady_state.jl`.
 
 - dev: Developer helpers for local workflows.
   - `dev/run_simple_all.sh` runs a couple of quick EGM solves.
