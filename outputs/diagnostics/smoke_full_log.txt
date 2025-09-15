@@ -1,0 +1,185 @@
+Quality Snapshot @ 2025-09-15 17:26:23
+================================================================================
+[Pkg.status()]
+Project ThesisProject v0.3.0
+Status `D:\From_EGM_to_NN\Project.toml`
+⌅ [f6369f11] ForwardDiff v0.10.39
+  [0f8b85d8] JSON3 v1.14.3
+  [276daf66] SpecialFunctions v2.5.1
+  [860ef19b] StableRNGs v1.0.3
+  [10745b16] Statistics v1.11.1
+  [ddb6d928] YAML v0.4.14
+  [37e2e46d] LinearAlgebra v1.11.0
+  [9a3f8284] Random v1.11.0
+  [ea8e919c] SHA v0.7.0
+Info Packages marked with ⌅ have new versions available but compatibility constraints restrict them from upgrading. To see why use `status --outdated`
+
+--------------------------------------------------------------------------------
+[Tests]
+Passed: true
+Coverage: 82.71%
+Test output (truncated to 10k chars):
+Precompiling ThesisProject...
+   2764.3 ms  ✓ ThesisProject
+  1 dependency successfully precompiled in 3 seconds. 32 already precompiled.
+Test Summary:        | Pass  Total   Time
+Deterministic config |   29     29  51.9s
+Test Summary:     | Pass  Total   Time
+Stochastic config |   39     39  13.4s
+[toplevel-info] virtualized the context of Main (took 0.031 sec)
+[toplevel-info] entered into D:\From_EGM_to_NN\src\ThesisProject.jl
+[toplevel-info] entered into D:\From_EGM_to_NN\src\core\api.jl
+[toplevel-info]  exited from D:\From_EGM_to_NN\src\core\api.jl (took 0.673 sec)
+[toplevel-info] entered into D:\From_EGM_to_NN\src\core\model_contract.jl
+[toplevel-info]  exited from D:\From_EGM_to_NN\src\core\model_contract.jl (took 0.007 sec)
+[toplevel-info] entered into D:\From_EGM_to_NN\src\utils\Config.jl
+[toplevel-info]  exited from D:\From_EGM_to_NN\src\utils\Config.jl (took 0.023 sec)
+[toplevel-info] entered into D:\From_EGM_to_NN\src\utils\Determinism.jl
+[toplevel-info]  exited from D:\From_EGM_to_NN\src\utils\Determinism.jl (took 0.02 sec)
+[toplevel-info] entered into D:\From_EGM_to_NN\src\models\shared\Shocks.jl
+[toplevel-info]  exited from D:\From_EGM_to_NN\src\models\shared\Shocks.jl (took 0.055 sec)
+[toplevel-info] entered into D:\From_EGM_to_NN\src\models\baseline\ConsumerSaving.jl
+[toplevel-info]  exited from D:\From_EGM_to_NN\src\models\baseline\ConsumerSaving.jl (took 0.023 sec)
+[toplevel-info] entered into D:\From_EGM_to_NN\src\core\model_factory.jl
+[toplevel-info]  exited from D:\From_EGM_to_NN\src\core\model_factory.jl (took 0.03 sec)
+[toplevel-info] entered into D:\From_EGM_to_NN\src\solvers\common\interp.jl
+[toplevel-info]  exited from D:\From_EGM_to_NN\src\solvers\common\interp.jl (took 0.056 sec)
+[toplevel-info] entered into D:\From_EGM_to_NN\src\solvers\common\value_fun.jl
+[toplevel-info]  exited from D:\From_EGM_to_NN\src\solvers\common\value_fun.jl (took 0.037 sec)
+[toplevel-info] entered into D:\From_EGM_to_NN\src\solvers\common\chebyshev.jl
+[toplevel-info]  exited from D:\From_EGM_to_NN\src\solvers\common\chebyshev.jl (took 0.017 sec)
+[toplevel-info] entered into D:\From_EGM_to_NN\src\solvers\common\residuals.jl
+[toplevel-info]  exited from D:\From_EGM_to_NN\src\solvers\common\residuals.jl (took 0.035 sec)
+[toplevel-info] entered into D:\From_EGM_to_NN\src\solvers\common\validators.jl
+[toplevel-info]  exited from D:\From_EGM_to_NN\src\solvers\common\validators.jl (took 0.022 sec)
+[toplevel-info] entered into D:\From_EGM_to_NN\src\solvers\projection\coefficients.jl
+[toplevel-info]  exited from D:\From_EGM_to_NN\src\solvers\projection\coefficients.jl (took 0.011 sec)
+[toplevel-info] entered into D:\From_EGM_to_NN\src\solvers\projection\kernel.jl
+[toplevel-info]  exited from D:\From_EGM_to_NN\src\solvers\projection\kernel.jl (took 0.07 sec)
+[toplevel-info] entered into D:\From_EGM_to_NN\src\solvers\egm\kernel.jl
+[toplevel-info]  exited from D:\From_EGM_to_NN\src\solvers\egm\kernel.jl (took 0.097 sec)
+[toplevel-info] entered into D:\From_EGM_to_NN\src\solvers\perturbation\kernel.jl
+[toplevel-info]  exited from D:\From_EGM_to_NN\src\solvers\perturbation\kernel.jl (took 0.085 sec)
+[toplevel-info] entered into D:\From_EGM_to_NN\src\solvers\nn\kernel.jl
+[toplevel-info]  exited from D:\From_EGM_to_NN\src\solvers\nn\kernel.jl (took 0.025 sec)
+[toplevel-info] entered into D:\From_EGM_to_NN\src\methods\EGM.jl
+[toplevel-info]  exited from D:\From_EGM_to_NN\src\methods\EGM.jl (took 0.127 sec)
+[toplevel-info] entered into D:\From_EGM_to_NN\src\methods\Projection.jl
+[toplevel-info]  exited from D:\From_EGM_to_NN\src\methods\Projection.jl (took 0.018 sec)
+[toplevel-info] entered into D:\From_EGM_to_NN\src\methods\Perturbation.jl
+[toplevel-info]  exited from D:\From_EGM_to_NN\src\methods\Perturbation.jl (took 0.024 sec)
+[toplevel-info] entered into D:\From_EGM_to_NN\src\methods\NN.jl
+[toplevel-info]  exited from D:\From_EGM_to_NN\src\methods\NN.jl (took 0.023 sec)
+[toplevel-info] entered into D:\From_EGM_to_NN\src\core\method_factory.jl
+[toplevel-info]  exited from D:\From_EGM_to_NN\src\core\method_factory.jl (took 0.007 sec)
+[toplevel-info] entered into D:\From_EGM_to_NN\src\sim\panel.jl
+[toplevel-info]  exited from D:\From_EGM_to_NN\src\sim\panel.jl (took 0.038 sec)
+[toplevel-info] entered into D:\From_EGM_to_NN\src\analysis\SteadyState.jl
+[toplevel-info]  exited from D:\From_EGM_to_NN\src\analysis\SteadyState.jl (took 0.015 sec)
+[toplevel-info] entered into D:\From_EGM_to_NN\src\viz\api.jl
+[toplevel-info]  exited from D:\From_EGM_to_NN\src\viz\api.jl (took 0.006 sec)
+[toplevel-info]  exited from D:\From_EGM_to_NN\src\ThesisProject.jl (took 1.894 sec)
+
+[toplevel-info] analyzing from top-level definitions (1/196)
+[toplevel-info] analyzing from top-level definitions (2/196)
+[toplevel-info] analyzing from top-level definitions (3/196)
+[toplevel-info] analyzing from top-level definitions (4/196)
+[toplevel-info] analyzing from top-level definitions (5/196)
+[toplevel-info] analyzing from top-level definitions (6/196)
+[toplevel-info] analyzing from top-level definitions (7/196)
+[toplevel-info] analyzing from top-level definitions (8/196)
+[toplevel-info] analyzing from top-level definitions (9/196)
+[toplevel-info] analyzing from top-level definitions (10/196)
+[toplevel-info] analyzing from top-level definitions (11/196)
+[toplevel-info] analyzing from top-level definitions (12/196)
+[toplevel-info] analyzing from top-level definitions (13/196)
+[toplevel-info] analyzing from top-level definitions (14/196)
+[toplevel-info] analyzing from top-level definitions (15/196)
+[toplevel-info] analyzing from top-level definitions (16/196)
+[toplevel-info] analyzing from top-level definitions (17/196)
+[toplevel-info] analyzing from top-level definitions (18/196)
+[toplevel-info] analyzing from top-level definitions (19/196)
+[toplevel-info] analyzing from top-level definitions (20/196)
+[toplevel-info] analyzing from top-level definitions (21/196)
+[toplevel-info] analyzing from top-level definitions (22/196)
+[toplevel-info] analyzing from top-level definitions (23/196)
+[toplevel-info] analyzing from top-level definitions (24/196)
+[toplevel-info] analyzing from top-level definitions (25/196)
+[toplevel-info] analyzing from top-level definitions (26/196)
+[toplevel-info] analyzing from top-level definitions (27/196)
+[toplevel-info] analyzing from top-level definitions (28/196)
+[toplevel-info] analyzing from top-level definitions (29/196)
+[toplevel-info] analyzing from top-level definitions (30/196)
+[toplevel-info] analyzing from top-level definitions (31/196)
+[toplevel-info] analyzing from top-level definitions (32/196)
+[toplevel-info] analyzing from top-level definitions (33/196)
+[toplevel-info] analyzing from top-level definitions (34/196)
+[toplevel-info] analyzing from top-level definitions (35/196)
+[toplevel-info] analyzing from top-level definitions (36/196)
+[toplevel-info] analyzing from top-level definitions (37/196)
+[toplevel-info] analyzing from top-level definitions (38/196)
+[toplevel-info] analyzing from top-level definitions (39/196)
+[toplevel-info] analyzing from top-level definitions (40/196)
+[toplevel-info] analyzing from top-level definitions (41/196)
+[toplevel-info] analyzing from top-level definitions (42/196)
+[toplevel-info] analyzing from top-level definitions (43/196)
+[toplevel-info] analyzing from top-level definitions (44/196)
+[toplevel-info] analyzing from top-level definitions (45/196)
+[toplevel-info] analyzing from top-level definitions (46/196)
+[toplevel-info] analyzing from top-level definitions (47/196)
+[toplevel-info] analyzing from top-level definitions (48/196)
+[toplevel-info] analyzing from top-level definitions (49/196)
+[toplevel-info] analyzing from top-level definitions (50/196)
+[toplevel-info] analyzing from top-level definitions (51/196)
+[toplevel-info] analyzing from top-level definitions (52/196)
+[toplevel-info] analyzing from top-level definitions (53/196)
+[toplevel-info] analyzing from top-level definitions (54/196)
+[toplevel-info] analyzing from top-level definitions (55/196)
+[toplevel-info] analyzing from top-level definitions (56/196)
+[toplevel-info] analyzing from top-level definitions (57/196)
+[toplevel-info] analyzing from top-level definitions (58/196)
+[toplevel-info] analyzing from top-level definitions (59/196)
+[toplevel-info] analyzing from top-level definitions (60/196)
+[toplevel-info] analyzing from top-level definitions (61/196)
+[toplevel-info] analyzing from top-level definitions (62/196)
+[toplevel-info] analyzing from top-level definitions (63/196)
+[toplevel-info] analyzing from top-level definitions (64/196)
+[toplevel-info] analyzing from top-level definitions (65/196)
+[toplevel-info] analyzing from top-level definitions (66/196)
+[toplevel-info] analyzing from top-level definitions (67/196)
+[toplevel-info] analyzing from top-level definitions (68/196)
+[toplevel-info] analyzing from top-level definitions (69/196)
+[toplevel-info] analyzing from top-level definitions (70/196)
+[toplevel-info] analyzing from top-level definitions (71/196)
+[toplevel-info] analyzing from top-level definitions (72/196)
+[toplevel-info] analyzing from top-level definitions (73/196)
+[toplevel-info] analyzing from top-level definitions (74/196)
+[toplevel-info] analyzing from top-level definitions (75/196)
+[toplevel-info] analyzing from top-level definitions (76/196)
+[toplevel-info] analyzing from top-level definitions (77/196)
+[toplevel-info] analyzing from top-level definitions (78/196)
+[toplevel-info] analyzing from top-level definitions (79/196)
+[toplevel-info] analyzing from top-level definitions (80/196)
+[toplevel-info] analyzing from top-level definitions (81/196)
+[toplevel-info] analyzing from top-level definitions (82/196)
+[toplevel-info] analyzing from top-level definitions (83/196)
+[toplevel-info] analyzing from top-level definitions (84/196)
+[toplevel-info] analyzing from top-level definitions (85/196)
+[toplevel-info] analyzing from top-level definitions (86/196)
+[toplevel-info] analyzing from top-lev
+
+...
+[truncated]
+--------------------------------------------------------------------------------
+[CI Smoke]
+Command: julia --project=. scripts/ci/smoke.jl
+Succeeded: true
+Output:
+[OK] D:\From_EGM_to_NN\scripts\ci\..\..\config\smoke_config\smoke_config.yaml | resid=7.923e-07 iters=195 interp=ThesisProject.CommonInterp.LinearInterp() t=1.20s
+[OK] D:\From_EGM_to_NN\scripts\ci\..\..\config\smoke_config\smoke_config_stochastic.yaml | resid=7.792e-07 iters=379 interp=ThesisProject.CommonInterp.LinearInterp() t=0.58s
+--------------------------------------------------------------------------------
+[Slowest Test]
+Slowest testset: Deterministic config (51.900s)
+Per-testset timings (s):
+  Deterministic config             51.900
+  Stochastic config                13.400
