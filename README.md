@@ -1,37 +1,24 @@
 # From_EGM_to_NN
-[![Coverage](https://codecov.io/gh/USER/From_EGM_to_NN/branch/main/graph/badge.svg)](https://codecov.io/gh/USER/From_EGM_to_NN)
-**Master’s Thesis – Master in Economics, IP Paris**
-Author: *Matthieu Grenier*
 
-Supervisor : *Pablo Winant*
+Master's Thesis — Master in Economics, IP Paris
+
+Author: Matthieu Grenier  •  Supervisor: Pablo Winant
 
 ---
 
 ## Overview
 
-This repository contains the code, notebooks, and results for my Master’s thesis in **computational economics**.
-The project investigates how **deep learning** methods can be useful for economists compared to traditional **perturbation** and **projection** methods.
+This repository contains the code and experiments for a master's thesis in computational economics. It studies how deep learning compares with traditional perturbation and projection methods on dynamic models, with emphasis on kinks in policy functions as a stress test for numerical methods.
 
-This thesis is inspired by **Maliar et al. (2021)**. The notebooks in the repository replicate and enhance their approach. We select throughout the notebooks problems with a kink in the policy function. This attribute makes it a good stress test for numerical solution methods.
+The implementation centers on the Julia package `ThesisProject` (v0.3.0), pinned to Julia `1.11.6` via `Project.toml`. Results are designed to be reproducible using fixed seeds where relevant.
 
-This repository aims to document the results exposed in the thesis. The graphs, tables, and results, are reproducible, as random seeds are fixed.
-
-The Jupyter notebooks in the repository are written using the Julia Programming Language 1.11.6
-
-External readers may feel free to use my work for personnal or educationnal purposes.
-
----
-## References
-
-Maliar, L., Maliar, S., & Winant, P. (2021). Deep learning for solving dynamic economic models. Journal of Monetary Economics.
-
-Judd, K. L. (1998). Numerical Methods in Economics. MIT Press.
+References that motivate the approach include Maliar, Maliar, and Winant (2021) and Judd (1998).
 
 ---
 
 ## Quickstart
 
-- Instantiate and test:
+- Instantiate and run tests:
   - `julia --project -e 'using Pkg; Pkg.instantiate(); Pkg.test()'`
 
 - Minimal example:
@@ -42,26 +29,26 @@ Judd, K. L. (1998). Numerical Methods in Economics. MIT Press.
   - `method = build_method(cfg)`
   - `sol = solve(model, method, cfg)`
 
-- Plotting (optional):
-  - `using Plots`
-  - `plot_policy(sol)`; `plot_euler_errors(sol)`
+- Plotting (optional, via package extension):
+  - `using Plots`  # enables `ThesisProjectPlotsExt`
+  - `ThesisProject.plot_policy(sol)`; `ThesisProject.plot_euler_errors(sol)`
 
 ---
 
-## Config Format
+## Configs
 
-Configs are YAML files loaded via `load_config`, which recursively converts keys to symbols. A minimal config requires:
+Configs are YAML files loaded via `load_config`, with keys converted to symbols. A minimal config requires:
 - `:model`: at least `name`
 - `:params`: model parameters
-- `:grids`: `Na`, `a_min`, `a_max`
-- `:solver`: `method` (e.g., `"EGM"`)
+- `:grids`: e.g., `Na`, `a_min`, `a_max`
+- `:solver`: `method` (e.g., `"EGM"`, `"Projection"`, `"Perturbation"`, `"NN"`)
 
-Optional solver fields supported by the EGM method:
-- `solver.interp_kind`: interpolation for policy evaluation inside EGM. One of `linear`, `pchip`, `monotone_cubic` (default: `linear`).
-- `solver.warm_start`: initial policy guess. One of `default`/`half_resources` (kernel default), or `steady_state` (sets `a' = a`, so `c = y + (1+r)a - a`). You may also provide a custom initial policy via `init.c` in the config (vector for deterministic, matrix for stochastic), which takes precedence.
+Selected EGM options:
+- `solver.interp_kind`: `linear` (default), `pchip`, or `monotone_cubic`.
+- `solver.warm_start`: `default`/`half_resources` or `steady_state`. You can also provide a custom initial policy via `init.c` (vector for deterministic, matrix for stochastic) which takes precedence.
 
-Optional shock fields:
-- `shocks.validate`: when `true` (default), check that the computed invariant distribution satisfies `Π'π ≈ π`. Set to `false` to skip this validation.
+Shock-related option:
+- `shocks.validate`: when `true` (default), checks the invariant distribution consistency; set `false` to skip.
 
 Example:
 
@@ -70,9 +57,11 @@ shocks:
   validate: false  # disable invariant distribution check
 ```
 
-## Running Simple Model Solvers
+---
 
-Run the basic solver on a deterministic or stochastic config:
+## Running Solvers
+
+Deterministic or stochastic baseline:
 
 - `using ThesisProject`
 - `cfg = load_config("config/simple_baseline.yaml")`  # or `config/simple_stochastic.yaml`
@@ -80,51 +69,59 @@ Run the basic solver on a deterministic or stochastic config:
 - `model = build_model(cfg)`
 - `method = build_method(cfg)`
 - `sol = solve(model, method, cfg)`
-- Optional plotting (if `Plots` is available):
-  - `using Plots`
-  - `plot_policy(sol)`
 
-Switch to the stochastic setup by replacing the path in `load_config` with "config/simple_stochastic.yaml". Both configs can set `cfg.random.seed` to control randomness without calling `Random.seed!`.
+Optional plotting (if `Plots` is available):
+- `using Plots`
+- `ThesisProject.plot_policy(sol)`
 
+Switch to the stochastic setup by using `config/simple_stochastic.yaml`. Both configs can set `random.seed` to control randomness without calling `Random.seed!`.
 
 ---
 
 ## Smoke Checks
 
-- Run a fast regression sweep on key configs:
+- Run fast regression checks on key configs:
   - `julia --project scripts/ci/smoke.jl`
-  - Exit code is non-zero if any config fails (useful in CI).
-  - You can pass specific configs: `julia --project scripts/ci/smoke.jl config/smoke_config/smoke_config.yaml`
+  - Pass specific configs if desired: `julia --project scripts/ci/smoke.jl config/smoke_config/smoke_config.yaml`
 
-CI is configured via `.github/workflows/ci.yml` to run tests, smoke checks, and upload coverage reports to [Codecov](https://codecov.io/gh/USER/From_EGM_to_NN) on pushes and PRs.
-
-Validate early with `validate_config(cfg)`; the function throws if something is missing or inconsistent.
+Use `validate_config(cfg)` early; it throws on missing or inconsistent fields.
 
 ---
 
-## Quality Checks (Optional)
+## Experiments
 
-The test suite can run Aqua.jl (package hygiene) and JET.jl (type stability/errors) if they are installed. They are optional; tests skip them if unavailable.
+Selected scripts under `scripts/experiments`:
+- `make_figures_simple.jl`: generate core figures for the simple model.
+- `compare_egm_projection.jl`: compare EGM vs projection methods.
+- `compare_methods_deviations.jl`: method comparison on deviations.
+- `robustness_sweep.jl`: parameter sweeps for robustness.
+- `stress_all_methods.jl`: stress tests across methods.
+- `generate_baseline_csv.jl`: export baseline results to CSV.
 
-- Install once if desired:
-  - `julia --project -e 'using Pkg; Pkg.add(["Aqua", "JET"])'`
+Each script is runnable with `julia --project path/to/script.jl` and may read from `config/`.
 
-- Run tests as usual: `Pkg.test()`
+---
+
+## Development
+
+- Quality checks (optional): If installed, the test suite will pick up Aqua.jl (package hygiene) and JET.jl (type stability/errors).
+  - Install: `julia --project -e 'using Pkg; Pkg.add(["Aqua", "JET"])'`
+  - Run tests: `julia --project -e 'using Pkg; Pkg.test()'`
+
+- Formatting: This repo uses [pre-commit](https://pre-commit.com/) with JuliaFormatter for `.jl` files.
+  - `pip install pre-commit`
+  - `julia --project -e 'using Pkg; Pkg.add("JuliaFormatter")'`
+  - `pre-commit install`
+  - Run manually: `pre-commit run --files $(git ls-files "*.jl")`
 
 ---
 
-## Formatting
+## References
 
-This repository uses [pre-commit](https://pre-commit.com/) with JuliaFormatter to keep `.jl` files tidy.
-
-Install and activate the hook:
-
-- `pip install pre-commit`
-- `julia --project -e 'using Pkg; Pkg.add("JuliaFormatter")'`
-- `pre-commit install`
-
-Run formatting manually with:
-
-- `pre-commit run --files $(git ls-files '*.jl')`
+- Maliar, L., Maliar, S., & Winant, P. (2021). Deep learning for solving dynamic economic models. Journal of Monetary Economics.
+- Judd, K. L. (1998). Numerical Methods in Economics. MIT Press.
 
 ---
+
+External readers may use this work for personal or educational purposes.
+
