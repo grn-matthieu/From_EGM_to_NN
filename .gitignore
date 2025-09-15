@@ -1,6 +1,13 @@
 # Ignore all outputs from robustness and other runs
 runs/
 *.png
+# Allow committed PNGs in docs (e.g., graphs/images)
+!docs/*.png
+!docs/**/*.png
+
+# Keep PNGs in outputs ignored
+outputs/*.png
+outputs/**/*.png
 *.csv
 
 # Ignore Julia compiled files and environments

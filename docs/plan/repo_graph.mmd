@@ -1,0 +1,152 @@
+%% Auto-generated detailed module graph
+flowchart LR
+classDef src fill:#eef,stroke:#88a,stroke-width:1px;
+classDef ext fill:#efe,stroke:#8a8,stroke-width:1px;
+classDef file fill:#fff,stroke:#bbb,stroke-dasharray: 3 2;
+subgraph src/core
+  ModelFactory["ModelFactory<br/>(model_factory.jl)"]
+  MethodFactory["MethodFactory<br/>(method_factory.jl)"]
+  ModelContract["ModelContract<br/>(model_contract.jl)"]
+  API["API<br/>(api.jl)"]
+end
+subgraph src/methods
+  Projection["Projection<br/>(Projection.jl)"]
+  Perturbation["Perturbation<br/>(Perturbation.jl)"]
+  EGM["EGM<br/>(EGM.jl)"]
+end
+subgraph src/models/shared
+  Shocks["Shocks<br/>(Shocks.jl)"]
+end
+subgraph src/models/baseline
+  ConsumerSaving["ConsumerSaving<br/>(ConsumerSaving.jl)"]
+end
+subgraph src/solvers/common
+  ValueFunction["ValueFunction<br/>(value_fun.jl)"]
+  CommonValidators["CommonValidators<br/>(validators.jl)"]
+  CommonInterp["CommonInterp<br/>(interp.jl)"]
+  Chebyshev["Chebyshev<br/>(chebyshev.jl)"]
+  EulerResiduals["EulerResiduals<br/>(residuals.jl)"]
+end
+subgraph src/solvers/projection
+  ProjectionKernel["ProjectionKernel<br/>(kernel.jl)"]
+  ProjectionCoefficients["ProjectionCoefficients<br/>(coefficients.jl)"]
+end
+subgraph src/solvers/egm
+  EGMKernel["EGMKernel<br/>(kernel.jl)"]
+end
+subgraph src/solvers/perturbation
+  PerturbationKernel["PerturbationKernel<br/>(kernel.jl)"]
+end
+subgraph src/utils
+  Determinism["Determinism<br/>(Determinism.jl)"]
+  UtilsConfig["UtilsConfig<br/>(Config.jl)"]
+end
+subgraph src/sim
+  SimPanel["SimPanel<br/>(panel.jl)"]
+end
+subgraph src/analysis
+  SteadyState["SteadyState<br/>(SteadyState.jl)"]
+end
+subgraph src/viz
+  src_viz_api_jl("api.jl")
+end
+subgraph ext
+  ThesisProjectPlotsExt["ThesisProjectPlotsExt<br/>(ThesisProjectPlotsExt.jl)"]
+end
+subgraph src/ThesisProject.jl
+  ThesisProject["ThesisProject<br/>(ThesisProject.jl)"]
+end
+  ModelFactory -->|uses| API
+  ModelFactory -->|uses| ModelContract
+  ModelFactory -->|uses| ConsumerSaving
+  ValueFunction -->|uses| CommonInterp
+  MethodFactory -->|uses| API
+  MethodFactory -->|uses| EGM
+  MethodFactory -->|uses| Perturbation
+  UtilsConfig -->|uses| API
+  ModelContract -->|uses| API
+  SteadyState -->|uses| API
+  SteadyState -->|uses| ConsumerSaving
+  SteadyState -->|uses| CommonInterp
+  ConsumerSaving -->|uses| API
+  ConsumerSaving -->|uses| Shocks
+  SimPanel -->|uses| Determinism
+  SimPanel -->|uses| API
+  SimPanel -->|uses| CommonInterp
+  ThesisProject -->|uses| SimPanel
+  ThesisProject -->|uses| SteadyState
+  ThesisProject -->|uses| API
+  Projection -->|uses| API
+  Projection -->|uses| ProjectionKernel
+  Projection -->|uses| ValueFunction
+  Projection -->|uses| Determinism
+  Perturbation -->|uses| API
+  Perturbation -->|uses| PerturbationKernel
+  Perturbation -->|uses| ValueFunction
+  Perturbation -->|uses| Determinism
+  Perturbation -->|uses| CommonValidators
+  EGMKernel -->|uses| CommonInterp
+  EGMKernel -->|uses| EulerResiduals
+  PerturbationKernel -->|uses| EulerResiduals
+  PerturbationKernel -->|uses| CommonInterp
+  ThesisProjectPlotsExt -->|uses| ThesisProject
+  ProjectionKernel -->|uses| Chebyshev
+  ProjectionKernel -->|uses| ProjectionCoefficients
+  ProjectionKernel -->|uses| EulerResiduals
+  ProjectionKernel -->|uses| CommonInterp
+  EGM -->|uses| API
+  EGM -->|uses| EGMKernel
+  EGM -->|uses| ValueFunction
+  EGM -->|uses| Determinism
+  EGM -->|uses| CommonInterp
+  EGM -->|uses| CommonValidators
+  EulerResiduals -->|uses| CommonInterp
+  ThesisProject -.includes .-> API
+  ThesisProject -.includes .-> ModelContract
+  ThesisProject -.includes .-> UtilsConfig
+  ThesisProject -.includes .-> Determinism
+  ThesisProject -.includes .-> Shocks
+  ThesisProject -.includes .-> ConsumerSaving
+  ThesisProject -.includes .-> ModelFactory
+  ThesisProject -.includes .-> CommonInterp
+  ThesisProject -.includes .-> ValueFunction
+  ThesisProject -.includes .-> Chebyshev
+  ThesisProject -.includes .-> EulerResiduals
+  ThesisProject -.includes .-> CommonValidators
+  ThesisProject -.includes .-> ProjectionCoefficients
+  ThesisProject -.includes .-> ProjectionKernel
+  ThesisProject -.includes .-> EGMKernel
+  ThesisProject -.includes .-> PerturbationKernel
+  ThesisProject -.includes .-> EGM
+  ThesisProject -.includes .-> Projection
+  ThesisProject -.includes .-> Perturbation
+  ThesisProject -.includes .-> MethodFactory
+  ThesisProject -.includes .-> SimPanel
+  ThesisProject -.includes .-> SteadyState
+  ThesisProject -.includes .-> src_viz_api_jl
+class SimPanel src;
+class Projection src;
+class Perturbation src;
+class EGM src;
+class ThesisProject src;
+class Determinism src;
+class UtilsConfig src;
+class ModelFactory src;
+class MethodFactory src;
+class ModelContract src;
+class API src;
+class Shocks src;
+class SteadyState src;
+class ConsumerSaving src;
+class src_viz_api_jl src;
+class ValueFunction src;
+class CommonValidators src;
+class CommonInterp src;
+class Chebyshev src;
+class EulerResiduals src;
+class ThesisProjectPlotsExt ext;
+class ProjectionKernel src;
+class ProjectionCoefficients src;
+class PerturbationKernel src;
+class EGMKernel src;
+class src_viz_api_jl file;
