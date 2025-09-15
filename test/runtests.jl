@@ -34,6 +34,7 @@ end
     include("test_quality.jl")
     include("test_value_function.jl")
     include("test_projection_orders.jl")
+    include("test_perturbation_method.jl")
 end
 
 #include("test_projection_stoch.jl")
