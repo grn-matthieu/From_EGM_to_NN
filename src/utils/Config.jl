@@ -228,7 +228,14 @@ function validate_config(cfg::AbstractDict)
             sh[rho_key]
         (rho isa Real && -1 < rho < 1) ||
             error("shocks.ρ_shock must be Real in (-1,1); got $(rho)")
-        s_e = _getnum(sh, :s_shock; name = "shocks.s_shock")
+        sigma_key =
+            haskey(sh, Symbol("σ_shock")) ? Symbol("σ_shock") :
+            (haskey(sh, :s_shock) ? :s_shock : nothing)
+        sigma_key === nothing &&
+            error("shocks.σ_shock (or s_shock) missing when shocks.active = true")
+        s_e = sh[sigma_key]
+        (s_e isa Real) ||
+            error("shocks.$(String(sigma_key)) must be a number; got $(typeof(s_e))")
         s_e >= 0 || error("shocks.s_shock must be >= 0; got $(s_e)")
         Nz = _getnum(sh, :Nz; name = "shocks.Nz")
         (Nz isa Integer) || error("shocks.Nz must be Integer; got $(typeof(Nz))")
