@@ -155,7 +155,10 @@ function solve_perturbation_det(
     resid = euler_resid_det_2(p, a_grid, c)
     iters = 1
     converged = true
-    max_resid = maximum(resid)
+    # prune boundaries when assessing accuracy
+    lo = Na > 2 ? 2 : 1
+    hi = Na > 2 ? Na - 1 : Na
+    max_resid = maximum(view(resid, lo:hi))
     opts = (;
         maxit = iters,
         runtime = (time_ns() - t0) / 1e9,
@@ -297,7 +300,10 @@ function solve_perturbation_stoch(
     resid = euler_resid_stoch(p, a_grid, z_grid, Π, c)
     iters = 1
     converged = true
-    max_resid = maximum(resid)
+    # prune boundary asset points when computing maximum residual
+    lo = Na > 2 ? 2 : 1
+    hi = Na > 2 ? Na - 1 : Na
+    max_resid = maximum(view(resid, lo:hi, :))
     opts = (;
         maxit = iters,
         runtime = (time_ns() - t0) / 1e9,
