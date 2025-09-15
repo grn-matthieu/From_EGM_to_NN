@@ -30,12 +30,13 @@ include("solvers/projection/kernel.jl")
 # egm specific
 include("solvers/egm/kernel.jl")
 include("solvers/perturbation/kernel.jl")
+include("solvers/nn/kernel.jl")
 
 # 5) methods (adapters)
 include("methods/EGM.jl")
 include("methods/Projection.jl")
 include("methods/Perturbation.jl")
-# include("methods/NN.jl")   # ok if stub
+include("methods/NN.jl")   # NN adapter (initial placeholder)
 
 # 6) method factory
 include("core/method_factory.jl")
