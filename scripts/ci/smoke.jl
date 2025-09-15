@@ -2,7 +2,8 @@
 using Pkg
 using Dates
 
-pushfirst!(LOAD_PATH, joinpath(@__DIR__, ".."))
+# Ensure the project is on LOAD_PATH (repo root is two levels up)
+pushfirst!(LOAD_PATH, joinpath(@__DIR__, "..", ".."))
 using ThesisProject
 using Printf
 
@@ -37,11 +38,15 @@ function main()
     cfgs = String[]
     # CLI args are config paths; if none provided, use defaults
     if isempty(ARGS)
-        push!(cfgs, joinpath(@__DIR__, "..", "config", "smoke_config", "smoke_config.yaml"))
+        push!(
+            cfgs,
+            joinpath(@__DIR__, "..", "..", "config", "smoke_config", "smoke_config.yaml"),
+        )
         push!(
             cfgs,
             joinpath(
                 @__DIR__,
+                "..",
                 "..",
                 "config",
                 "smoke_config",

@@ -39,8 +39,16 @@ jobs:
       - name: Run tests with coverage
         run: julia --project=. --code-coverage=user -e 'using Pkg; Pkg.test(coverage=true)'
 
-      - name: Generate coverage report
-        uses: julia-actions/julia-processcoverage@v1
+      - name: Generate coverage report (src only)
+        run: |
+          julia -e '
+            using Pkg
+            Pkg.activate(temp=true)
+            Pkg.add("Coverage")
+            using Coverage
+            cov = process_folder("src")
+            LCOV.writefile("lcov.info", cov)
+          '
 
       - name: Check coverage
         run: |
@@ -67,4 +75,4 @@ jobs:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Smoke (deterministic and stochastic)
-        run: julia --project=. scripts/smoke.jl
+        run: julia --project=. scripts/ci/smoke.jl

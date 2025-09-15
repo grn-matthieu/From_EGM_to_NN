@@ -7,3 +7,4 @@ pre-commit run --all-files --show-diff-on-failure
 julia --project=. -e 'using Pkg; Pkg.test(coverage=true)'
 julia --project=. -e 'using Coverage; cov=process_folder("src"); LCOV.writefile("lcov.info", cov)'
 julia -e 'using Pkg; Pkg.activate(temp=true); Pkg.add("Coverage"); using Coverage: LCOV, get_summary; c=LCOV.readfile("lcov.info"); println(get_summary(c))'
+

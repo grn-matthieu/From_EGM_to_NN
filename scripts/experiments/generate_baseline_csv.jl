@@ -10,7 +10,7 @@ Outputs two files in `outputs/`:
 - egm_baseline_stoch.csv
 
 Run with:
-  julia --project=. scripts/generate_baseline_csv.jl [--Na=..] [--Nz=..] [--tol=..] [--tol_pol=..]
+  julia --project=. scripts/experiments/generate_baseline_csv.jl [--Na=..] [--Nz=..] [--tol=..] [--tol_pol=..]
 """
 
 module GenerateBaselineCSV
@@ -19,7 +19,7 @@ import Pkg
 using Dates
 using Printf
 
-const ROOT = normpath(joinpath(@__DIR__, ".."))
+const ROOT = normpath(joinpath(@__DIR__, "..", ".."))
 
 """
 Activate the project immediately so downstream `using ThesisProject` works.

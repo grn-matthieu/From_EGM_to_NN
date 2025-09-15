@@ -92,9 +92,9 @@ Switch to the stochastic setup by replacing the path in `load_config` with "conf
 ## Smoke Checks
 
 - Run a fast regression sweep on key configs:
-  - `julia --project scripts/smoke.jl`
+  - `julia --project scripts/ci/smoke.jl`
   - Exit code is non-zero if any config fails (useful in CI).
-  - You can pass specific configs: `julia --project scripts/smoke.jl config/smoke_config/smoke_config.yaml`
+  - You can pass specific configs: `julia --project scripts/ci/smoke.jl config/smoke_config/smoke_config.yaml`
 
 CI is configured via `.github/workflows/ci.yml` to run tests, smoke checks, and upload coverage reports to [Codecov](https://codecov.io/gh/USER/From_EGM_to_NN) on pushes and PRs.
 

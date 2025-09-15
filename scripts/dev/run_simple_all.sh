@@ -4,8 +4,8 @@
 
 set -euo pipefail
 
-# Resolve repository root
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Resolve repository root (two levels up from scripts/dev)
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 # Grid sizes to test
 GRIDS=(100 1000)

@@ -3,11 +3,11 @@
 Generate policy and Euler-error plots for the simple consumer-saving model in
 deterministic and stochastic settings. Figures are saved under `outputs/`.
 Run:
-  julia --project=. scripts/make_figures_simple.jl
+  julia --project=. scripts/experiments/make_figures_simple.jl
 """
 module MakeFiguresSimple
 import Pkg
-Pkg.activate(normpath(joinpath(@__DIR__, "..")); io = devnull)
+Pkg.activate(normpath(joinpath(@__DIR__, "..", "..")); io = devnull)
 using ThesisProject
 using ThesisProject.Determinism: make_rng
 try
@@ -15,7 +15,7 @@ try
 catch err
     @warn "Plots not available; skipping figure generation" err
 end
-const ROOT = normpath(joinpath(@__DIR__, ".."))
+const ROOT = normpath(joinpath(@__DIR__, "..", ".."))
 const OUTDIR = joinpath(ROOT, "outputs")
 """Ensure the output directory exists."""
 function ensure_outdir()

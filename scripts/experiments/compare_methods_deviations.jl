@@ -4,7 +4,7 @@ Automate plots of policy/value function deviations for all 3 methods
 (EGM, Projection, Perturbation) on the same model configuration.
 
 Usage:
-  julia --project=. scripts/compare_methods_deviations.jl [--config=path]
+  julia --project=. scripts/experiments/compare_methods_deviations.jl [--config=path]
 
 Notes:
 - Saves figures under `outputs/`:
@@ -15,7 +15,7 @@ Notes:
 module CompareMethodsDeviations
 
 import Pkg
-Pkg.activate(normpath(joinpath(@__DIR__, "..")); io = devnull)
+Pkg.activate(normpath(joinpath(@__DIR__, "..", "..")); io = devnull)
 
 using ThesisProject
 using ThesisProject.Determinism: make_rng
@@ -28,7 +28,7 @@ catch err
     @warn "Plots not available; deviation plots will be skipped" err
 end
 
-const ROOT = normpath(joinpath(@__DIR__, ".."))
+const ROOT = normpath(joinpath(@__DIR__, "..", ".."))
 const OUTDIR = joinpath(ROOT, "outputs")
 const HEATDIR = joinpath(OUTDIR, "heatmaps")
 
