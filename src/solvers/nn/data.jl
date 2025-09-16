@@ -1,6 +1,7 @@
 module NNData
 
 using Random
+using ..Determinism: make_rng
 
 export grid_minibatches
 
@@ -12,6 +13,7 @@ export grid_minibatches
         batch::Integer=128,
         shuffle::Bool=true,
         rng=nothing,
+        seed::Union{Nothing,Integer}=nothing,
         drop_last::Bool=false,
         antithetic::Bool=false,
     ) -> iterator
@@ -41,6 +43,7 @@ function grid_minibatches(
     batch::Integer = 128,
     shuffle::Bool = true,
     rng = nothing,
+    seed::Union{Nothing,Integer} = nothing,
     drop_last::Bool = false,
     antithetic::Bool = false,
 )
@@ -53,7 +56,9 @@ function grid_minibatches(
         @assert size(targets, 2) == Ny "targets must have size (Na, Ny)"
     end
 
-    R = rng === nothing ? Random.default_rng() : rng
+    R =
+        rng !== nothing ? rng :
+        (seed === nothing ? Random.default_rng() : make_rng(Int(seed)))
 
     elT = promote_type(
         eltype(a_grid),
