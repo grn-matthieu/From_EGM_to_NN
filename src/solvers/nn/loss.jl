@@ -37,6 +37,9 @@ function check_finite_residuals(model, policy, batch)::Bool
     return all_finite
 end
 
+
+
+
 """
     stabilize_residuals(R; method = :none)
 
@@ -99,28 +102,7 @@ function euler_mse(R::AbstractArray{<:Real}; reduction::Symbol = :mean)::Float64
     return reduction === :mean ? s64 / length(R) : s64
 end
 
-"""
-    euler_loss(R; reduction = :mean, stabilize::Bool = false, method::Symbol = :log1p_square)
 
-Convenience wrapper that optionally stabilizes residuals before computing MSE.
-
-Behavior:
-- If `stabilize` is `true`, applies `stabilize_residuals(R; method)` first.
-- Then computes `euler_mse(.; reduction)`.
-
-Typical usage:
-- Enable stabilization for heavy‑tailed residuals or early training.
-- Use default `reduction = :mean` to match standard MSE.
-"""
-function euler_loss(
-    R;
-    reduction::Symbol = :mean,
-    stabilize::Bool = false,
-    method::Symbol = :log1p_square,
-)
-    R′ = stabilize ? stabilize_residuals(R; method = method) : R
-    return euler_mse(R′; reduction = reduction)
-end
 
 """
     marg_u(c, θ)
@@ -304,6 +286,126 @@ function _residuals_stoch(model::API.AbstractModel, policy::Dict{Symbol,Any}, ba
     res = similar(c, Float64)
     euler_resid_stoch!(res, p, a_grid, z_grid, Pz, c)
     return res
+end
+
+"""
+    weighted_mse(R, w; reduction = :mean)::Float64
+
+Compute a weighted MSE by scaling residuals with `sqrt.(w)` and then applying
+`euler_mse`. This matches the standard equivalence between weighted MSE and
+rescaling the residuals.
+
+- `R::AbstractArray{<:Real}`: Residuals tensor (any shape).
+- `w::AbstractArray{<:Real}`: Weights broadcastable to `R` (e.g., same shape or scalars).
+- `reduction ? (:mean, :sum)`: Aggregation across all elements.
+
+Examples:
+    julia> weighted_mse([1.0, -2.0], [1.0, 4.0])
+    8.5
+
+    julia> weighted_mse([1.0, -2.0], 3.0; reduction = :sum)
+    15.0
+"""
+function weighted_mse(R::AbstractArray{<:Real}, w; reduction::Symbol = :mean)::Float64
+    return euler_mse(R .* sqrt.(w); reduction = reduction)
+end
+
+"""
+    distance_to_bound(ap, a_min)
+
+Nonnegative distance to the borrowing constraint `a' ≥ a_min`.
+
+Returns `max.(0, a_min .- ap)` with broadcasting, so it accepts scalars
+or arrays for both `ap` and `a_min`.
+
+Examples:
+    julia> distance_to_bound([0.9, 1.0, 1.1], 1.0)
+    3-element Vector{Float64}:
+     0.09999999999999998
+     0.0
+     0.0
+"""
+distance_to_bound(ap, a_min) = max.(0, a_min .- ap)
+
+"""
+    constraint_weights(ap, a_min; α::Real=5.0, κ::Real=20.0, form::Symbol=:exp)
+
+Construct weights that upweight residuals near the borrowing constraint `a′ ≥ a_min`.
+
+Forms (all ensure weights ≥ 1 and finite via a final clamp):
+- `:exp`:    `1 .+ α .* (1 .- exp.(-κ .* distance_to_bound(...)))`
+- `:linear`: `1 .+ α .* distance_to_bound(...)`
+
+`α` controls the strength of upweighting and `κ` the sharpness for `:exp`.
+
+Examples:
+    julia> ap = [0.9, 1.0, 1.2]; a_min = 1.0;
+    julia> constraint_weights(ap, a_min; form = :exp)[1] > 1
+    true
+
+    julia> constraint_weights(ap, a_min; form = :linear)
+    3-element Vector{Float64}:
+     1.5
+     1.0
+     1.0
+"""
+
+"""
+    euler_loss(R; reduction = :mean, stabilize::Bool = false, method::Symbol = :log1p_square,
+               weights::Union{Nothing,AbstractArray}=nothing)
+
+Convenience wrapper that optionally stabilizes residuals before computing MSE.
+
+Behavior:
+- If `stabilize` is `true`, applies `stabilize_residuals(R; method)` first.
+- If `weights !== nothing`, computes `weighted_mse(.; reduction)` with the
+  provided `weights`.
+- Otherwise computes `euler_mse(.; reduction)`.
+
+Typical usage:
+- Enable stabilization for heavy-tailed residuals or early training.
+- Use default `reduction = :mean` to match standard MSE.
+
+Examples:
+    julia> R = [1.0, -2.0]; w = [2.0, 1.0];
+    julia> euler_loss(R; weights = w)
+    3.0
+"""
+function euler_loss(
+    R;
+    reduction::Symbol = :mean,
+    stabilize::Bool = false,
+    method::Symbol = :log1p_square,
+    weights::Union{Nothing,AbstractArray} = nothing,
+)
+    R_stab = stabilize ? stabilize_residuals(R; method = method) : R
+    if weights === nothing
+        return euler_mse(R_stab; reduction = reduction)
+    else
+        return weighted_mse(R_stab, weights; reduction = reduction)
+    end
+end
+
+# Robust keyword-handling wrapper to support both ASCII and Unicode kwargs
+function constraint_weights(ap, a_min; form::Symbol = :exp, kwargs...)
+    # Accept both :α/:κ and ASCII :alpha/:kappa fallbacks
+    alpha =
+        haskey(kwargs, :α) ? kwargs[:α] : (haskey(kwargs, :alpha) ? kwargs[:alpha] : 5.0)
+    kappa =
+        haskey(kwargs, :κ) ? kwargs[:κ] : (haskey(kwargs, :kappa) ? kwargs[:kappa] : 20.0)
+    d = Float64.(distance_to_bound(ap, a_min))
+    alphaf = Float64(alpha)
+    kappaf = Float64(kappa)
+    w = if form === :exp
+        1 .+ alphaf .* (1 .- exp.(-kappaf .* d))
+    elseif form === :linear
+        1 .+ alphaf .* d
+    else
+        throw(ArgumentError("Unknown form: $(form). Use :exp or :linear."))
+    end
+    w = max.(1.0, w)
+    w = ifelse.(isfinite.(w), w, 1.0)
+    return w
 end
 
 end # module
