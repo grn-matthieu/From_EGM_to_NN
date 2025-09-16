@@ -33,6 +33,7 @@ include("solvers/perturbation/kernel.jl")
 include("solvers/nn/kernel.jl")
 include("solvers/nn/init.jl")
 include("solvers/nn/data.jl")
+include("solvers/nn/loss.jl")
 include("solvers/nn/train.jl")
 
 # 5) methods (adapters)
