@@ -79,7 +79,8 @@ export load_config,
     get_utility,
     simulate_panel,
     steady_state_analytic,
-    steady_state_from_policy
+    steady_state_from_policy,
+    residuals
 
 # --- Extensions ---
 include("viz/api.jl")      # stubs only

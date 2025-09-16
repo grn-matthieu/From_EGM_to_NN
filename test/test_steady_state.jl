@@ -6,7 +6,7 @@ using ThesisProject
     r = cfg[:params][:r]
     # 1) beta*R < 1 -> lower bound
     cfg1 = deepcopy(cfg)
-    cfg1[:params]:[β] = 0.90
+    cfg1[:params][:β] = 0.90
     m1 = build_model(cfg1)
     ss1 = ThesisProject.steady_state_analytic(m1)
     @test ss1.kind == :lower_bound
