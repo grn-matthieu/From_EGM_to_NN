@@ -13,15 +13,21 @@ export grid_minibatches
         shuffle::Bool=true,
         rng=nothing,
         drop_last::Bool=false,
+        antithetic::Bool=false,
     ) -> iterator
 
 Creates a stateful iterator that yields minibatches over the Cartesian product
-of `a_grid × y_grid`.
+of `a_grid x y_grid`.
 
 Each iteration returns a pair `(X, Y)` where:
-  - `X` is a `2 × B` matrix with first row `a` and second row `y` for `B` points
-  - `Y` is a `1 × B` matrix of targets if `targets` is provided (size `(Na, Ny)`),
-    otherwise a `1 × B` matrix filled with `NaN`.
+  - `X` is a `2 x B` matrix with first row `a` and second row `y` for `B` points
+  - `Y` is a `1 x B` matrix of targets if `targets` is provided (size `(Na, Ny)`),
+    otherwise a `1 x B` matrix filled with `NaN`.
+
+If `antithetic=true`, each batch is augmented with mirrored y-index pairs
+`(a_i, y_j) => (a_i, y_{Ny-j+1})` when `Ny>1`. Midpoint indices (when
+`2j == Ny+1`) are not duplicated. Note: this can increase the effective batch
+size up to roughly 2x the requested `batch`.
 
 Ordering traverses `a` fastest by default when not shuffled. If `shuffle=true`,
 each fresh iteration over the returned object re-draws a new random permutation.
@@ -36,6 +42,7 @@ function grid_minibatches(
     shuffle::Bool = true,
     rng = nothing,
     drop_last::Bool = false,
+    antithetic::Bool = false,
 )
     Na = length(a_grid)
     Ny = length(y_grid)
@@ -66,9 +73,10 @@ function grid_minibatches(
         N::Int
         drop_last::Bool
         elT::DataType
+        antithetic::Bool
     end
 
-    Base.length(it::_GridMB) = it.drop_last ? (it.N ÷ it.batch) : ceil(Int, it.N / it.batch)
+    Base.length(it::_GridMB) = it.drop_last ? div(it.N, it.batch) : cld(it.N, it.batch)
 
     function Base.iterate(it::_GridMB)
         ord = it.shuffle ? randperm(it.rng, it.N) : collect(1:it.N)
@@ -92,7 +100,18 @@ function grid_minibatches(
         B = length(idxs)
 
         ia = @. ((idxs - 1) % it.Na) + 1
-        iy = @. ((idxs - 1) ÷ it.Na) + 1
+        iy = fld.((idxs .- 1), it.Na) .+ 1
+
+        if it.antithetic && it.Ny > 1
+            iyt = @. (it.Ny - iy + 1)
+            self = @. (iy == iyt)
+            add_idx = findall(!, self)
+            if !isempty(add_idx)
+                ia = vcat(ia, ia[add_idx])
+                iy = vcat(iy, iyt[add_idx])
+            end
+            B = length(ia)
+        end
 
         X = Array{it.elT}(undef, 2, B)
         @inbounds begin
@@ -122,6 +141,7 @@ function grid_minibatches(
         N,
         drop_last,
         elT,
+        antithetic,
     )
 end
 
