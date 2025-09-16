@@ -16,7 +16,7 @@ Returns a NamedTuple with `(a_ss, c_ss, kind)` where `kind` is one of
 For the baseline deterministic CRRA model with constant income y and gross
 return R = 1 + r:
   - If βR < 1, the steady state is at the borrowing (asset) lower bound.
-  - If βR = 1, any constant `a` is a steady state (we return the lower bound).
+  - If βR ≈ 1, any constant `a` is a steady state (we return the lower bound).
   - If βR > 1, with a finite grid the upper bound is absorbing.
 
 Errors if called when shocks are active (non-degenerate) since the natural
@@ -38,13 +38,13 @@ function steady_state_analytic(model::AbstractModel)
     a_min = g[:a].min
     a_max = g[:a].max
     R = 1 + p.r
-    βR = p.β * R
+    betaR = p.β * R
 
-    if βR < 1 - 1e-12
+    if betaR < 1 - 1e-12
         a_ss = a_min
         c_ss = p.y + p.r * a_ss
         return (a_ss = a_ss, c_ss = c_ss, kind = :lower_bound)
-    elseif abs(βR - 1) ≤ 1e-12
+    elseif abs(betaR - 1) <= 1e-12
         # Indeterminate set; return canonical representative at the lower bound
         a_ss = a_min
         c_ss = p.y + p.r * a_ss

@@ -67,6 +67,12 @@ end
 @testset "Kernels - Perturbation" begin
     include("test_perturbation_kernel.jl")
 end
+@testset "Kernels - NN" begin
+    include("test_nn_kernel.jl")
+end
+@testset "NN - Method Adapter" begin
+    include("test_nn_method.jl")
+end
 
 # --- Core/shared utilities ---
 @testset "Core - Residuals" begin
@@ -103,4 +109,11 @@ end
 end
 @testset "NN - Data" begin
     include("loss_test.jl")
+end
+@testset "NN - Train" begin
+    include("test_nn_train.jl")
+end
+
+@testset "Analysis - SteadyState" begin
+    include("test_steady_state.jl")
 end
