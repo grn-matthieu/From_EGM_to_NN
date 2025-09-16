@@ -7,6 +7,7 @@ using Statistics
 using Dates
 using Printf
 using Random
+using ..NNData: grid_minibatches
 
 using ..NNInit: NNState, init_state
 
