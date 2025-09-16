@@ -9,6 +9,8 @@ export EulerResidual
 export check_finite_residuals,
     stabilize_residuals, euler_mse, euler_loss, marg_u, inv_marg_u
 
+export assemble_euler_loss
+
 """
     check_finite_residuals(model, policy, batch) -> Bool
 
@@ -406,6 +408,41 @@ function constraint_weights(ap, a_min; form::Symbol = :exp, kwargs...)
     w = max.(1.0, w)
     w = ifelse.(isfinite.(w), w, 1.0)
     return w
+end
+
+"""
+    assemble_euler_loss(R, ap, a_min, cfg)
+
+Assemble the Euler loss with optional stabilization and residual weighting
+near the borrowing constraint using configuration `cfg`.
+
+Expected `cfg` fields (typically from `NNConfig`):
+- `stabilize::Bool`
+- `stab_method::Symbol`
+- `residual_weighting::Symbol`  (:none | :exp | :linear)
+- `weight_alpha::Float64`
+- `weight_kappa::Float64`
+
+When `cfg.residual_weighting === :none`, no weights are applied (preserves
+previous unweighted behaviour).
+"""
+function assemble_euler_loss(R, ap, a_min, cfg)
+    w =
+        cfg.residual_weighting === :none ? nothing :
+        constraint_weights(
+            ap,
+            a_min;
+            α = cfg.weight_alpha,
+            κ = cfg.weight_kappa,
+            form = cfg.residual_weighting,
+        )
+    return euler_loss(
+        R;
+        reduction = :mean,
+        stabilize = cfg.stabilize,
+        method = cfg.stab_method,
+        weights = w,
+    )
 end
 
 end # module

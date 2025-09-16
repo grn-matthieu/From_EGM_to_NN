@@ -1,6 +1,7 @@
 module NNKernel
 
 using ..EulerResiduals: euler_resid_det_2, euler_resid_stoch!
+using ..NNLoss: assemble_euler_loss
 
 export solve_nn_det, solve_nn_stoch
 
@@ -25,7 +26,15 @@ Returns a NamedTuple with fields:
   - `model_params`: passthrough of `p`
   - `opts`: NamedTuple of runtime options/diagnostics
 """
-function solve_nn_det(p, g, U; tol::Real = 1e-6, maxit::Int = 1_000, verbose::Bool = false)
+function solve_nn_det(
+    p,
+    g,
+    U,
+    cfg::AbstractDict;
+    tol::Real = 1e-6,
+    maxit::Int = 1_000,
+    verbose::Bool = false,
+)
     t0 = time_ns()
     a_grid = g[:a].grid
     a_min = g[:a].min
@@ -44,6 +53,17 @@ function solve_nn_det(p, g, U; tol::Real = 1e-6, maxit::Int = 1_000, verbose::Bo
 
     resid = euler_resid_det_2(p, a_grid, c)
 
+    # Optional weighted/stabilized loss (defaults preserve previous behavior)
+    solver_cfg = get(cfg, :solver, Dict{Symbol,Any}())
+    cfgw = (
+        stabilize = get(solver_cfg, :stabilize, false),
+        stab_method = get(solver_cfg, :stab_method, :log1p_square),
+        residual_weighting = get(solver_cfg, :residual_weighting, :none), # :none|:exp|:linear
+        weight_alpha = float(get(solver_cfg, :weight_alpha, 5.0)),
+        weight_kappa = float(get(solver_cfg, :weight_kappa, 20.0)),
+    )
+    loss_val = assemble_euler_loss(resid, a_next, a_min, cfgw)
+
     # prune boundaries when assessing accuracy
     lo = Na > 2 ? 2 : 1
     hi = Na > 2 ? Na - 1 : Na
@@ -55,6 +75,7 @@ function solve_nn_det(p, g, U; tol::Real = 1e-6, maxit::Int = 1_000, verbose::Bo
         verbose = verbose,
         seed = nothing,
         runtime = (time_ns() - t0) / 1e9,
+        loss = loss_val,
     )
 
     return (
@@ -67,6 +88,19 @@ function solve_nn_det(p, g, U; tol::Real = 1e-6, maxit::Int = 1_000, verbose::Bo
         max_resid = max_resid,
         model_params = p,
         opts = opts,
+    )
+end
+
+# Backwards-compatible method without cfg argument
+function solve_nn_det(p, g, U; tol::Real = 1e-6, maxit::Int = 1_000, verbose::Bool = false)
+    return solve_nn_det(
+        p,
+        g,
+        U,
+        Dict{Symbol,Any}();
+        tol = tol,
+        maxit = maxit,
+        verbose = verbose,
     )
 end
 
@@ -88,7 +122,8 @@ function solve_nn_stoch(
     p,
     g,
     S,
-    U;
+    U,
+    cfg::AbstractDict;
     tol::Real = 1e-6,
     maxit::Int = 1_000,
     verbose::Bool = false,
@@ -122,6 +157,17 @@ function solve_nn_stoch(
     resid = similar(c)
     euler_resid_stoch!(resid, p, a_grid, z_grid, P, c)
 
+    # Optional weighted/stabilized loss
+    solver_cfg = get(cfg, :solver, Dict{Symbol,Any}())
+    cfgw = (
+        stabilize = get(solver_cfg, :stabilize, false),
+        stab_method = get(solver_cfg, :stab_method, :log1p_square),
+        residual_weighting = get(solver_cfg, :residual_weighting, :none),
+        weight_alpha = float(get(solver_cfg, :weight_alpha, 5.0)),
+        weight_kappa = float(get(solver_cfg, :weight_kappa, 20.0)),
+    )
+    loss_val = assemble_euler_loss(resid, a_next, a_min, cfgw)
+
     max_resid = maximum(resid[min(2, end):end, :])
 
     opts = (;
@@ -130,6 +176,7 @@ function solve_nn_stoch(
         verbose = verbose,
         seed = nothing,
         runtime = (time_ns() - t0) / 1e9,
+        loss = loss_val,
     )
 
     return (
@@ -143,6 +190,28 @@ function solve_nn_stoch(
         max_resid = max_resid,
         model_params = p,
         opts = opts,
+    )
+end
+
+# Backwards-compatible method without cfg argument
+function solve_nn_stoch(
+    p,
+    g,
+    S,
+    U;
+    tol::Real = 1e-6,
+    maxit::Int = 1_000,
+    verbose::Bool = false,
+)
+    return solve_nn_stoch(
+        p,
+        g,
+        S,
+        U,
+        Dict{Symbol,Any}();
+        tol = tol,
+        maxit = maxit,
+        verbose = verbose,
     )
 end
 

@@ -66,7 +66,8 @@ function solve(
         solve_nn_det(
             p,
             g,
-            U;
+            U,
+            cfg;
             tol = method.opts.tol,
             maxit = method.opts.maxit,
             verbose = method.opts.verbose,
@@ -75,7 +76,8 @@ function solve(
             p,
             g,
             S,
-            U;
+            U,
+            cfg;
             tol = method.opts.tol,
             maxit = method.opts.maxit,
             verbose = method.opts.verbose,
