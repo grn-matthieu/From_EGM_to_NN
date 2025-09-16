@@ -61,6 +61,10 @@ function solve(
     U = get_utility(model)
 
     # --- Delegate to kernel ---
+    # Pull projection kind from cfg (default :softplus for backwards compatibility)
+    solver_cfg = get(cfg, :solver, Dict{Symbol,Any}())
+    projection_kind = get(solver_cfg, :projection_kind, :softplus)
+
     sol =
         S === nothing ?
         solve_nn_det(
@@ -71,6 +75,7 @@ function solve(
             tol = method.opts.tol,
             maxit = method.opts.maxit,
             verbose = method.opts.verbose,
+            projection_kind = projection_kind,
         ) :
         solve_nn_stoch(
             p,
@@ -81,6 +86,7 @@ function solve(
             tol = method.opts.tol,
             maxit = method.opts.maxit,
             verbose = method.opts.verbose,
+            projection_kind = projection_kind,
         )
 
     # --- Euler errors vectorization for policy packaging ---
@@ -110,6 +116,7 @@ function solve(
         method = method.opts.name,
         seed = get(sol.opts, :seed, nothing),
         runtime = get(sol.opts, :runtime, NaN),
+        feasibility = get(sol.opts, :feasibility, NaN),
     )
     metadata = Dict{Symbol,Any}(
         :iters => sol.iters,

@@ -4,10 +4,15 @@ using ..API
 using ..CommonInterp: interp_linear!
 using ..EulerResiduals: euler_resid_det_2, euler_resid_stoch!
 
+# Constraint utilities (violation + penalties)
+include("constraints.jl")
+
 export EulerResidual
 
 export check_finite_residuals,
-    stabilize_residuals, euler_mse, euler_loss, marg_u, inv_marg_u
+    stabilize_residuals, euler_mse, euler_loss, total_loss, marg_u, inv_marg_u
+
+export violation, quadratic_penalty
 
 export assemble_euler_loss
 
@@ -386,6 +391,31 @@ function euler_loss(
     else
         return weighted_mse(R_stab, weights; reduction = reduction)
     end
+end
+
+"""
+    total_loss(R, ap, a_min; λ=0.0, reduction=:mean, stabilize=false, method=:log1p_square, weights=nothing)
+
+Composite loss: Euler loss plus smooth quadratic penalty for violations of
+`a' ≥ a_min`. When `λ=0`, this reduces to pure `euler_loss`.
+"""
+function total_loss(
+    R,
+    ap,
+    a_min;
+    λ::Real = 0.0,
+    reduction::Symbol = :mean,
+    stabilize::Bool = false,
+    method::Symbol = :log1p_square,
+    weights::Union{Nothing,AbstractArray} = nothing,
+)
+    return euler_loss(
+        R;
+        reduction = reduction,
+        stabilize = stabilize,
+        method = method,
+        weights = weights,
+    ) + quadratic_penalty(ap, a_min; λ = λ, reduction = reduction)
 end
 
 # Robust keyword-handling wrapper to support both ASCII and Unicode kwargs

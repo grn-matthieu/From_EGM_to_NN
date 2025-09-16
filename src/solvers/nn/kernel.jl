@@ -2,6 +2,8 @@ module NNKernel
 
 using ..EulerResiduals: euler_resid_det_2, euler_resid_stoch!
 using ..NNLoss: assemble_euler_loss
+using ..NNConstraints: project_savings, project_savings_clip
+using Statistics: mean
 
 export solve_nn_det, solve_nn_stoch
 
@@ -34,6 +36,7 @@ function solve_nn_det(
     tol::Real = 1e-6,
     maxit::Int = 1_000,
     verbose::Bool = false,
+    projection_kind::Symbol = :softplus,
 )
     t0 = time_ns()
     a_grid = g[:a].grid
@@ -48,10 +51,14 @@ function solve_nn_det(
     cmax = @. p.y + R * a_grid - a_min
     c = clamp.(0.5 .* resources, cmin, cmax)
 
-    a_next = @. R * a_grid + p.y - c
-    @. a_next = clamp(a_next, a_min, a_max)
+    a_next_raw = @. R * a_grid + p.y - c
+    a_next = project_savings(a_next_raw, a_min; kind = projection_kind)
+    @. a_next = min(a_next, a_max)
 
     resid = euler_resid_det_2(p, a_grid, c)
+
+    # Feasibility metric: share with a' >= a_min (post-projection)
+    feas = mean(vec(project_savings_clip(a_next, a_min) .== a_next))
 
     # Optional weighted/stabilized loss (defaults preserve previous behavior)
     solver_cfg = get(cfg, :solver, Dict{Symbol,Any}())
@@ -76,6 +83,8 @@ function solve_nn_det(
         seed = nothing,
         runtime = (time_ns() - t0) / 1e9,
         loss = loss_val,
+        projection_kind = projection_kind,
+        feasibility = feas,
     )
 
     return (
@@ -92,7 +101,15 @@ function solve_nn_det(
 end
 
 # Backwards-compatible method without cfg argument
-function solve_nn_det(p, g, U; tol::Real = 1e-6, maxit::Int = 1_000, verbose::Bool = false)
+function solve_nn_det(
+    p,
+    g,
+    U;
+    tol::Real = 1e-6,
+    maxit::Int = 1_000,
+    verbose::Bool = false,
+    projection_kind::Symbol = :softplus,
+)
     return solve_nn_det(
         p,
         g,
@@ -101,6 +118,7 @@ function solve_nn_det(p, g, U; tol::Real = 1e-6, maxit::Int = 1_000, verbose::Bo
         tol = tol,
         maxit = maxit,
         verbose = verbose,
+        projection_kind = projection_kind,
     )
 end
 
@@ -127,6 +145,7 @@ function solve_nn_stoch(
     tol::Real = 1e-6,
     maxit::Int = 1_000,
     verbose::Bool = false,
+    projection_kind::Symbol = :softplus,
 )
     t0 = time_ns()
 
@@ -150,7 +169,9 @@ function solve_nn_stoch(
         @views begin
             resources = @. R * a_grid - a_min + y
             c[:, j] = clamp.(0.5 .* resources, cmin, y .+ R .* a_grid .- a_min)
-            a_next[:, j] = clamp.(R .* a_grid .+ y .- c[:, j], a_min, a_max)
+            a_next_raw = @. R * a_grid + y - c[:, j]
+            a_next[:, j] =
+                min.(project_savings(a_next_raw, a_min; kind = projection_kind), a_max)
         end
     end
 
@@ -170,6 +191,9 @@ function solve_nn_stoch(
 
     max_resid = maximum(resid[min(2, end):end, :])
 
+    # Feasibility metric across (Na, Nz): share with a' >= a_min
+    feas = mean(vec(project_savings_clip(a_next, a_min) .== a_next))
+
     opts = (;
         tol = tol,
         maxit = maxit,
@@ -177,6 +201,8 @@ function solve_nn_stoch(
         seed = nothing,
         runtime = (time_ns() - t0) / 1e9,
         loss = loss_val,
+        projection_kind = projection_kind,
+        feasibility = feas,
     )
 
     return (
@@ -202,6 +228,7 @@ function solve_nn_stoch(
     tol::Real = 1e-6,
     maxit::Int = 1_000,
     verbose::Bool = false,
+    projection_kind::Symbol = :softplus,
 )
     return solve_nn_stoch(
         p,
@@ -212,6 +239,7 @@ function solve_nn_stoch(
         tol = tol,
         maxit = maxit,
         verbose = verbose,
+        projection_kind = projection_kind,
     )
 end
 
