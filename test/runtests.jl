@@ -101,3 +101,6 @@ end
 @testset "NN - Init" begin
     include("test_nn_init.jl")
 end
+@testset "NN - Data" begin
+    include("loss_test.jl")
+end
