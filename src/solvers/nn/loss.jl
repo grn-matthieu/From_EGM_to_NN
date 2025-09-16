@@ -2,7 +2,8 @@ module NNLoss
 
 using ..EulerResiduals: residuals
 
-export check_finite_residuals, stabilize_residuals, euler_mse, euler_loss
+export check_finite_residuals,
+    stabilize_residuals, euler_mse, euler_loss, marg_u, inv_marg_u
 
 """
     check_finite_residuals(model, policy, batch) -> Bool
@@ -115,6 +116,59 @@ function euler_loss(
 )
     R′ = stabilize ? stabilize_residuals(R; method = method) : R
     return euler_mse(R′; reduction = reduction)
+end
+
+"""
+    marg_u(c, θ)
+
+CRRA marginal utility u′(c) for consumption `c` and risk aversion σ stored in `θ`.
+
+Conventions:
+- If σ ≈ 1: u′(c) = 1 / c
+- Else:     u′(c) = c^(-σ)
+
+Numerical safety: clamps `c` below by `eps()` via `max.(c, eps())`.
+Accepts scalars and arrays.
+
+Examples:
+    julia> marg_u(2.0, (; s = 2.0))
+    0.25
+
+    julia> marg_u([1.0, 2.0], (; s = 1.0))
+    2-element Vector{Float64}:
+     1.0
+     0.5
+"""
+@inline function marg_u(c, θ)
+    σ = θ isa Number ? Float64(θ) : Float64(getproperty(θ, :s))
+    c_safe = max.(c, eps())
+    return isapprox(σ, 1.0; atol = 1e-12) ? 1.0 ./ c_safe : c_safe .^ (-σ)
+end
+
+"""
+    inv_marg_u(x, θ)
+
+Inverse marginal utility (u′)^{-1}(x) for CRRA with risk aversion σ in `θ`.
+
+Conventions:
+- If σ ≈ 1: (u′)^{-1}(x) = 1 / x
+- Else:     (u′)^{-1}(x) = x^(-1/σ)
+
+Numerical safety: clamps `x` below by `eps()` via `max.(x, eps())`.
+Accepts scalars and arrays.
+
+Examples:
+    julia> inv_marg_u(0.25, (; s = 2.0))
+    2.0
+
+    julia> c = [0.5, 1.0, 2.0]; θ = (; s = 1.0);
+    julia> inv_marg_u(marg_u(c, θ), θ) ≈ c
+    true
+"""
+@inline function inv_marg_u(x, θ)
+    σ = θ isa Number ? Float64(θ) : Float64(getproperty(θ, :s))
+    x_safe = max.(x, eps())
+    return isapprox(σ, 1.0; atol = 1e-12) ? 1.0 ./ x_safe : x_safe .^ (-1.0 / σ)
 end
 
 end # module
