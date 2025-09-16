@@ -4,7 +4,7 @@ using ..CommonInterp: interp_linear!
 using ..API
 
 export euler_resid_det,
-    euler_resid_stoch, euler_resid_det_2, euler_resid_det!, euler_resid_stoch!, residuals
+    euler_resid_stoch, euler_resid_det_2, euler_resid_det!, euler_resid_stoch!
 
 # --- Functions ---
 
@@ -159,96 +159,5 @@ function euler_resid_stoch(
     return euler_resid_stoch!(res, model_params, a_grid, z_grid, Pz, c)
 end
 
-
-# --- High-level wrapper API ---
-
-"""
-    residuals(model, policy, batch) -> AbstractArray
-
-Compute Euler-equation residuals for a given `model`, `policy`, and `batch` of
-evaluation points.
-
-- Deterministic models (no shocks):
-  - `batch` is an `AbstractVector` of asset grid points.
-  - `policy` is expected to be the standard policy dictionary used in this
-    codebase, i.e. `policy[:c]` is a NamedTuple with a `value` vector and an
-    optional `grid` vector. If `batch` differs from the policy grid, the
-    consumption policy is linearly interpolated onto `batch` before residuals
-    are computed.
-
-- Stochastic models (with shocks):
-  - `batch` should be a `NamedTuple` or `Dict` with keys `:a_grid`, `:z_grid`,
-    and `:Pz`.
-  - `policy[:c].value` must be a matrix with size `(length(a_grid), length(z_grid))`.
-
-Returns a vector (deterministic) or a matrix (stochastic) of absolute Euler
-residuals.
-"""
-function residuals(model::API.AbstractModel, policy::Dict{Symbol,Any}, batch)
-    S = API.get_shocks(model)
-    return S === nothing ? _residuals_det(model, policy, batch) :
-           _residuals_stoch(model, policy, batch)
-end
-
-
-# --- Deterministic ---
-
-function _residuals_det(
-    model::API.AbstractModel,
-    policy::Dict{Symbol,Any},
-    a_batch::AbstractVector{<:Real},
-)
-    p = API.get_params(model)
-
-    @assert haskey(policy, :c) "policy[:c] not found"
-    c_entry = policy[:c]
-    c = getfield(c_entry, :value)
-    ag = hasproperty(c_entry, :grid) ? getfield(c_entry, :grid) : nothing
-
-    @assert c isa AbstractVector "policy[:c].value must be a vector for deterministic residuals"
-
-    # Interpolate policy onto requested batch grid if needed
-    if ag === nothing || (length(ag) == length(a_batch) && ag === a_batch)
-        c_eval = c
-        a_grid = a_batch
-    else
-        c_eval = similar(a_batch, Float64)
-        interp_linear!(c_eval, ag, c, a_batch)
-        a_grid = a_batch
-    end
-
-    return euler_resid_det_2(p, a_grid, c_eval)
-end
-
-
-# --- Stochastic ---
-
-_haskey_like(x, k) =
-    (x isa AbstractDict && haskey(x, k)) || (x isa NamedTuple && hasproperty(x, k))
-_get_key(x, k) = x isa AbstractDict ? x[k] : getfield(x, k)
-
-function _residuals_stoch(model::API.AbstractModel, policy::Dict{Symbol,Any}, batch)
-    @assert _haskey_like(batch, :a_grid) &&
-            _haskey_like(batch, :z_grid) &&
-            _haskey_like(batch, :Pz) "batch must provide :a_grid, :z_grid, and :Pz for stochastic residuals"
-
-    a_grid = _get_key(batch, :a_grid)
-    z_grid = _get_key(batch, :z_grid)
-    Pz = _get_key(batch, :Pz)
-
-    p = API.get_params(model)
-
-    @assert haskey(policy, :c) "policy[:c] not found"
-    c_entry = policy[:c]
-    c = getfield(c_entry, :value)
-
-    Na = length(a_grid)
-    Nz = length(z_grid)
-    @assert c isa AbstractMatrix && size(c, 1) == Na && size(c, 2) == Nz "policy[:c].value must be a (Na, Nz) matrix matching batch grids"
-
-    res = similar(c, Float64)
-    euler_resid_stoch!(res, p, a_grid, z_grid, Pz, c)
-    return res
-end
 
 end # module

@@ -1,6 +1,10 @@
 module NNLoss
 
-using ..EulerResiduals: residuals
+using ..API
+using ..CommonInterp: interp_linear!
+using ..EulerResiduals: euler_resid_det_2, euler_resid_stoch!
+
+export EulerResidual
 
 export check_finite_residuals,
     stabilize_residuals, euler_mse, euler_loss, marg_u, inv_marg_u
@@ -15,7 +19,7 @@ Logs a short summary containing `max|residual|` and, when applicable, the count
 of non-finite entries.
 """
 function check_finite_residuals(model, policy, batch)::Bool
-    res = residuals(model, policy, batch)
+    res = _compute_residuals(model, policy, batch)
 
     # Reductions without excessive allocations
     maxabs = maximum(abs, res)
@@ -169,6 +173,137 @@ Examples:
     σ = θ isa Number ? Float64(θ) : Float64(getproperty(θ, :s))
     x_safe = max.(x, eps())
     return isapprox(σ, 1.0; atol = 1e-12) ? 1.0 ./ x_safe : x_safe .^ (-1.0 / σ)
+end
+
+"""
+    EulerResidual(a, y; θ, policy, sampler; nMC::Integer=1)
+
+Computes the Euler-equation residual u′(c) − β * E[u′(c′) * R′] by Monte Carlo,
+vectorized over a batch of state points `(a, y)`.
+
+Assumptions and conventions:
+- CRRA marginal utility via `marg_u(c, θ)` with risk aversion stored in `θ.s`.
+- Budget: `c = max(resources(a, y; θ) − a′, eps())`, where `a′ = policy(a, y; θ)`.
+- One-step dynamics per draw ε: `y′ = T(y, ε; θ)`, `R′ = R(a′, y′; θ)`,
+  `a″ = policy(a′, y′; θ)`, `c′ = max(resources(a′, y′; θ) − a″, eps())`.
+- Residual: `marg_u(c, θ) − θ.β * mean_k( marg_u(c′_k, θ) .* R′_k )`.
+
+Shapes and types:
+- Accepts scalars or arrays for `a` and `y`; broadcasting defines the batch.
+- Returns an array matching the broadcasted shape of `a` and `y` (Float64).
+- No global RNG side effects: randomness is delegated to `sampler`.
+
+Sampler interface:
+- If `nMC == 1`, a sampler that returns a single `ε` (i.e., `sampler()`)
+  is supported. If `sampler(n::Int)` is defined, it may also be used.
+- If `nMC > 1`, either implement `sampler(n::Int)` returning an iterable of
+  `ε` draws of length `n`, or implement `sampler()` to return a fresh draw
+  and it will be called `nMC` times.
+
+Notes:
+- Uses small in-place buffers to avoid large temporaries when feasible.
+- Clamps consumption with `eps()` to ensure finite marginal utilities.
+"""
+function EulerResidual(a, y; θ, policy, sampler, nMC::Integer = 1)
+    # First-stage: compute a′ and c for the current state
+    ap = policy.(a, y; θ = θ)
+    c = max.(resources.(a, y; θ = θ) .- ap, eps())
+    mu = marg_u(c, θ)
+
+    # Allocate accumulation buffer in Float64 with broadcasted shape
+    EmuR = zero.(Float64.(mu))
+
+    # Reusable buffers for next-period computations
+    yp = similar(EmuR)
+    ap2 = similar(EmuR)
+    cp = similar(EmuR)
+    Rp = similar(EmuR)
+
+    # Helper: draw an iterator of ε of length nMC
+    _draws(n::Int) = begin
+        if hasmethod(sampler, Tuple{Int})
+            sampler(n)
+        else
+            # Fallback: materialize by repeated scalar draws
+            (sampler() for _ = 1:n)
+        end
+    end
+
+    if nMC == 1
+        # Single-draw path supporting samplers that return one ε
+        ε_iter = _draws(1)
+        @inbounds for ε in ε_iter
+            yp .= T.(y, ε; θ = θ)
+            Rp .= R.(ap, yp; θ = θ)
+            ap2 .= policy.(ap, yp; θ = θ)
+            cp .= max.(resources.(ap, yp; θ = θ) .- ap2, eps())
+            EmuR .+= marg_u(cp, θ) .* Rp
+        end
+    else
+        # Multi-draw Monte Carlo
+        ε_iter = _draws(nMC)
+        @inbounds for ε in ε_iter
+            yp .= T.(y, ε; θ = θ)
+            Rp .= R.(ap, yp; θ = θ)
+            ap2 .= policy.(ap, yp; θ = θ)
+            cp .= max.(resources.(ap, yp; θ = θ) .- ap2, eps())
+            EmuR .+= marg_u(cp, θ) .* Rp
+        end
+        EmuR ./= nMC
+    end
+
+    return Float64.(mu) .- Float64(getproperty(θ, :β)) .* EmuR
+end
+
+_haskey_like(x, k) =
+    (x isa AbstractDict && haskey(x, k)) || (x isa NamedTuple && hasproperty(x, k))
+_get_key(x, k) = x isa AbstractDict ? x[k] : getfield(x, k)
+
+function _compute_residuals(model::API.AbstractModel, policy::Dict{Symbol,Any}, batch)
+    S = API.get_shocks(model)
+    return S === nothing ? _residuals_det(model, policy, batch) :
+           _residuals_stoch(model, policy, batch)
+end
+
+function _residuals_det(
+    model::API.AbstractModel,
+    policy::Dict{Symbol,Any},
+    a_batch::AbstractVector{<:Real},
+)
+    p = API.get_params(model)
+    @assert haskey(policy, :c) "policy[:c] not found"
+    c_entry = policy[:c]
+    c = getfield(c_entry, :value)
+    ag = hasproperty(c_entry, :grid) ? getfield(c_entry, :grid) : nothing
+    @assert c isa AbstractVector "policy[:c].value must be a vector for deterministic residuals"
+    if ag === nothing || (length(ag) == length(a_batch) && ag === a_batch)
+        c_eval = c
+        a_grid = a_batch
+    else
+        c_eval = similar(a_batch, Float64)
+        interp_linear!(c_eval, ag, c, a_batch)
+        a_grid = a_batch
+    end
+    return euler_resid_det_2(p, a_grid, c_eval)
+end
+
+function _residuals_stoch(model::API.AbstractModel, policy::Dict{Symbol,Any}, batch)
+    @assert _haskey_like(batch, :a_grid) &&
+            _haskey_like(batch, :z_grid) &&
+            _haskey_like(batch, :Pz) "batch must provide :a_grid, :z_grid, and :Pz for stochastic residuals"
+    a_grid = _get_key(batch, :a_grid)
+    z_grid = _get_key(batch, :z_grid)
+    Pz = _get_key(batch, :Pz)
+    p = API.get_params(model)
+    @assert haskey(policy, :c) "policy[:c] not found"
+    c_entry = policy[:c]
+    c = getfield(c_entry, :value)
+    Na = length(a_grid)
+    Nz = length(z_grid)
+    @assert c isa AbstractMatrix && size(c, 1) == Na && size(c, 2) == Nz "policy[:c].value must be a (Na, Nz) matrix matching batch grids"
+    res = similar(c, Float64)
+    euler_resid_stoch!(res, p, a_grid, z_grid, Pz, c)
+    return res
 end
 
 end # module
