@@ -120,6 +120,10 @@ end
     include("test_nn_train.jl")
 end
 
+@testset "NN - Eval" begin
+    include("nn/eval_tests.jl")
+end
+
 @testset "Analysis - SteadyState" begin
     include("test_steady_state.jl")
 end

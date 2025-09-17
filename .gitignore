@@ -36,3 +36,6 @@ Thumbs.db
 
 # Ignore info files
 *.info
+
+# Ignore xlsx files
+*.xlsx
