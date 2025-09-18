@@ -201,21 +201,7 @@ function _batch_loss_stoch(ps, st, model, X, p, a_min, z_grid, P; hyper)
     ap = vec(project_savings(ŷ_raw, a_min; kind = hyper.projection_kind))
     c = clamp.(y .+ R .* a .- ap, 1.0e-12, Inf)
 
-    # Expected next-period marginal utility times R (functional, no in-place updates)
-    T = hcat(
-        [
-            begin
-                yprime = exp(z_grid[jp])
-                Xin = vcat(reshape(ap, 1, :), fill(yprime, 1, B))
-                y2_raw, _ = Lux.apply(model, Xin, ps, st2)
-                ap2 = vec(project_savings(y2_raw, a_min; kind = hyper.projection_kind))
-                cp = clamp.(yprime .+ R .* ap .- ap2, 1.0e-12, Inf)
-                w = P[jidx, jp]
-                w .* (cp ./ c) .^ (-σ)
-            end for jp = 1:length(z_grid)
-        ]...,
-    )
-    Emu = vec(sum(T; dims = 2))
+    # Emu computed via batched next-period evaluation below
     # Batched over shocks (single Lux.apply): recompute Emu efficiently
     Nz = length(z_grid)
     yprimes = exp.(z_grid)
