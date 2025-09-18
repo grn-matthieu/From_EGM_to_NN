@@ -194,7 +194,7 @@ function _batch_loss_stoch(ps, st, model, X, p, a_min, z_grid, P; hyper)
 
     # Map y -> z index j
     zvals = log.(y)
-    jidx = map(zv -> clamp(searchsortedfirst(z_grid, zv), 1, length(z_grid)), zvals)
+    jidx = clamp.(searchsortedfirst.(Ref(z_grid), zvals), 1, length(z_grid))
 
     # Forward current policy a' and consumption c
     ŷ_raw, st2 = Lux.apply(model, X, ps, st)
