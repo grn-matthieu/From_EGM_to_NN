@@ -39,9 +39,9 @@ export solve_nn_det, solve_nn_stoch
 """
     solve_nn_det(p, g, U; tol=1e-6, maxit=1_000, verbose=false)
 
-Placeholder deterministic kernel for the Maliar et al. (2021) neural-network method.
+Baseline deterministic kernel for the Maliar et al. (2021) neural-network method.
 
-This stub provides an API-compatible return signature so that the adapter can
+This baseline provides an API-compatible return signature so that the adapter can
 construct a `Solution`. It does not perform NN training yet; instead, it returns
 an initial feasible policy based on a simple half-resources rule, along with
 Euler residuals computed on the grid.
@@ -178,9 +178,9 @@ end
 """
     solve_nn_stoch(p, g, S, U; tol=1e-6, maxit=1_000, verbose=false)
 
-Placeholder stochastic kernel for the Maliar et al. (2021) neural-network method.
+Baseline stochastic kernel for the Maliar et al. (2021) neural-network method.
 
-This stub mirrors the deterministic placeholder column-wise for each shock
+This baseline mirrors the deterministic baseline column-wise for each shock
 state, building a feasible baseline policy and reporting Euler residuals using
 `euler_resid_stoch!`.
 
