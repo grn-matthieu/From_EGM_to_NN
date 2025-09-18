@@ -285,7 +285,7 @@ function solve_nn_det(
     # Evaluate trained policy on full grid
     Xin = reshape(a_grid, 1, :)
     ŷ_raw, _ = Lux.apply(st.model, Xin, st.ps, st.st)
-    a_next = project_savings(vec(ŷ_raw), a_min; kind = projection_kind)
+    a_next = project_savings(vec(ŷ_raw), a_min; kind = hyper.projection_kind)
     @. a_next = min(a_next, a_max)
     R = 1 + p.r
     c = clamp.(p.y .+ R .* a_grid .- a_next, 1.0e-12, Inf)
@@ -326,6 +326,8 @@ function solve_nn_det(
         logdir,
         "run_" * Dates.format(Dates.now(), dateformat"yyyymmdd_HHMMSS") * ".csv",
     )
+    mkpath(logdir)
+    mkpath(logdir)
     lg = CSVLogger(logpath)
     log_row!(
         lg;
@@ -348,7 +350,7 @@ function solve_nn_det(
         c = c,
         a_next = a_next,
         resid = resid,
-        iters = Int(epochs_cfg),
+        iters = Int(hyper.epochs),
         converged = true,
         max_resid = max_resid,
         model_params = p,
@@ -613,7 +615,7 @@ function solve_nn_stoch(
         c = c,
         a_next = a_next,
         resid = resid,
-        iters = Int(epochs_cfg),
+        iters = Int(hyper.epochs),
         converged = true,
         max_resid = max_resid,
         model_params = p,
