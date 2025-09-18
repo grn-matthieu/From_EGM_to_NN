@@ -20,95 +20,95 @@ end
 
 # --- Deterministic breakdown ---
 @testset "Deterministic - Core" begin
-    include("test_core.jl")
+    include("core/test_core.jl")
 end
 @testset "Deterministic - Accuracy" begin
-    include("test_accuracy.jl")
+    include("core/test_accuracy.jl")
 end
 @testset "Deterministic - Viz" begin
-    include("test_viz.jl")
+    include("core/test_viz.jl")
 end
 @testset "Deterministic - Solver Options" begin
-    include("test_solver_options.jl")
+    include("core/test_solver_options.jl")
 end
 
 # --- Stochastic breakdown ---
 @testset "Stochastic - EGM Smoke" begin
-    include("test_egm_stoch.jl")
+    include("stochastic/test_egm_stoch.jl")
 end
 @testset "Stochastic - Simulation" begin
-    include("test_sim.jl")
+    include("stochastic/test_sim.jl")
 end
 @testset "Stochastic - Stability Extreme" begin
-    include("test_stability_extreme.jl")
+    include("stochastic/test_stability_extreme.jl")
 end
 
 # --- Projection grouping ---
 @testset "Projection - Stochastic Smoke" begin
-    include("test_projection_stoch.jl")
+    include("methods/test_projection_stoch.jl")
 end
 @testset "Projection - Method Adapter" begin
-    include("test_projection_method.jl")
+    include("methods/test_projection_method.jl")
 end
 @testset "Projection - Accuracy" begin
-    include("test_projection_accuracy.jl")
+    include("methods/test_projection_accuracy.jl")
 end
 @testset "Projection - Orders" begin
-    include("test_projection_orders.jl")
+    include("methods/test_projection_orders.jl")
 end
 @testset "Projection - Deterministic" begin
-    include("test_projection.jl")
+    include("methods/test_projection.jl")
 end
 
 # --- Kernels ---
 @testset "Kernels - EGM" begin
-    include("test_egm_kernel.jl")
+    include("methods/test_egm_kernel.jl")
 end
 @testset "Kernels - Perturbation" begin
-    include("test_perturbation_kernel.jl")
+    include("methods/test_perturbation_kernel.jl")
 end
 @testset "Kernels - NN" begin
-    include("test_nn_kernel.jl")
+    include("methods/test_nn_kernel.jl")
 end
 @testset "NN - Method Adapter" begin
-    include("test_nn_method.jl")
+    include("methods/test_nn_method.jl")
 end
 
 # --- Core/shared utilities ---
 @testset "Core - Residuals" begin
-    include("test_residuals.jl")
+    include("core/test_residuals.jl")
 end
 @testset "Core - Interp" begin
-    include("test_interp.jl")
+    include("core/test_interp.jl")
 end
 @testset "Core - Determinism" begin
-    include("test_determinism.jl")
+    include("core/test_determinism.jl")
 end
 @testset "Core - Shocks" begin
-    include("test_shocks.jl")
+    include("core/test_shocks.jl")
 end
 @testset "Core - Chebyshev" begin
-    include("test_chebyshev.jl")
+    include("core/test_chebyshev.jl")
 end
 @testset "Core - Value Function" begin
-    include("test_value_function.jl")
+    include("core/test_value_function.jl")
 end
 @testset "Core - Quality" begin
-    include("test_quality.jl")
+    include("core/test_quality.jl")
 end
 @testset "Core - API" begin
-    include("test_core_api.jl")
+    include("core/test_core_api.jl")
 end
 @testset "Core - Config Validator" begin
-    include("test_config_validator.jl")
+    include("core/test_config_validator.jl")
 end
 
 # --- NN ---
 @testset "NN - Init" begin
-    include("test_nn_init.jl")
+    include("methods/test_nn_init.jl")
 end
 @testset "NN - Data" begin
-    include("loss_test.jl")
+    include("methods/loss_test.jl")
 end
 @testset "NN - Loss" begin
     include("nn/test_loss.jl")
@@ -119,7 +119,7 @@ end
     include("nn/test_constraints_extras.jl")
 end
 @testset "NN - Train" begin
-    include("test_nn_train.jl")
+    include("methods/test_nn_train.jl")
 end
 
 @testset "NN - Eval" begin
@@ -127,29 +127,29 @@ end
 end
 
 @testset "Coverage - Boost" begin
-    include("coverage_boost.jl")
+    include("coverage/coverage_boost.jl")
 end
 
 @testset "Coverage - More" begin
-    include("coverage_more.jl")
+    include("coverage/coverage_more.jl")
 end
 
 @testset "Coverage - SimPlots" begin
-    include("coverage_simplots.jl")
+    include("coverage/coverage_simplots.jl")
 end
 
 @testset "Coverage - NNLoss" begin
-    include("coverage_nnloss.jl")
+    include("coverage/coverage_nnloss.jl")
 end
 
 @testset "Coverage - NNTrain" begin
-    include("coverage_nntrain.jl")
+    include("coverage/coverage_nntrain.jl")
 end
 
 @testset "Coverage - Core API" begin
-    include("coverage_core_api.jl")
+    include("coverage/coverage_core_api.jl")
 end
 
 @testset "Analysis - SteadyState" begin
-    include("test_steady_state.jl")
+    include("analysis/test_steady_state.jl")
 end
