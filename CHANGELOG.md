@@ -1,5 +1,4 @@
-# Changelog
-
+\n## [0.4.0] - 2025-09-18\n- Cleanup: organized tests into folders and updated runtests includes.\n- Repo hygiene: ignored local temp artifacts.\n- Version bump to 0.4.0.\n\n
 All notable changes to this project are documented in this file.
 
 ## [0.3.0] - 2025-09-15
@@ -19,3 +18,4 @@ Notes:
 - A quick smoke run of the stress harness with tiny grids completed and wrote `outputs/_smoke_stress.csv`.
 
 [0.3.0]: https://example.com/releases/v0.3.0
+
