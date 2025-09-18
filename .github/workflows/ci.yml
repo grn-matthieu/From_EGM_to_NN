@@ -74,5 +74,9 @@ jobs:
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
+      - name: Cleanup coverage artifacts
+        run: |
+          find . -type f \( -name "*.cov" -o -name "*.info" -o -name "lcov.info" \) -print -delete || true
+
       - name: Smoke (deterministic and stochastic)
         run: julia --project=. scripts/ci/smoke.jl

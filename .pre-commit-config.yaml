@@ -15,3 +15,11 @@ repos:
       - id: trailing-whitespace
       - id: mixed-line-ending
         args: [--fix=lf]  # normalize to LF
+
+  - repo: local
+    hooks:
+      - id: cleanup-coverage-artifacts
+        name: Cleanup coverage artifacts (*.cov, *.info)
+        language: system
+        entry: bash -lc 'find . -type f \( -name "*.cov" -o -name "*.info" -o -name "lcov.info" \) -print -delete || true'
+        pass_filenames: false

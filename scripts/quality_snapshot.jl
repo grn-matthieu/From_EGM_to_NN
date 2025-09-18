@@ -186,6 +186,19 @@ function main()
     end
 
     println("Wrote smoke log to: ", log_path)
+
+    # Best-effort cleanup of coverage artifacts created during this run
+    try
+        for (dir, _, files) in walkdir(".")
+            for f in files
+                if endswith(f, ".cov") || endswith(f, ".info") || f == "lcov.info"
+                    rm(joinpath(dir, f); force = true)
+                end
+            end
+        end
+    catch err
+        @warn "Failed to cleanup coverage artifacts" error = err
+    end
 end
 
 main()

@@ -71,3 +71,17 @@ for (fc, (cov, tot)) in file_stats
         ")",
     )
 end
+
+# Best-effort cleanup of coverage artifacts when run standalone
+try
+    root = joinpath(@__DIR__, "..")
+    for (dir, _, files) in walkdir(root)
+        for f in files
+            if endswith(f, ".cov") || endswith(f, ".info") || f == "lcov.info"
+                rm(joinpath(dir, f); force = true)
+            end
+        end
+    end
+catch err
+    @warn "Failed to cleanup coverage artifacts" error = err
+end
