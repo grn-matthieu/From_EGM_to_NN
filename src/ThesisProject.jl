@@ -48,7 +48,7 @@ include("solvers/nn/pretrain.jl")
 include("methods/EGM.jl")
 include("methods/Projection.jl")
 include("methods/Perturbation.jl")
-include("methods/NN.jl")   # NN adapter (initial placeholder)
+include("methods/NN.jl")   # NN adapter
 
 # 6) method factory
 include("core/method_factory.jl")
@@ -97,7 +97,6 @@ export load_config,
     residuals
 
 # --- Extensions ---
-include("viz/api.jl")      # stubs only
-export plot_policy, plot_euler_errors        # users call ThesisProject.plot_policy(...), etc.
-
+include("viz/api.jl")      # visualization API stubs; enabled by Plots extension
+export plot_policy, plot_euler_errors
 end # module
