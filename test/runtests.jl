@@ -112,9 +112,11 @@ end
 end
 @testset "NN - Loss" begin
     include("nn/test_loss.jl")
+    include("nn/test_loss_extras.jl")
 end
 @testset "NN - Constraints" begin
     include("nn/constraints_test.jl")
+    include("nn/test_constraints_extras.jl")
 end
 @testset "NN - Train" begin
     include("test_nn_train.jl")

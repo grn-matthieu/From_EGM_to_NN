@@ -1,7 +1,51 @@
 #!/usr/bin/env julia
 using Coverage
+using YAML
 
-cl = process_folder(joinpath(@__DIR__, "..", "src"))
+# Load ignore globs from Codecov config (best-effort). Patterns use forward slashes.
+function load_ignore_globs()
+    root = normpath(joinpath(@__DIR__, ".."))
+    cfg_paths = [joinpath(root, ".codecov.yml"), joinpath(root, "codecov.yml")]
+    for p in cfg_paths
+        if isfile(p)
+            try
+                y = YAML.load_file(p)
+                ig = get(y, "ignore", String[])
+                ig isa AbstractVector || (ig = String[])
+                return String.(ig)
+            catch err
+                @warn "Failed to parse Codecov config; proceeding without extra ignores" file =
+                    p error = err
+            end
+        end
+    end
+    return String[]
+end
+
+# Convert a Codecov-style glob into a Regex. Normalize path separators to '/'.
+function glob_to_regex(glob::AbstractString)
+    s = replace(glob, "\\" => "/")
+    # Escape regex meta, then reinstate globs
+    s = replace(s, r"([.()+^$|])" => s"\\\1")
+    s = replace(s, "**" => ".*")
+    s = replace(s, "*" => "[^/]*")
+    s = replace(s, "?" => "[^/]")
+    return Regex("^" * s * "\$")
+end
+
+function filter_ignored(cl)
+    root = normpath(joinpath(@__DIR__, ".."))
+    globs = load_ignore_globs()
+    res = Regex[glob_to_regex(g) for g in globs]
+    return [fc for fc in cl if begin
+        rel = replace(relpath(fc.filename, root), "\\" => "/")
+        !any(r -> occursin(r, rel), res)
+    end]
+end
+
+all_fc = process_folder(joinpath(@__DIR__, "..", "src"))
+cl = filter_ignored(all_fc)
+
 LCOV.writefile(joinpath(@__DIR__, "..", "lcov.info"), cl)
 
 using Coverage: get_summary

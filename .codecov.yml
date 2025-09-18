@@ -1,3 +1,9 @@
 ignore:
   - "scripts/**"
   - "**/scripts/**"
+  # Exclude plotting helpers (manual/visual only)
+  - "src/viz/**"
+  # Exclude lightweight API stubs/entry shims
+  - "src/ThesisProject.jl"
+  - "src/viz/api.jl"
+  - "src/core/model_contract.jl"
