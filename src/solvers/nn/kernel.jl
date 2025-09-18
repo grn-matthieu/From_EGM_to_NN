@@ -314,7 +314,7 @@ function solve_nn_det(
         tol = tol,
         maxit = maxit,
         verbose = verbose,
-        seed = nothing,
+        seed = seed_cfg,
         runtime = (time_ns() - t0) / 1e9,
         loss = loss_val,
         projection_kind = projection_kind,
