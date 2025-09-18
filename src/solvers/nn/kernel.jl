@@ -122,43 +122,6 @@ function _train_det!(state, a_grid, p; hyper, y_scalar, master_rng)
                 _batch_loss_det(ps_local, state.st, state.model, X, p, a_grid[1]; hyper)
             L, back = Zygote.pullback(loss_only, state.ps)
             gs = back(1.0)[1]
-            # Optional grad clipping
-            if hyper.clip_norm !== nothing
-                # simple global L2 over leaves
-                s = 0.0
-                function _acc(x)
-                    if x isa AbstractArray
-                        s += sum(abs2, x)
-                    elseif x isa NamedTuple
-                        for v in values(x)
-                            _acc(v)
-                        end
-                    elseif x isa Tuple
-                        for v in x
-                            _acc(v)
-                        end
-                    end
-                end
-                _acc(gs)
-                gnorm = sqrt(s)
-                if isfinite(gnorm) && gnorm > hyper.clip_norm
-                    scale = hyper.clip_norm / (gnorm + 1e-12)
-                    function _scale!(x)
-                        if x isa AbstractArray
-                            @. x = scale * x
-                        elseif x isa NamedTuple
-                            for v in values(x)
-                                _scale!(v)
-                            end
-                        elseif x isa Tuple
-                            for v in x
-                                _scale!(v)
-                            end
-                        end
-                    end
-                    _scale!(gs)
-                end
-            end
             new_optstate, new_ps = Optimisers.update(state.optstate, state.ps, gs)
             state = NNState(
                 model = state.model,
@@ -316,7 +279,7 @@ function solve_nn_det(
         seed = seed_cfg,
         runtime = (time_ns() - t0) / 1e9,
         loss = loss_val,
-        projection_kind = projection_kind,
+        projection_kind = hyper.projection_kind,
         feasibility = feas,
     )
     # --- Logging via NNTrain.CSVLogger ---
@@ -375,7 +338,7 @@ function solve_nn_det(
         tol = tol,
         maxit = maxit,
         verbose = verbose,
-        projection_kind = projection_kind,
+        projection_kind = hyper.projection_kind,
     )
 end
 
