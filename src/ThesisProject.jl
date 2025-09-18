@@ -39,6 +39,7 @@ include("solvers/nn/init.jl")
 include("solvers/nn/data.jl")
 include("solvers/nn/train.jl")
 include("solvers/nn/eval.jl")
+include("solvers/nn/pretrain.jl")
 
 # 5) methods (adapters)
 include("methods/EGM.jl")
@@ -58,6 +59,7 @@ include("analysis/SteadyState.jl")
 using .SteadyState: steady_state_analytic, steady_state_from_policy
 
 using .NNEval: eval_nn, write_eval_report
+using .NNPretrain: fit_to_EGM!
 using .API:
     AbstractModel,
     AbstractMethod,
@@ -85,6 +87,7 @@ export load_config,
     get_utility,
     eval_nn,
     write_eval_report,
+    fit_to_EGM!,
     simulate_panel,
     steady_state_analytic,
     steady_state_from_policy,

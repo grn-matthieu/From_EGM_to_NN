@@ -1,0 +1,29 @@
+[model]
+name = "BaselineConsumerSaving"
+
+[grids.a]
+min = 0.0
+max = 50.0
+N = 200
+
+[params]
+r = 0.02
+y = 1.0
+beta = 0.96
+sigma = 2.0
+
+[solver]
+method = "NN"
+epochs = 20
+batch = 256
+lr = 1e-3
+projection_kind = "softplus"
+stabilize = true
+stab_method = "log1p_square"
+residual_weighting = "none"
+weight_alpha = 5.0
+weight_kappa = 20.0
+
+[random]
+seed = 42
+
