@@ -222,9 +222,12 @@ function solve_nn_det(
     # Hyperparameters and state init
     hyper = _solver_hyper(cfg)
     st = init_state(Dict(cfg))
-    # Ensure optimiser LR matches cfg if provided (NNState is immutable)
+    # Ensure optimiser LR and optional clip_norm (NNState is immutable)
     if hyper.lr !== nothing
         newopt = Optimisers.Adam(hyper.lr)
+        if hyper.clip_norm !== nothing
+            newopt = Optimisers.OptimiserChain(Optimisers.ClipNorm(hyper.clip_norm), newopt)
+        end
         newoptstate = Optimisers.setup(newopt, st.ps)
         st = NNState(
             model = st.model,
@@ -279,7 +282,7 @@ function solve_nn_det(
         seed = seed_cfg,
         runtime = (time_ns() - t0) / 1e9,
         loss = loss_val,
-        projection_kind = hyper.projection_kind,
+        projection_kind = projection_kind,
         feasibility = feas,
     )
     # --- Logging via NNTrain.CSVLogger ---
@@ -338,7 +341,7 @@ function solve_nn_det(
         tol = tol,
         maxit = maxit,
         verbose = verbose,
-        projection_kind = hyper.projection_kind,
+        projection_kind = projection_kind,
     )
 end
 
@@ -387,6 +390,9 @@ function solve_nn_stoch(
     master_rng = seed_cfg === nothing ? make_rng(Int(0x9a9aa9a9)) : make_rng(Int(seed_cfg))
     if hyper.lr !== nothing
         newopt = Optimisers.Adam(hyper.lr)
+        if hyper.clip_norm !== nothing
+            newopt = Optimisers.OptimiserChain(Optimisers.ClipNorm(hyper.clip_norm), newopt)
+        end
         newoptstate = Optimisers.setup(newopt, st.ps)
         st = NNState(
             model = st.model,
