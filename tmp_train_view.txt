@@ -24,7 +24,7 @@ const DEFAULT_LAMBDA_SCHEDULE = :cosine
 """
     curriculum(epoch, E; stages=default_stages()) -> NamedTuple
 
-Coarse-fine schedule over epochs. Selects an active stage from `stages`
+Coarse→fine schedule over epochs. Selects an active stage from `stages`
 based on the current `epoch` in 1..E and returns its parameters as a
 NamedTuple.
 
@@ -38,7 +38,7 @@ function curriculum(epoch::Integer, E::Integer; stages::Vector = default_stages(
     epoch < 1 && throw(ArgumentError("epoch must be >= 1, got $(epoch)"))
     nstages = length(stages)
     nstages == 0 && throw(ArgumentError("stages must be non-empty"))
-    # Map epoch in [1, E] to stage index in [1, nstages]
+    # Map epoch ∈ [1, E] to stage index ∈ [1, nstages]
     frac = clamp(epoch / E, 0.0, 1.0)
     idx = max(1, min(nstages, ceil(Int, frac * nstages)))
     st = stages[idx]
@@ -301,27 +301,5 @@ function _step!(
     end
 
     # Learning rate (best-effort; may be absent in some rules)
-    lr = try
-        getfield(state.opt, :η)
-    catch
-        try
-            getfield(state.opt, :eta)
-        catch
-            try
-                getfield(state.opt, :lr)
-            catch
-                NaN
-            end
-        end
-    end
+    lr = try getfield(state.opt, :η) catch; try getfield(state.opt, :eta) catch; try getfield(state.opt, :lr) catch; NaN end end end
 
-end   # Return new state
-new_state = NNState(
-    model = state.model,
-    ps = new_ps,
-    st = st_new,
-    opt = state.opt,
-    optstate = new_optstate,
-)
-return new_state, loss_val, gnorm, lr
-end

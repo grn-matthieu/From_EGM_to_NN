@@ -1,0 +1,44 @@
+module NNTrain
+
+using Lux
+using Zygote
+using Optimisers
+include("optim.jl")
+using .NNOptim
+using Statistics
+using Dates
+using Printf
+using Random
+using ..NNData: grid_minibatches
+using ..NNLoss: anneal_lambda
+
+using ..NNInit: NNState, init_state
+
+export train!, dummy_epoch!
+
+# Default λ scheduling parameters (overridable via cfg)
+const DEFAULT_Λ_START = 0.1
+const DEFAULT_Λ_FINAL = 5.0
+const DEFAULT_Λ_SCHEDULE = :cosine
+
+"""
+    curriculum(epoch, E; stages=default_stages()) -> NamedTuple
+
+Coarse→fine schedule over epochs. Selects an active stage from `stages`
+based on the current `epoch` in 1..E and returns its parameters as a
+NamedTuple.
+
+Fields in the returned NamedTuple:
+- `grid_stride`: Subsample factor for state grid or minibatch indices.
+- `nMC`: Number of Monte Carlo draws for expectations.
+- `shock_noise`: Multiplier applied to innovation std in the sampler.
+"""
+function curriculum(epoch::Integer, E::Integer; stages::Vector = default_stages())
+    E <= 0 && throw(ArgumentError("E must be positive, got $(E)"))
+    epoch < 1 && throw(ArgumentError("epoch must be ≥ 1, got $(epoch)"))
+    nstages = length(stages)
+    nstages == 0 && throw(ArgumentError("stages must be non-empty"))
+    # Map epoch ∈ [1, E] to stage index ∈ [1, nstages]
+    frac = clamp(epoch / E, 0.0, 1.0)
+    idx = max(1, min(nstages, ceil(Int, frac * nstages)))
+

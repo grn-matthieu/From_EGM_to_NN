@@ -14,7 +14,10 @@ const DEFAULT_CONFIG = joinpath(dirname(@__DIR__), "config", "simple_baseline.ya
 
 usage() = """
 Usage:
-  julia --project scripts/run_nn_baseline.jl --config <path> [--epochs <Int>] [--lr <Float64>] [--batch <Int>] [--seed <Int>]
+  julia --project scripts/run_nn_baseline.jl --config <path> [--epochs <Int>] [--lr <Float64>] [--batch <Int>] [--seed <Int>] \
+         [--opt <adam|rmsprop|sgd>] [--beta1 <Float64>] [--beta2 <Float64>] [--eps <Float64>] \
+         [--mom <Float64>] [--rho <Float64>] [--lr_schedule <none|cosine|step>] \
+         [--eta_min <Float64>] [--step_size <Int>] [--gamma <Float64>]
 
 Options:
   --config   Path to YAML config (required)
@@ -23,6 +26,16 @@ Options:
   --batch    Batch size (optional)
   --seed     RNG seed (default 42)
   --smoke    Force quick run (epochs=1 if unset, batch<=64, CPU)
+  --opt      Optimizer (adam|rmsprop|sgd)
+  --beta1    Adam/RMSProp beta1
+  --beta2    Adam beta2
+  --eps      Epsilon for Adam/RMSProp/SGD
+  --mom      Momentum for SGD
+  --rho      Rho for RMSProp
+  --lr_schedule  Learning rate schedule (none|cosine|step)
+  --eta_min  Min LR for cosine
+  --step_size Step size for step schedule
+  --gamma    Decay factor for step schedule
 """
 
 function parse_args(argv::Vector{String})::NamedTuple
@@ -37,6 +50,17 @@ function parse_args(argv::Vector{String})::NamedTuple
         "batch" => nothing,
         "seed" => 42,
         "smoke" => false,
+        # optimizer and schedule
+        "opt" => nothing,
+        "beta1" => nothing,
+        "beta2" => nothing,
+        "eps" => nothing,
+        "mom" => nothing,
+        "rho" => nothing,
+        "lr_schedule" => nothing,
+        "eta_min" => nothing,
+        "step_size" => nothing,
+        "gamma" => nothing,
     )
     i = 1
     while i ≤ length(argv)
@@ -51,6 +75,16 @@ function parse_args(argv::Vector{String})::NamedTuple
         a == "--batch" && (opt["batch"] = parse(Int, argv[i+=1]); i += 1; continue)
         a == "--seed" && (opt["seed"] = parse(Int, argv[i+=1]); i += 1; continue)
         a == "--smoke" && (opt["smoke"] = true; i += 1; continue)
+        a == "--opt" && (opt["opt"] = argv[i+=1]; i += 1; continue)
+        a == "--beta1" && (opt["beta1"] = parse(Float64, argv[i+=1]); i += 1; continue)
+        a == "--beta2" && (opt["beta2"] = parse(Float64, argv[i+=1]); i += 1; continue)
+        a == "--eps" && (opt["eps"] = parse(Float64, argv[i+=1]); i += 1; continue)
+        a == "--mom" && (opt["mom"] = parse(Float64, argv[i+=1]); i += 1; continue)
+        a == "--rho" && (opt["rho"] = parse(Float64, argv[i+=1]); i += 1; continue)
+        a == "--lr_schedule" && (opt["lr_schedule"] = argv[i+=1]; i += 1; continue)
+        a == "--eta_min" && (opt["eta_min"] = parse(Float64, argv[i+=1]); i += 1; continue)
+        a == "--step_size" && (opt["step_size"] = parse(Int, argv[i+=1]); i += 1; continue)
+        a == "--gamma" && (opt["gamma"] = parse(Float64, argv[i+=1]); i += 1; continue)
         error("Unknown arg: $a")
     end
     isnothing(opt["config"]) && error("--config is required")
@@ -61,6 +95,17 @@ function parse_args(argv::Vector{String})::NamedTuple
         batch = opt["batch"],
         seed = opt["seed"],
         smoke = opt["smoke"],
+        # optimizer & schedule
+        opt = opt["opt"],
+        beta1 = opt["beta1"],
+        beta2 = opt["beta2"],
+        eps = opt["eps"],
+        mom = opt["mom"],
+        rho = opt["rho"],
+        lr_schedule = opt["lr_schedule"],
+        eta_min = opt["eta_min"],
+        step_size = opt["step_size"],
+        gamma = opt["gamma"],
     )
 end
 
@@ -88,6 +133,38 @@ function apply_overrides!(cfg::AbstractDict, opt)::Nothing
         random_cfg = get!(cfg, :random, Dict{Symbol,Any}())
         random_cfg[:seed] = opt.seed
         cfg[:random] = random_cfg
+    end
+
+    # Optimizer + schedule overrides
+    if opt.opt !== nothing
+        solver_cfg[:optimizer] = String(opt.opt)
+    end
+    if opt.beta1 !== nothing
+        solver_cfg[:beta1] = opt.beta1
+    end
+    if opt.beta2 !== nothing
+        solver_cfg[:beta2] = opt.beta2
+    end
+    if opt.eps !== nothing
+        solver_cfg[:eps] = opt.eps
+    end
+    if opt.mom !== nothing
+        solver_cfg[:mom] = opt.mom
+    end
+    if opt.rho !== nothing
+        solver_cfg[:rho] = opt.rho
+    end
+    if opt.lr_schedule !== nothing
+        solver_cfg[:lr_schedule] = Symbol(opt.lr_schedule)
+    end
+    if opt.eta_min !== nothing
+        solver_cfg[:eta_min] = opt.eta_min
+    end
+    if opt.step_size !== nothing
+        solver_cfg[:step_size] = opt.step_size
+    end
+    if opt.gamma !== nothing
+        solver_cfg[:gamma] = opt.gamma
     end
 
     cfg[:solver] = solver_cfg
