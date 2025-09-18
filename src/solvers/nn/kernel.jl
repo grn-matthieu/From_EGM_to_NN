@@ -4,6 +4,35 @@ using ..EulerResiduals: euler_resid_det_2, euler_resid_stoch!
 using ..NNLoss: assemble_euler_loss
 using ..NNConstraints: project_savings, project_savings_clip
 using Statistics: mean
+using Printf
+using Dates
+
+"""
+    ensure_dir(path)
+
+Create directory `path` if it doesn't already exist.
+"""
+function ensure_dir(path)
+    isdir(path) || mkpath(path)
+    return path
+end
+
+"""
+    open_logger(dir) -> (fname, io)
+
+Ensure `dir` exists and open a timestamped CSV file for logging.
+Header: ts,epoch,train_loss,feas,lr,batch,seed,config
+"""
+function open_logger(dir)::Tuple{String,IO}
+    ensure_dir(dir)
+    fname = joinpath(
+        dir,
+        "run_" * Dates.format(Dates.now(), dateformat"yyyymmdd_HHMMSS") * ".csv",
+    )
+    io = open(fname, "w")
+    println(io, "ts,epoch,train_loss,feas,lr,batch,seed,config")
+    return fname, io
+end
 
 export solve_nn_det, solve_nn_stoch
 
@@ -86,6 +115,29 @@ function solve_nn_det(
         projection_kind = projection_kind,
         feasibility = feas,
     )
+
+    # --- Epoch logging (deterministic) ---
+    logdir = joinpath(pwd(), "results", "nn", "baseline")
+    fname, io = open_logger(logdir)
+    epochs_cfg = get(get(cfg, :solver, Dict{Symbol,Any}()), :epochs, 1)
+    lr_cfg = get(get(cfg, :solver, Dict{Symbol,Any}()), :lr, NaN)
+    batch_cfg = get(get(cfg, :solver, Dict{Symbol,Any}()), :batch, 0)
+    seed_cfg = get(get(cfg, :random, Dict{Symbol,Any}()), :seed, -1)
+    cfg_name = basename(get(cfg, :config_path, "unknown"))
+    @printf(
+        io,
+        "%s,%d,%.6g,%.6g,%.6g,%d,%d,%s\n",
+        Dates.format(Dates.now(), dateformat"yyyy-mm-ddTHH:MM:SS"),
+        Int(epochs_cfg),
+        float(loss_val),
+        float(feas),
+        float(lr_cfg),
+        Int(batch_cfg),
+        Int(seed_cfg),
+        cfg_name,
+    )
+    close(io)
+    @info "NN baseline log written" path = fname
 
     return (
         a_grid = a_grid,
@@ -204,6 +256,29 @@ function solve_nn_stoch(
         projection_kind = projection_kind,
         feasibility = feas,
     )
+
+    # --- Epoch logging (stochastic) ---
+    logdir = joinpath(pwd(), "results", "nn", "baseline")
+    fname, io = open_logger(logdir)
+    epochs_cfg = get(get(cfg, :solver, Dict{Symbol,Any}()), :epochs, 1)
+    lr_cfg = get(get(cfg, :solver, Dict{Symbol,Any}()), :lr, NaN)
+    batch_cfg = get(get(cfg, :solver, Dict{Symbol,Any}()), :batch, 0)
+    seed_cfg = get(get(cfg, :random, Dict{Symbol,Any}()), :seed, -1)
+    cfg_name = basename(get(cfg, :config_path, "unknown"))
+    @printf(
+        io,
+        "%s,%d,%.6g,%.6g,%.6g,%d,%d,%s\n",
+        Dates.format(Dates.now(), dateformat"yyyy-mm-ddTHH:MM:SS"),
+        Int(epochs_cfg),
+        float(loss_val),
+        float(feas),
+        float(lr_cfg),
+        Int(batch_cfg),
+        Int(seed_cfg),
+        cfg_name,
+    )
+    close(io)
+    @info "NN baseline log written" path = fname
 
     return (
         a_grid = a_grid,
