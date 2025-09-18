@@ -126,6 +126,30 @@ end
     include("nn/eval_tests.jl")
 end
 
+@testset "Coverage - Boost" begin
+    include("coverage_boost.jl")
+end
+
+@testset "Coverage - More" begin
+    include("coverage_more.jl")
+end
+
+@testset "Coverage - SimPlots" begin
+    include("coverage_simplots.jl")
+end
+
+@testset "Coverage - NNLoss" begin
+    include("coverage_nnloss.jl")
+end
+
+@testset "Coverage - NNTrain" begin
+    include("coverage_nntrain.jl")
+end
+
+@testset "Coverage - Core API" begin
+    include("coverage_core_api.jl")
+end
+
 @testset "Analysis - SteadyState" begin
     include("test_steady_state.jl")
 end

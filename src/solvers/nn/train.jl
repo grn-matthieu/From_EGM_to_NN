@@ -1,4 +1,5 @@
-using DelimitedFiles
+using Dates
+using Printf
 
 function bench_mixedprecision(cfg; warmup_epochs = 1, run_epochs = 2)
     # Settings
@@ -408,7 +409,7 @@ function log_row!(
             _f(shock_noise),
             _f(lambda_penalty),
         )
-        λ
+        nothing
     end
     return nothing
 end
@@ -574,13 +575,54 @@ function _step!(
         end
     end
 
-end   # Return new state
-new_state = NNState(
-    model = state.model,
-    ps = new_ps,
-    st = st_new,
-    opt = state.opt,
-    optstate = new_optstate,
-)
-return new_state, loss_val, gnorm, lr
+    new_state = NNState(
+        model = state.model,
+        ps = new_ps,
+        st = st_new,
+        opt = state.opt,
+        optstate = new_optstate,
+        rngs = state.rngs,
+    )
+    return new_state, loss_val, gnorm, lr
 end
+
+"""
+    train!(state::NNState, data, cfg; val_data=nothing) -> NNState
+
+Simple training loop used by tests: iterate over `epochs` and call `_step!`
+for each minibatch in `data`. Overload that accepts a model initializes a
+state via `init_state(cfg)`.
+"""
+function train!(state::NNState, data, cfg; val_data = nothing)
+    solver_cfg = get(cfg, :solver, Dict{Symbol,Any}())
+    epochs = get(solver_cfg, :epochs, 1)
+    clip_norm = get(solver_cfg, :clip_norm, nothing)
+    st = state
+    for epoch = 1:epochs
+        for (x, y) in data
+            st, loss, gnorm, lr = _step!(st, x, y; clip_norm = clip_norm)
+        end
+    end
+    return st
+end
+
+function train!(model, data, cfg; val_data = nothing)
+    st = init_state(cfg)
+    return train!(st, data, cfg; val_data = val_data)
+end
+
+function dummy_epoch!(; n::Integer = 32, batch::Integer = 8, epochs::Integer = 1)
+    cfg = Dict{Symbol,Any}()
+    st = init_state(cfg)
+    steps = max(1, div(n, batch))
+    for _ = 1:epochs
+        for _ = 1:steps
+            x = rand(Float32, 1, batch)
+            y = rand(Float32, 1, batch)
+            st, _, _, _ = _step!(st, x, y)
+        end
+    end
+    return st
+end
+
+end # module NNTrain

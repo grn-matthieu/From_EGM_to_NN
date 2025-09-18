@@ -1,16 +1,5 @@
-"""
-    to_fp32(x)
-
-Convert `x` (scalar or array) to `Float32` while preserving shape.
-"""
-function to_fp32(x)
-    if x isa AbstractArray
-        return Float32.(x)
-    else
-        return Float32(x)
-    end
-end
 module NNLoss
+using ..NNMixedPrecision: to_fp32
 
 using ..API
 using ..CommonInterp: interp_linear!

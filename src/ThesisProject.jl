@@ -1,5 +1,7 @@
 module ThesisProject
 
+__precompile__(false)
+
 # --- Includes ---
 # 1) spine
 include("core/api.jl")
@@ -32,9 +34,9 @@ include("solvers/egm/kernel.jl")
 include("solvers/perturbation/kernel.jl")
 
 # nn
+include("solvers/nn/mixedprec.jl")
 include("solvers/nn/loss.jl")   # provide NNLoss before NNKernel imports it
 include("solvers/nn/constraints.jl")   # NNConstraints: softplus-based projections
-include("solvers/nn/mixedprec.jl")
 include("solvers/nn/kernel.jl")
 include("solvers/nn/init.jl")
 include("solvers/nn/data.jl")

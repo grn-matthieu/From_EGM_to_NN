@@ -17,28 +17,30 @@ const DEFAULT_CONFIG = joinpath(dirname(@__DIR__), "config", "simple_baseline.ya
 
 usage() = """
 Usage:
-  julia --project scripts/run_nn_baseline.jl --config <path> [--epochs <Int>] [--lr <Float64>] [--batch <Int>] [--seed <Int>] \
-         [--opt <adam|rmsprop|sgd>] [--beta1 <Float64>] [--beta2 <Float64>] [--eps <Float64>] \
-         [--mom <Float64>] [--rho <Float64>] [--lr_schedule <none|cosine|step>] \
-         [--eta_min <Float64>] [--step_size <Int>] [--gamma <Float64>]
+    julia --project scripts/run_nn_baseline.jl --config <path> [--epochs <Int>] [--lr <Float64>] [--batch <Int>] [--seed <Int>] \
+                 [--opt <adam|rmsprop|sgd>] [--beta1 <Float64>] [--beta2 <Float64>] [--eps <Float64>] \
+                 [--mom <Float64>] [--rho <Float64>] [--lr_schedule <none|cosine|step>] \
+                 [--eta_min <Float64>] [--step_size <Int>] [--gamma <Float64>]
 
 Options:
-  --config   Path to YAML config (required)
-  --epochs   NN training epochs (optional)
-  --lr       Learning rate (optional)
-  --batch    Batch size (optional)
-  --seed     RNG seed (default 42)
-  --smoke    Force quick run (epochs=1 if unset, batch<=64, CPU)
-  --opt      Optimizer (adam|rmsprop|sgd)
-  --beta1    Adam/RMSProp beta1
-  --beta2    Adam beta2
-  --eps      Epsilon for Adam/RMSProp/SGD
-  --mom      Momentum for SGD
-  --rho      Rho for RMSProp
-  --lr_schedule  Learning rate schedule (none|cosine|step)
-  --eta_min  Min LR for cosine
-  --step_size Step size for step schedule
-  --gamma    Decay factor for step schedule
+    --config   Path to YAML config (required)
+    --epochs   NN training epochs (optional)
+    --lr       Learning rate (optional)
+    --batch    Batch size (optional)
+    --seed     RNG seed (default 42)
+    --smoke    Force quick run (epochs=1 if unset, batch<=64, CPU)
+    --opt      Optimizer (adam|rmsprop|sgd)
+    --beta1    Adam/RMSProp beta1
+    --beta2    Adam beta2
+    --eps      Epsilon for Adam/RMSProp/SGD
+    --mom      Momentum for SGD
+    --rho      Rho for RMSProp
+    --lr_schedule  Learning rate schedule (none|cosine|step)
+    --eta_min  Min LR for cosine
+    --step_size Step size for step schedule
+    --gamma    Decay factor for step schedule
+    --all-methods   Run benchmarks for all supported methods (egm,vi,nn)
+    --methods       Comma-separated list of methods to run (egm,vi,nn)
 """
 
 function parse_args(argv::Vector{String})::NamedTuple
@@ -64,6 +66,8 @@ function parse_args(argv::Vector{String})::NamedTuple
         "eta_min" => nothing,
         "step_size" => nothing,
         "gamma" => nothing,
+        "all_methods" => false,
+        "methods" => nothing,
     )
     i = 1
     while i ≤ length(argv)
@@ -88,6 +92,8 @@ function parse_args(argv::Vector{String})::NamedTuple
         a == "--eta_min" && (opt["eta_min"] = parse(Float64, argv[i+=1]); i += 1; continue)
         a == "--step_size" && (opt["step_size"] = parse(Int, argv[i+=1]); i += 1; continue)
         a == "--gamma" && (opt["gamma"] = parse(Float64, argv[i+=1]); i += 1; continue)
+        a == "--all-methods" && (opt["all_methods"] = true; i += 1; continue)
+        a == "--methods" && (opt["methods"] = argv[i+=1]; i += 1; continue)
         error("Unknown arg: $a")
     end
     isnothing(opt["config"]) && error("--config is required")
@@ -109,6 +115,8 @@ function parse_args(argv::Vector{String})::NamedTuple
         eta_min = opt["eta_min"],
         step_size = opt["step_size"],
         gamma = opt["gamma"],
+        all_methods = opt["all_methods"],
+        methods = opt["methods"],
     )
 end
 
@@ -221,6 +229,91 @@ function compute_training_loss(sol)::Float64
     return sum(abs2, res_data) / length(res_data)
 end
 
+
+"""
+run_nn(cfg; epochs, batch, opt, seed) -> NamedTuple
+
+Builds model and NN method, runs training and returns a NamedTuple with metrics.
+"""
+function run_nn(
+    cfg::AbstractDict;
+    epochs = nothing,
+    batch = nothing,
+    optname = nothing,
+    seed = nothing,
+)
+    cfg_local = deepcopy(cfg)
+    ensure_supported_shocks!(cfg_local)
+    ensure_nn_method!(cfg_local)
+
+    solver_cfg = get!(cfg_local, :solver, Dict{Symbol,Any}())
+    if epochs !== nothing
+        solver_cfg[:epochs] = epochs
+    end
+    if batch !== nothing
+        solver_cfg[:batch] = batch
+    end
+    if optname !== nothing
+        solver_cfg[:optimizer] = optname
+    end
+    if seed !== nothing
+        cfg_local[:random] = get!(cfg_local, :random, Dict{Symbol,Any}())
+        cfg_local[:random][:seed] = seed
+    end
+    solver_cfg[:device] = :cpu
+    cfg_local[:solver] = solver_cfg
+
+    t0 = Dates.now()
+    model = build_model(cfg_local)
+    method = build_method(cfg_local)
+    sol = solve(model, method, cfg_local)
+    elapsed = Dates.now() - t0
+    wall_seconds = Dates.value(elapsed) / 1000
+
+    loss = compute_training_loss(sol)
+    feas = isfinite(loss) ? 1.0 : 0.0
+
+    return (
+        method = :nn,
+        loss = loss,
+        feas = feas,
+        wall_s = wall_seconds,
+        epochs = get(solver_cfg, :epochs, nothing),
+        batch = get(solver_cfg, :batch, nothing),
+        opt = get(solver_cfg, :optimizer, ""),
+    )
+end
+
+
+function run_egm(cfg::AbstractDict)
+    cfg_local = deepcopy(cfg)
+    cfg_local[:method] = :EGM
+    t0 = Dates.now()
+    model = build_model(cfg_local)
+    method = build_method(cfg_local)
+    sol = solve(model, method, cfg_local)
+    elapsed = Dates.now() - t0
+    wall_seconds = Dates.value(elapsed) / 1000
+    loss = compute_training_loss(sol)
+    feas = isfinite(loss) ? 1.0 : 0.0
+    return (method = :egm, loss = loss, feas = feas, wall_s = wall_seconds)
+end
+
+
+function run_vi(cfg::AbstractDict)
+    cfg_local = deepcopy(cfg)
+    cfg_local[:method] = :VI
+    t0 = Dates.now()
+    model = build_model(cfg_local)
+    method = build_method(cfg_local)
+    sol = solve(model, method, cfg_local)
+    elapsed = Dates.now() - t0
+    wall_seconds = Dates.value(elapsed) / 1000
+    loss = compute_training_loss(sol)
+    feas = isfinite(loss) ? 1.0 : 0.0
+    return (method = :vi, loss = loss, feas = feas, wall_s = wall_seconds)
+end
+
 function main(args::Vector{String} = ARGS)
     opt = try
         parse_args(args)
@@ -269,48 +362,88 @@ function main(args::Vector{String} = ARGS)
     seed = inject_seed!(cfg, opt)
     Random.seed!(seed)
 
-    t0 = Dates.now()
-    model = build_model(cfg)
-    method = build_method(cfg)
-    sol = solve(model, method, cfg)
-    elapsed = Dates.now() - t0
-    wall_seconds = Dates.value(elapsed) / 1000
+    # Determine which methods to run
+    method_names = if getfield(opt, :all_methods) === true
+        ["egm", "vi", "nn"]
+    elseif opt.methods !== nothing
+        split(String(opt.methods), ',') .|> strip .|> lowercase
+    else
+        ["nn"]
+    end
 
-    epochs = get(cfg[:solver], :epochs, missing)
-    loss = compute_training_loss(sol)
+    # Prepare results directory and CSV
+    logdir = joinpath(pwd(), "results", "benchmarks")
+    isdir(logdir) || mkpath(logdir)
+    timestamp = Dates.format(Dates.now(), "yyyy-mm-dd_HHMMSS")
+    csvpath = joinpath(logdir, "bench_$(timestamp).csv")
+    open(csvpath, "w") do io
+        println(io, "method,loss,feas,wall_s,epochs,batch,opt,seed,config")
+    end
 
-    epoch_str = epochs === missing ? "?" : string(epochs)
-    @printf(
-        "Epochs: %s | Final loss: %.4e | Wall time: %.2fs\n",
-        epoch_str,
-        loss,
-        wall_seconds
-    )
-
-    # If smoke, print success line with CSV path (best-effort: pick latest log file)
-    if getfield(opt, :smoke) === true
-        logdir = joinpath(pwd(), "results", "nn", "baseline")
-        csvpath = try
-            if isdir(logdir)
-                files = filter(
-                    f -> endswith(lowercase(f), ".csv"),
-                    readdir(logdir; join = true),
-                )
-                isempty(files) ? nothing : files[argmax(stat.(files) .|> x -> x.mtime)]
-            else
-                nothing
-            end
-        catch
-            nothing
-        end
-        if csvpath === nothing
-            println("SMOKE OK (no CSV found)")
+    results = Vector{Any}()
+    for m in method_names
+        mclean = lowercase(strip(m))
+        if mclean == "egm"
+            res = run_egm(cfg)
+        elseif mclean == "vi"
+            res = run_vi(cfg)
+        elseif mclean == "nn"
+            res = run_nn(
+                cfg;
+                epochs = opt.epochs,
+                batch = opt.batch,
+                optname = opt.opt,
+                seed = opt.seed,
+            )
         else
-            println("SMOKE OK " * String(csvpath))
+            @warn "Unknown method: $mclean — skipping"
+            continue
+        end
+
+        push!(results, res)
+
+        # Print summary line
+        if haskey(res, :epochs)
+            epoch_str = res[:epochs] === nothing ? "?" : string(res[:epochs])
+        else
+            epoch_str = "?"
+        end
+        @printf(
+            "Method: %s | Loss: %.4e | Wall: %.2fs | Epochs: %s\n",
+            string(res[:method]),
+            res[:loss],
+            res[:wall_s],
+            epoch_str
+        )
+
+        # Append to CSV
+        open(csvpath, "a") do io
+            e = get(res, :epochs, "")
+            b = get(res, :batch, "")
+            o = get(res, :opt, "")
+            s = get(cfg, :random, Dict{Symbol,Any}())[:seed]
+            println(
+                io,
+                join(
+                    [
+                        string(res[:method]),
+                        string(res[:loss]),
+                        string(res[:feas]),
+                        string(res[:wall_s]),
+                        string(e),
+                        string(b),
+                        string(o),
+                        string(s),
+                        opt.config,
+                    ],
+                    ',',
+                ),
+            )
         end
     end
 
-    return (; solution = sol, epochs = epochs, loss = loss, wall_time = wall_seconds)
+    println("Wrote benchmark CSV: $csvpath")
+    return (; results = results, csv = csvpath)
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__
