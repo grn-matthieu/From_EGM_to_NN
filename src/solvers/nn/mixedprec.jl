@@ -1,3 +1,9 @@
+"""
+NNMixedPrecision
+
+Lightweight helpers to run mixed-precision training/evaluation (FP16/BF16)
+with safe casting and loss scaling wrappers.
+"""
 module NNMixedPrecision
 
 export UseFP16,

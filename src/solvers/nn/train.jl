@@ -252,6 +252,12 @@ function bench_mixedprecision(cfg; warmup_epochs = 1, run_epochs = 2)
     end
     return results
 end
+"""
+NNTrain
+
+Training utilities and logging helpers for NN solvers, including simple CSV
+logging, curricula, and convenience wrappers around mixed-precision.
+"""
 module NNTrain
 
 using Lux

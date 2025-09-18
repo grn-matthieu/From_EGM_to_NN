@@ -1,3 +1,8 @@
+"""
+CommonValidators
+
+Lightweight configuration and argument validators shared by solver kernels.
+"""
 module CommonValidators
 
 export is_nondec, is_positive, respects_amin

@@ -1,3 +1,9 @@
+"""
+ConsumerSaving
+
+Baseline consumption–savings model with CRRA utility and borrowing constraint.
+Defines parameters, grids, and shock processes used by solver kernels.
+"""
 module ConsumerSaving
 
 using ..API: AbstractModel

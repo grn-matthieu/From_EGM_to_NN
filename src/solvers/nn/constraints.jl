@@ -1,3 +1,9 @@
+"""
+NNConstraints
+
+Projection and clipping utilities tailored for NN policy outputs (e.g., mapping
+unconstrained outputs to feasible savings `a′ ≥ a_min`).
+"""
 module NNConstraints
 
 export softplus, project_savings_softplus, project_savings_clip, project_savings

@@ -1,3 +1,20 @@
+"""
+NNKernel
+
+Neural-network solver kernels for consumption–savings problems.
+
+- Deterministic: mini-batch training on Euler residuals; model maps `a → a′`.
+- Stochastic: residual training with discrete shocks; next-period expectations
+  are computed efficiently via a single batched forward pass across shocks.
+
+Conventions and options
+- Projection: apply `project_savings(.; kind = hyper.projection_kind)` to keep `a′ ≥ a_min`.
+- Stabilization/weights: delegated to `NNLoss.assemble_euler_loss` via `hyper`.
+- Optimiser: use `Optimisers.Adam(lr)` optionally wrapped with `ClipNorm` when
+  `hyper.clip_norm` is provided.
+
+Exports: `solve_nn_det`, `solve_nn_stoch`.
+"""
 module NNKernel
 
 using Lux

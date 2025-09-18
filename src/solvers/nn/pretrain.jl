@@ -1,3 +1,9 @@
+"""
+NNPretrain
+
+Supervised pretraining routines to fit NN policies to EGM-generated targets
+before residual-based fine-tuning.
+"""
 module NNPretrain
 
 using Lux

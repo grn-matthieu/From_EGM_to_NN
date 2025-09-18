@@ -1,3 +1,8 @@
+"""
+NNEval
+
+Evaluation helpers for trained NN policies and reporting utilities.
+"""
 module NNEval
 
 using Statistics: mean

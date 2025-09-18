@@ -1,3 +1,9 @@
+"""
+Chebyshev
+
+Chebyshev polynomial utilities used by projection methods (basis evaluation,
+recurrence, scaling). Intended for internal use by projection kernels.
+"""
 module Chebyshev
 
 export chebyshev_nodes,

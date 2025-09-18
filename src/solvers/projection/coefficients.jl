@@ -1,3 +1,9 @@
+"""
+ProjectionCoefficients
+
+Routines to compute and work with projection coefficients for policy/value
+approximations used by the projection solver.
+"""
 module ProjectionCoefficients
 
 using LinearAlgebra: AbstractVecOrMat, transpose, I

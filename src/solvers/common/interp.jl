@@ -1,3 +1,9 @@
+"""
+CommonInterp
+
+Interpolation primitives used across solvers. Provides linear and monotone
+piecewise-cubic interpolation routines and types.
+"""
 module CommonInterp
 
 export interp_linear!, interp_pchip!, InterpKind, LinearInterp, MonotoneCubicInterp

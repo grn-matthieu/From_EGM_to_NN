@@ -1,3 +1,9 @@
+"""
+ProjectionKernel
+
+Projection method solver kernel for deterministic and stochastic variants.
+Assembles basis functions, solves for coefficients, and evaluates policies.
+"""
 module ProjectionKernel
 
 using LinearAlgebra: mul!, cond

@@ -1,3 +1,9 @@
+"""
+SteadyState
+
+Utilities to compute steady states analytically or from a policy function.
+Exports `steady_state_analytic` and `steady_state_from_policy`.
+"""
 module SteadyState
 
 using ..API: AbstractModel, Solution, get_params, get_grids, get_shocks

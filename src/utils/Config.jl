@@ -1,3 +1,9 @@
+"""
+UtilsConfig
+
+Configuration loading and validation helpers. Normalizes user inputs and
+provides defaults for solvers and models.
+"""
 module UtilsConfig
 
 import ..API: load_config, validate_config

@@ -1,3 +1,9 @@
+"""
+EulerResiduals
+
+Implements Euler-equation residual calculations (deterministic and stochastic)
+and their in-place variants, used for accuracy metrics and training losses.
+"""
 module EulerResiduals
 
 using ..CommonInterp: interp_linear!

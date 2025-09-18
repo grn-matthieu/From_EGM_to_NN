@@ -1,3 +1,8 @@
+"""
+NN
+
+Adapter for the neural-network solver, bridging `API.solve` to `NNKernel`.
+"""
 module NN
 
 using ..API

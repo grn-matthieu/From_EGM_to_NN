@@ -1,3 +1,9 @@
+"""
+Determinism
+
+Utilities to make runs reproducible: seeded RNGs, deterministic seeds derived
+from structured inputs, and helpers for hashing/serialization.
+"""
 module Determinism
 
 using StableRNGs

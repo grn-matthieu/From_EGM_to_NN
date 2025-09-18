@@ -1,3 +1,9 @@
+"""
+NNData
+
+Mini-batch and dataset utilities for grid-based training of NN policies.
+Provides iterators over asset/shock grids with optional shuffling and targets.
+"""
 module NNData
 
 using Random

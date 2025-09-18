@@ -1,3 +1,9 @@
+"""
+EGMKernel
+
+Endogenous Grid Method solver kernel for the consumption–savings model.
+Exports helpers and the main projection-based policy iteration.
+"""
 module EGMKernel
 
 using ..CommonInterp:

@@ -1,3 +1,9 @@
+"""
+ValueFunction
+
+Value-function utilities (Bellman operator evaluations, expectations, etc.)
+used by projection methods and diagnostics.
+"""
 module ValueFunction
 
 using ..CommonInterp: interp_linear!

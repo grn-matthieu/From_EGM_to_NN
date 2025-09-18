@@ -1,3 +1,10 @@
+"""
+ThesisProject
+
+Top-level package module. Assembles core APIs, utilities, models, solvers, and
+method adapters into a cohesive interface. See `src/core/api.jl` for the public
+types and entry points, and `methods/*` for adapters that call solver kernels.
+"""
 module ThesisProject
 
 __precompile__(false)

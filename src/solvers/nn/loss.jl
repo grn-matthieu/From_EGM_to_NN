@@ -1,3 +1,9 @@
+"""
+NNLoss
+
+Loss assembly for NN training based on Euler residuals, including optional
+stabilization, boundary weighting, and constraint penalties.
+"""
 module NNLoss
 using ..NNMixedPrecision: to_fp32
 

@@ -1,3 +1,9 @@
+"""
+Shocks
+
+Shock discretization and utilities. Provides `ShockOutput` and helpers to
+construct shock grids, transition matrices, and invariant distributions.
+"""
 module Shocks
 
 using SpecialFunctions: erf

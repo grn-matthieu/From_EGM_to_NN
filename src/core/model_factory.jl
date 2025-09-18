@@ -1,3 +1,8 @@
+"""
+ModelFactory
+
+Constructs concrete model instances from configuration via `API.build_model`.
+"""
 module ModelFactory
 
 import ..API: build_model

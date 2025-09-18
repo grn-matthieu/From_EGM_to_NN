@@ -1,3 +1,10 @@
+"""
+NNOptim
+
+Standalone, allocation-free optimisers with a common in-place API for
+standalone experiments. Note: the solver kernels primarily use Optimisers.jl;
+these are used by NNTrain utilities.
+"""
 module NNOptim
 
 export Optimizer, SGD, RMSProp, Adam, init!, update!, make_optimizer

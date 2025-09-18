@@ -1,3 +1,10 @@
+"""
+ModelContract
+
+Defines the minimal interface that model implementations must satisfy and
+provides overload points for `API.get_params`, `get_grids`, `get_shocks`, and
+`get_utility`.
+"""
 module ModelContract
 
 using ..API

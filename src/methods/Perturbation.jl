@@ -1,3 +1,9 @@
+"""
+Perturbation
+
+Adapter for a simple perturbation-based policy update, wired into `API.solve`.
+Primarily used for testing and baseline comparisons.
+"""
 module Perturbation
 
 using ..API

@@ -1,3 +1,9 @@
+"""
+PolicyPlots
+
+Plotting helpers for policies and residuals (activated via package extension).
+Defines implementations for `plot_policy` and `plot_euler_errors`.
+"""
 import ThesisProject: plot_policy, plot_euler_errors
 
 const LINE_KW = (; lw = 2)

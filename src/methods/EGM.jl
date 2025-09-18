@@ -1,3 +1,8 @@
+"""
+EGM
+
+Adapter that wires the EGM solver kernel into the unified `API.solve` method.
+"""
 module EGM
 
 using ..API

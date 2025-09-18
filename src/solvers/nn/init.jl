@@ -1,3 +1,9 @@
+"""
+NNInit
+
+Model/state initialization for NN solvers: builds Lux models, parameters,
+optimisers, and RNGs based on configuration.
+"""
 module NNInit
 
 using Lux

@@ -1,3 +1,8 @@
+"""
+Projection
+
+Adapter exposing projection-based solver kernel through `API.solve`.
+"""
 module Projection
 using ..API
 import ..API: solve

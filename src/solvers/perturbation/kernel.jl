@@ -1,3 +1,9 @@
+"""
+PerturbationKernel
+
+Simple perturbation-based policy update kernel used for smoke tests and
+baselines. Not intended as a production-quality solver.
+"""
 module PerturbationKernel
 
 using ..EulerResiduals: euler_resid_det_2, euler_resid_stoch
