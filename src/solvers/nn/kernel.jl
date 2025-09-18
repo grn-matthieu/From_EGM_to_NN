@@ -216,6 +216,19 @@ function _batch_loss_stoch(ps, st, model, X, p, a_min, z_grid, P; hyper)
         ]...,
     )
     Emu = vec(sum(T; dims = 2))
+    # Batched over shocks (single Lux.apply): recompute Emu efficiently
+    Nz = length(z_grid)
+    yprimes = exp.(z_grid)
+    ap_rep = repeat(ap, Nz)
+    yprime_rep = repeat(yprimes, inner = B)
+    Xbig = vcat(reshape(ap_rep, 1, :), reshape(yprime_rep, 1, :))
+    y2_raw_all, _ = Lux.apply(model, Xbig, ps, st2)
+    ap2_all = vec(project_savings(y2_raw_all, a_min; kind = hyper.projection_kind))
+    cp_all = clamp.(yprime_rep .+ R .* ap_rep .- ap2_all, 1.0e-12, Inf)
+    c_rep = repeat(c, Nz)
+    ratio_all = (cp_all ./ c_rep) .^ (-σ)
+    W = P[jidx, :]
+    Emu = vec(sum(reshape(vec(W) .* ratio_all, B, Nz); dims = 2))
     resid = abs.(1 .- β .* R .* Emu)
     return assemble_euler_loss(resid, ap, a_min, hyper)
 end
