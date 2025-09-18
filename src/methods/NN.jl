@@ -62,7 +62,8 @@ function solve(
     # --- Delegate to kernel ---
     # Pull projection kind from cfg (default :softplus for backwards compatibility)
     solver_cfg = get(cfg, :solver, Dict{Symbol,Any}())
-    projection_kind = get(solver_cfg, :projection_kind, :softplus)
+    pk = get(solver_cfg, :projection_kind, :softplus)
+    projection_kind = pk isa Symbol ? pk : Symbol(pk)
 
     sol =
         S === nothing ?

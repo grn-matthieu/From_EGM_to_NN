@@ -116,8 +116,8 @@ function validate_config(cfg::AbstractDict)
     s = cfg[:solver]
     haskey(s, :method) || error("solver.method missing")
     mth = _lower(s[:method])
-    mth in ("egm", "projection", "perturbation") || error(
-        "solver.method must be one of: EGM, Projection, Perturbation; got $(s[:method])",
+    mth in ("egm", "projection", "perturbation", "nn") || error(
+        "solver.method must be one of: EGM, Projection, Perturbation, NN; got $(s[:method])",
     )
 
     # Common numeric options sanity if present

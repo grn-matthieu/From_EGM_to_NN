@@ -70,8 +70,10 @@ function fit_to_EGM!(model_in, policy, cfg; epochs::Int, batch::Int, seed::Int =
         end
     end
 
-    projection_kind =
+    projection_kind_raw =
         get(get(cfg, :solver, Dict{Symbol,Any}()), :projection_kind, :softplus)
+    projection_kind =
+        projection_kind_raw isa Symbol ? projection_kind_raw : Symbol(projection_kind_raw)
 
     # Assemble minibatch iterator over (a,y)
     mb = grid_minibatches(
@@ -136,7 +138,7 @@ function fit_to_EGM!(model_in, policy, cfg; epochs::Int, batch::Int, seed::Int =
             L, back = Zygote.pullback(loss_only, ps)
             grads = back(1.0)[1]
             # Optimiser update
-            optstate, ps = Optimisers.update(opt, optstate, ps, grads)
+            optstate, ps = Optimisers.update(optstate, ps, grads)
             ep_loss_sum += float(L)
             ep_count += 1
         end
@@ -302,7 +304,7 @@ function pretrain_then_euler!(
         )
         Lval, back = Zygote.pullback(loss_only, ps)
         grads = back(1.0)[1]
-        optstate, ps = Optimisers.update(opt, optstate, ps, grads)
+        optstate, ps = Optimisers.update(optstate, ps, grads)
 
         # Keep state updated
         state.ps = ps

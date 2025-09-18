@@ -24,11 +24,7 @@ else
     eltype_from(::UseBF16) = Float16
 end
 
-function _convert_array(x::AbstractArray, ::Type{T}) where {T<:Real}
-    y = similar(x, T)
-    y .= x
-    return y
-end
+_convert_array(x::AbstractArray, ::Type{T}) where {T<:Real} = convert.(T, x)
 
 function to_mp(x, ::Type{T}) where {T<:Real}
     x isa AbstractArray ? _convert_array(x, T) : convert(T, x)

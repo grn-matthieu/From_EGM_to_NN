@@ -1,0 +1,40 @@
+model:
+  name: cs
+
+params:
+  β: 0.96
+  σ: 2.0
+  r: 0.02
+  y: 1.0
+
+grids:
+  Na: 64
+  a_min: 0.0
+  a_max: 20.0
+
+shocks:
+  active: true
+  method: "rouwenhorst"   # or "tauchen"
+  ρ_shock: 0.9            # ASCII alias accepted in validator
+  s_shock: 0.10           # ASCII alias accepted in validator
+  Nz: 7
+  validate: true
+
+utility:
+  u_type: CRRA
+
+solver:
+  method: NN
+  epochs: 5
+  batch: 128
+  lr: 1.0e-3
+  projection_kind: softplus
+  stabilize: true
+  stab_method: log1p_square
+  residual_weighting: none
+  weight_alpha: 5.0
+  weight_kappa: 20.0
+
+random:
+  seed: 1234
+

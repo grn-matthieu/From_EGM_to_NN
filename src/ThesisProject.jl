@@ -33,16 +33,16 @@ include("solvers/projection/kernel.jl")
 include("solvers/egm/kernel.jl")
 include("solvers/perturbation/kernel.jl")
 
-# nn
+# nn (order matters: provide deps before kernel)
 include("solvers/nn/mixedprec.jl")
-include("solvers/nn/loss.jl")   # provide NNLoss before NNKernel imports it
-include("solvers/nn/constraints.jl")   # NNConstraints: softplus-based projections
-include("solvers/nn/kernel.jl")
-include("solvers/nn/init.jl")
-include("solvers/nn/data.jl")
-include("solvers/nn/train.jl")
-include("solvers/nn/eval.jl")
-include("solvers/nn/pretrain.jl")
+include("solvers/nn/loss.jl")          # NNLoss
+include("solvers/nn/constraints.jl")   # NNConstraints
+include("solvers/nn/init.jl")          # NNInit
+include("solvers/nn/data.jl")          # NNData
+include("solvers/nn/train.jl")         # NNTrain
+include("solvers/nn/eval.jl")          # NNEval
+include("solvers/nn/pretrain.jl")      # NNPretrain
+include("solvers/nn/kernel.jl")        # NNKernel (uses modules above)
 
 # 5) methods (adapters)
 include("methods/EGM.jl")
