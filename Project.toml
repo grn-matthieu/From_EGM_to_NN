@@ -1,7 +1,7 @@
 name = "ThesisProject"
 uuid = "12345678-abcd-ef00-1234-56789abcdef0"
 authors = ["Matthieu Grenier <matthieu.grenier@ensae.fr>"]
-version = "0.3.0"
+version = "0.4.0"
 
 [deps]
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
