@@ -119,10 +119,7 @@ function log_row!(
 )
     open(lg.path, lg.header_written[] ? "a" : "w") do io
         if !lg.header_written[]
-            println(
-                io,
-                "timestamp,epoch,step,split,loss,grad_norm,lr,stage,grid_stride,nMC,shock_noise,lambda_penalty",
-            )
+            println(io, "timestamp,epoch,step,split,loss,grad_norm,lr,stage,grid_stride,nMC,shock_noise,lambda_penalty")
             lg.header_written[] = true
         end
         ts = Dates.format(Dates.now(), dateformat"yyyy-mm-ddTHH:MM:SS")
@@ -131,9 +128,7 @@ function log_row!(
         _i(x) = x === nothing ? "NA" : string(Int(x))
         _f(x) = x === nothing ? "NA" : @sprintf("%.6e", float(x))
         # Write full row including curriculum columns
-        @printf(
-            io,
-            "%s,%d,%d,%s,%.6e,%.6e,%.6e,%s,%s,%s,%s,%s\n",
+        @printf(io, "%s,%d,%d,%s,%.6e,%.6e,%.6e,%s,%s,%s,%s,%s\n",
             ts,
             epoch,
             step,
@@ -147,7 +142,7 @@ function log_row!(
             _f(shock_noise),
             _f(lambda_penalty),
         )
-        lam = λ
+        lam = I�
     end
     return nothing
 end
@@ -385,11 +380,11 @@ function train!(state::NNState, data, cfg; val_data = nothing)
             grid_stride = st.grid_stride,
             nMC = st.nMC,
             shock_noise = st.shock_noise,
-            lambda_penalty = λ,
+            lambda_penalty = I�,
         )
 
         # Stdout one-line summary per epoch
-        @info "epoch=$(epoch), loss=$(round(train_epoch_loss, sigdigits=4)), stage=$(st.name), stride=$(st.grid_stride), nMC=$(st.nMC), noise=$(st.shock_noise), λ=$(round(λ, sigdigits=3))"
+        @info "epoch=$(epoch), loss=$(round(train_epoch_loss, sigdigits=4)), stage=$(st.name), stride=$(st.grid_stride), nMC=$(st.nMC), noise=$(st.shock_noise), λ=$(round(I�, sigdigits=3))"
 
         # Validation pass (no updates)
         val_epoch_loss = NaN
@@ -475,3 +470,4 @@ function dummy_epoch!(; n::Int = 64, batch::Int = 16, epochs::Int = 1, seed::Int
 end
 
 end # module
+

@@ -14,6 +14,49 @@ export check_finite_residuals,
 
 export violation, quadratic_penalty
 
+# Scheduling utility for constraint weight λ
+export anneal_lambda
+
+"""
+    anneal_lambda(epoch, E; λ_start=0.1, λ_final=5.0, schedule=:cosine) -> Float64
+
+Return an annealed constraint weight `λ` for a given `epoch` in `1:E`.
+
+Schedules:
+- :linear → λ = λ_start + (λ_final - λ_start) * ((epoch - 1) / (E - 1))
+- :cosine → λ = λ_final - (λ_final - λ_start) * 0.5 * (1 + cos(π * (epoch - 1) / (E - 1)))
+
+Behavior and guidance:
+- Increasing λ over epochs is useful when you want to emphasise feasibility
+  (constraint satisfaction) later in training, after the model has roughly
+  minimised the primary residual objective.
+- Decreasing λ can be used when you want to allow exploration early while
+  tightening feasibility pressure over time in the opposite direction.
+
+Safety: result is clipped to [min(λ_start, λ_final), max(…)] to avoid small
+numerical excursions at the endpoints.
+"""
+function anneal_lambda(
+    epoch::Integer,
+    E::Integer;
+    λ_start::Real = 0.1,
+    λ_final::Real = 5.0,
+    schedule::Symbol = :cosine,
+)::Float64
+    E <= 1 && return float(λ_final)
+    t = (float(epoch) - 1.0) / (float(E) - 1.0)
+    raw = if schedule === :linear
+        λ_start + (λ_final - λ_start) * t
+    elseif schedule === :cosine
+        λ_final - (λ_final - λ_start) * 0.5 * (1 + cos(pi * t))
+    else
+        throw(ArgumentError("Unknown schedule $(schedule). Use :linear or :cosine."))
+    end
+    lo = min(float(λ_start), float(λ_final))
+    hi = max(float(λ_start), float(λ_final))
+    return clamp(float(raw), lo, hi)
+end
+
 export assemble_euler_loss
 
 """
