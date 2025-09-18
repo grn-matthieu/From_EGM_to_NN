@@ -15,33 +15,7 @@ using ..API: build_model, build_method, solve
 using Statistics: mean
 using Printf
 using Dates
-
-"""
-    ensure_dir(path)
-
-Create directory `path` if it doesn't already exist.
-"""
-function ensure_dir(path)
-    isdir(path) || mkpath(path)
-    return path
-end
-
-"""
-    open_logger(dir) -> (fname, io)
-
-Ensure `dir` exists and open a timestamped CSV file for logging.
-Header: ts,epoch,train_loss,feas,lr,batch,seed,config
-"""
-function open_logger(dir)::Tuple{String,IO}
-    ensure_dir(dir)
-    fname = joinpath(
-        dir,
-        "run_" * Dates.format(Dates.now(), dateformat"yyyymmdd_HHMMSS") * ".csv",
-    )
-    io = open(fname, "w")
-    println(io, "ts,epoch,train_loss,feas,lr,batch,seed,config")
-    return fname, io
-end
+using ..NNTrain: CSVLogger, log_row!
 
 export solve_nn_det, solve_nn_stoch
 
@@ -340,29 +314,28 @@ function solve_nn_det(
         projection_kind = projection_kind,
         feasibility = feas,
     )
-
-    # --- Epoch logging (deterministic) ---
+    # --- Logging via NNTrain.CSVLogger ---
     logdir = joinpath(pwd(), "results", "nn", "baseline")
-    fname, io = open_logger(logdir)
-    epochs_cfg = hyper.epochs
-    lr_cfg = hyper.lr
-    batch_cfg = hyper.batch
-    seed_cfg = hyper.seed === nothing ? -1 : Int(hyper.seed)
-    cfg_name = basename(get(cfg, :config_path, "unknown"))
-    @printf(
-        io,
-        "%s,%d,%.6g,%.6g,%.6g,%d,%d,%s\n",
-        Dates.format(Dates.now(), dateformat"yyyy-mm-ddTHH:MM:SS"),
-        Int(epochs_cfg),
-        float(isfinite(last_loss) ? last_loss : loss_val),
-        float(feas),
-        float(lr_cfg),
-        Int(batch_cfg),
-        Int(seed_cfg),
-        cfg_name,
+    logpath = joinpath(
+        logdir,
+        "run_" * Dates.format(Dates.now(), dateformat"yyyymmdd_HHMMSS") * ".csv",
     )
-    close(io)
-    @info "NN baseline log written" path = fname
+    lg = CSVLogger(logpath)
+    log_row!(
+        lg;
+        epoch = Int(hyper.epochs),
+        step = Int(hyper.epochs),
+        split = "train",
+        loss = float(isfinite(last_loss) ? last_loss : loss_val),
+        grad_norm = NaN,
+        lr = float(hyper.lr),
+        stage = :final,
+        grid_stride = 1,
+        nMC = 1,
+        shock_noise = NaN,
+        lambda_penalty = NaN,
+    )
+    @info "NN baseline log written" path = logpath
 
     return (
         a_grid = a_grid,
@@ -601,29 +574,28 @@ function solve_nn_stoch(
         projection_kind = projection_kind,
         feasibility = feas,
     )
-
-    # --- Epoch logging (stochastic) ---
+    # --- Logging via NNTrain.CSVLogger (stochastic) ---
     logdir = joinpath(pwd(), "results", "nn", "baseline")
-    fname, io = open_logger(logdir)
-    epochs_cfg = hyper.epochs
-    lr_cfg = hyper.lr
-    batch_cfg = hyper.batch
-    seed_cfg = hyper.seed === nothing ? -1 : Int(hyper.seed)
-    cfg_name = basename(get(cfg, :config_path, "unknown"))
-    @printf(
-        io,
-        "%s,%d,%.6g,%.6g,%.6g,%d,%d,%s\n",
-        Dates.format(Dates.now(), dateformat"yyyy-mm-ddTHH:MM:SS"),
-        Int(epochs_cfg),
-        float(isfinite(last_loss) ? last_loss : loss_val),
-        float(feas),
-        float(lr_cfg),
-        Int(batch_cfg),
-        Int(seed_cfg),
-        cfg_name,
+    logpath = joinpath(
+        logdir,
+        "run_" * Dates.format(Dates.now(), dateformat"yyyymmdd_HHMMSS") * ".csv",
     )
-    close(io)
-    @info "NN training log written" path = fname
+    lg = CSVLogger(logpath)
+    log_row!(
+        lg;
+        epoch = Int(hyper.epochs),
+        step = Int(hyper.epochs),
+        split = "train",
+        loss = float(isfinite(last_loss) ? last_loss : loss_val),
+        grad_norm = NaN,
+        lr = float(hyper.lr),
+        stage = :final,
+        grid_stride = 1,
+        nMC = 1,
+        shock_noise = NaN,
+        lambda_penalty = NaN,
+    )
+    @info "NN training log written" path = logpath
 
     return (
         a_grid = a_grid,
