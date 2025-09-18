@@ -2,6 +2,9 @@
 # Example runs:
 # julia --project scripts/run_nn_baseline.jl --config config/simple_stochastic.yaml --epochs 1 --batch 64 --seed 123
 # julia --project scripts/run_nn_baseline.jl --config config/simple_stochastic.yaml --smoke
+#
+# Benchmark mixed precision:
+# julia --project scripts/run_nn_baseline.jl --config config/simple_stochastic.yaml --bench-mp
 using Pkg;
 Pkg.activate(dirname(@__DIR__));
 

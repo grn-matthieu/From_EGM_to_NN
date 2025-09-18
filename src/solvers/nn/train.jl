@@ -1,3 +1,256 @@
+using DelimitedFiles
+
+function bench_mixedprecision(cfg; warmup_epochs = 1, run_epochs = 2)
+    # Settings
+    mp_modes = [(nothing, "FP32"), (UseFP16(), "FP16"), (UseBF16(), "BF16")]
+    results = NamedTuple[]
+    now = Dates.now()
+    timestamp = Dates.format(now, dateformat"yyyymmdd_HHMMSS")
+    outdir = "results/nn/mixedprec"
+    isdir(outdir) || mkpath(outdir)
+    csv_path = joinpath(outdir, "bench_$(timestamp).csv")
+    header = "mp,epochs,wall_time_s,loss,feas,loss_scale"
+    open(csv_path, "w") do io
+        println(io, header)
+    end
+
+    # Helper: run training for a given mp mode
+    function run_one(mp, mp_name)
+        Random.seed!(cfg.seed)
+        # Deepcopy model/params/batch if needed for isolation
+        # (Assume init_state and batch generation are deterministic with seed)
+        state = init_state(cfg)
+        # Local mutable bindings for parameters and optimiser state
+        ps_local = state.ps
+        optstate_local = state.optstate
+        opt_local = state.opt
+        batch = cfg.batch
+        loss_scale = get(cfg, :loss_scale, 1.0)
+        feas = 0.0
+        loss = NaN
+        wall_time = 0.0
+        try
+            # Helper: local grad norm (avoid depending on other private helpers)
+            function _grad_global_l2norm_local(grads)
+                s = 0.0
+                _rec(x) = begin
+                    if x isa NamedTuple
+                        for v in values(x)
+                            _rec(v)
+                        end
+                    elseif x isa Tuple
+                        for v in x
+                            _rec(v)
+                        end
+                    elseif x isa AbstractArray
+                        s += sum(abs2, x)
+                    else
+                        return
+                    end
+                end
+                _rec(grads)
+                return sqrt(s)
+            end
+
+            # Warmup epochs (not timed) -- single-step per epoch on the provided batch
+            for _ = 1:warmup_epochs
+                # Define loss evaluated using mixed-precision views but returning an FP32/FP64-safe scalar
+                loss_master(ps_local) =
+                    with_mixed_precision(
+                        state.model,
+                        ps_local,
+                        batch;
+                        mp = mp,
+                        loss_scale = loss_scale,
+                    ) do (pmp, bmp)
+                        # Expect minibatch as (X, Y)
+                        X, Y = bmp
+                        ŷ, st2 = Lux.apply(state.model, X, pmp, state.st)
+                        # Upcast residuals to FP32 before reduction for numerical safety
+                        diff32 = to_fp32(ŷ .- Y)
+                        s = sum(abs2, diff32)
+                        return Float64(s / length(diff32))
+                    end
+
+                # Compute grads w.r.t. master params and update optimiser
+                gs = first(Zygote.gradient(loss_master, ps_local))
+                # Optional gradient clipping if configured
+                clip_norm = get(cfg, :clip_norm, nothing)
+                if clip_norm !== nothing && isfinite(clip_norm) && clip_norm > 0
+                    gnorm = _grad_global_l2norm_local(gs)
+                    if gnorm > clip_norm
+                        α = clip_norm / (gnorm + 1e-12)
+                        foreach_array_leaf(gs) do g
+                            @. g = α * g
+                        end
+                    end
+                end
+
+                # Optimiser update
+                if opt_local isa NNOptim.Optimizer
+                    pvec = collect_array_leaves(ps_local)
+                    gvec = collect_array_leaves(gs)
+                    update!(opt_local, pvec, gvec)
+                else
+                    optstate_local, ps_local =
+                        Optimisers.update(optstate_local, ps_local, gs)
+                end
+            end
+
+            # Timed epochs
+            t0 = time()
+            for _ = 1:run_epochs
+                loss_master(ps_local) =
+                    with_mixed_precision(
+                        state.model,
+                        ps_local,
+                        batch;
+                        mp = mp,
+                        loss_scale = loss_scale,
+                    ) do (pmp, bmp)
+                        X, Y = bmp
+                        ŷ, st2 = Lux.apply(state.model, X, pmp, state.st)
+                        diff32 = to_fp32(ŷ .- Y)
+                        s = sum(abs2, diff32)
+                        return Float64(s / length(diff32))
+                    end
+
+                gs = first(Zygote.gradient(loss_master, ps_local))
+                # Optional clipping
+                clip_norm = get(cfg, :clip_norm, nothing)
+                if clip_norm !== nothing && isfinite(clip_norm) && clip_norm > 0
+                    gnorm = _grad_global_l2norm_local(gs)
+                    if gnorm > clip_norm
+                        α = clip_norm / (gnorm + 1e-12)
+                        foreach_array_leaf(gs) do g
+                            @. g = α * g
+                        end
+                    end
+                end
+
+                if opt_local isa NNOptim.Optimizer
+                    pvec = collect_array_leaves(ps_local)
+                    gvec = collect_array_leaves(gs)
+                    update!(opt_local, pvec, gvec)
+                else
+                    optstate_local, ps_local =
+                        Optimisers.update(optstate_local, ps_local, gs)
+                end
+            end
+            wall_time = time() - t0
+
+            # Evaluate final loss/feasibility on the trained weights
+            loss = with_mixed_precision(
+                state.model,
+                ps_local,
+                batch;
+                mp = mp,
+                loss_scale = loss_scale,
+            ) do (pmp, bmp)
+                X, Y = bmp
+                ŷ, st2 = Lux.apply(state.model, X, pmp, state.st)
+                diff32 = to_fp32(ŷ .- Y)
+                s = sum(abs2, diff32)
+                return Float64(s / length(diff32))
+            end
+            feas = isfinite(loss) ? 1.0 : 0.0
+        catch err
+            @warn "Error in $mp_name benchmark: $err"
+            wall_time = NaN
+            loss = NaN
+            feas = 0.0
+        end
+        # After run, if the original state is an NNState, copy trained arrays back
+        function _copy_tree_arrays!(dest, src)
+            if dest isa NamedTuple && src isa NamedTuple
+                for k in keys(dest)
+                    _copy_tree_arrays!(getfield(dest, k), getfield(src, k))
+                end
+            elseif dest isa Tuple && src isa Tuple
+                for i in eachindex(dest)
+                    _copy_tree_arrays!(dest[i], src[i])
+                end
+            elseif dest isa AbstractArray && src isa AbstractArray
+                @assert size(dest) == size(src)
+                dest .= src
+            else
+                # numbers or unsupported leaves are ignored
+            end
+            return dest
+        end
+
+        # Copy back into state.ps so the caller-observed state reflects training
+        try
+            _copy_tree_arrays!(state.ps, ps_local)
+            # Update optstate in-place if possible
+            try
+                state.optstate = optstate_local
+            catch
+                # if NNState fields are immutable, ignore
+            end
+        catch
+            # best-effort; continue
+        end
+
+        # Write CSV row
+        open(csv_path, "a") do io
+            @printf(
+                io,
+                "%s,%d,%.6f,%.6e,%.3f,%.1f\n",
+                mp_name,
+                run_epochs,
+                wall_time,
+                loss,
+                feas,
+                loss_scale
+            )
+        end
+        return (
+            mp = mp_name,
+            wall_time = wall_time,
+            loss = loss,
+            feas = feas,
+            loss_scale = loss_scale,
+        )
+    end
+
+    # Run all modes
+    for (mp, mp_name) in mp_modes
+        push!(results, run_one(mp, mp_name))
+    end
+
+    # Print summary
+    fp32 = findfirst(r -> r.mp == "FP32", results)
+    fp16 = findfirst(r -> r.mp == "FP16", results)
+    bf16 = findfirst(r -> r.mp == "BF16", results)
+    if fp32 !== nothing && fp16 !== nothing
+        t_fp32 = results[fp32].wall_time
+        t_fp16 = results[fp16].wall_time
+        loss_fp32 = results[fp32].loss
+        loss_fp16 = results[fp16].loss
+        feas_fp16 = results[fp16].feas
+        if isfinite(t_fp16) && isfinite(loss_fp16) && feas_fp16 >= 0.99
+            println(@sprintf("FP16 speedup = %.2fx", t_fp32 / t_fp16))
+            println(@sprintf("Δloss = %.3e", loss_fp16 - loss_fp32))
+        else
+            println("FP16 UNSTABLE")
+        end
+    end
+    if fp32 !== nothing && bf16 !== nothing
+        t_fp32 = results[fp32].wall_time
+        t_bf16 = results[bf16].wall_time
+        loss_fp32 = results[fp32].loss
+        loss_bf16 = results[bf16].loss
+        feas_bf16 = results[bf16].feas
+        if isfinite(t_bf16) && isfinite(loss_bf16) && feas_bf16 >= 0.99
+            println(@sprintf("BF16 speedup = %.2fx", t_fp32 / t_bf16))
+            println(@sprintf("Δloss = %.3e", loss_bf16 - loss_fp32))
+        else
+            println("BF16 UNSTABLE")
+        end
+    end
+    return results
+end
 module NNTrain
 
 using Lux
@@ -9,8 +262,14 @@ using Statistics
 using Dates
 using Printf
 using Random
+
 using ..NNData: grid_minibatches
 using ..NNLoss: anneal_lambda
+using ..NNMixedPrecision: with_mixed_precision, to_fp32
+# Example usage in a training loop (insert at appropriate call site):
+# with_mixed_precision(model, params, batch; mp=cfg.mixed_precision, loss_scale=cfg.loss_scale) do (pmp, bmp)
+#     # forward, loss, grads (upcast for reductions), update master FP32
+# end
 
 using ..NNInit: NNState, init_state
 
@@ -63,7 +322,7 @@ Default curriculum schedule (override via config):
 default_stages() = [
     (; name = :warmup, grid_stride = 4, nMC = 1, shock_noise = 1.25),
     (; name = :mid, grid_stride = 2, nMC = 2, shock_noise = 1.00),
-    (; name = :fine, grid_stride <= 1, nMC = 4, shock_noise = 0.75),
+    (; name = :fine, grid_stride = 1, nMC = 4, shock_noise = 0.75),
 ]
 
 """Thin a batch-like array by taking every `stride`-th sample.

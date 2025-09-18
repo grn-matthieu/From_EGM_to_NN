@@ -1,3 +1,15 @@
+"""
+    to_fp32(x)
+
+Convert `x` (scalar or array) to `Float32` while preserving shape.
+"""
+function to_fp32(x)
+    if x isa AbstractArray
+        return Float32.(x)
+    else
+        return Float32(x)
+    end
+end
 module NNLoss
 
 using ..API
@@ -147,9 +159,11 @@ Examples:
 function euler_mse(R::AbstractArray{<:Real}; reduction::Symbol = :mean)::Float64
     (reduction ∈ (:mean, :sum)) ||
         throw(ArgumentError("reduction must be :mean or :sum, got $(reduction)"))
-    s = sum(abs2, R)
+    # Upcast to Float32 before reduction for numerical safety
+    R32 = to_fp32(R)
+    s = sum(abs2, R32)
     s64 = Float64(s)
-    return reduction === :mean ? s64 / length(R) : s64
+    return reduction === :mean ? s64 / length(R32) : s64
 end
 
 
@@ -357,7 +371,9 @@ Examples:
     15.0
 """
 function weighted_mse(R::AbstractArray{<:Real}, w; reduction::Symbol = :mean)::Float64
-    return euler_mse(R .* sqrt.(w); reduction = reduction)
+    # Upcast to Float32 before reduction
+    Rw = to_fp32(R .* sqrt.(w))
+    return euler_mse(Rw; reduction = reduction)
 end
 
 """
@@ -429,10 +445,12 @@ function euler_loss(
     weights::Union{Nothing,AbstractArray} = nothing,
 )
     R_stab = stabilize ? stabilize_residuals(R; method = method) : R
+    # Upcast to Float32 before reduction for safety
+    R32 = to_fp32(R_stab)
     if weights === nothing
-        return euler_mse(R_stab; reduction = reduction)
+        return euler_mse(R32; reduction = reduction)
     else
-        return weighted_mse(R_stab, weights; reduction = reduction)
+        return weighted_mse(R32, weights; reduction = reduction)
     end
 end
 
