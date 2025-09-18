@@ -14,8 +14,7 @@ export NNMethod, build_nn_method
 
 Adapter for the Maliar et al. (2021) neural-network solution method.
 Holds solver options in a `NamedTuple`. This initial version provides a
-placeholder implementation that returns a feasible baseline policy and a
-conforming `Solution` object.
+baseline implementation that returns a feasible policy and a conforming `Solution` object.
 """
 struct NNMethod <: AbstractMethod
     opts::NamedTuple
@@ -25,11 +24,11 @@ end
     build_nn_method(cfg::AbstractDict) -> NNMethod
 
 Construct an `NNMethod` using solver options contained in `cfg`.
-Recognized options (placeholders for now):
+Recognized options:
   - `tol` (Real): residual tolerance
   - `maxit` (Int): maximum training/iteration steps
   - `verbose` (Bool): print progress
-  - `hidden` (Tuple/Vector): hidden layer sizes (unused placeholder)
+  - `hidden` (Tuple/Vector): hidden layer sizes (used by NN init; default (32, 32))
 """
 function build_nn_method(cfg::AbstractDict)
     return NNMethod((
