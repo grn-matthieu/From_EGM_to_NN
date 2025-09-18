@@ -39,3 +39,7 @@ Thumbs.db
 
 # Ignore xlsx files
 *.xlsx
+# Local temp files
+tmp*.txt
+temp_head.txt
+10_day_plan_maxgranular_full.xlsx
