@@ -16,6 +16,7 @@ using Statistics: mean
 using Printf
 using Dates
 using ..NNTrain: CSVLogger, log_row!
+using ..Determinism: make_rng, derive_seed
 
 export solve_nn_det, solve_nn_stoch
 
@@ -96,12 +97,12 @@ end
 Run a simple mini-batch training loop for the deterministic case.
 Updates `state` in-place and returns final average loss.
 """
-function _train_det!(state, a_grid, p; hyper, y_scalar)
+function _train_det!(state, a_grid, p; hyper, y_scalar, master_rng)
     # Mini-batches over (a, y). Use a singleton y-grid for determinism.
     y_grid = [float(y_scalar)]
-    rng =
-        hyper.seed === nothing ? Random.default_rng() :
-        Random.MersenneTwister(Int(hyper.seed))
+    # Derive a dedicated RNG for minibatch sampling from the master RNG
+    seed_mb = derive_seed(master_rng, "nn/kernel/minibatch/det")
+    rng = make_rng(Int(seed_mb % typemax(Int)))
     mb = grid_minibatches(
         a_grid,
         y_grid;
@@ -273,8 +274,13 @@ function solve_nn_det(
         )
     end
 
+    # Master RNG for deterministic solver
+    seed_cfg = get(get(cfg, :random, Dict{Symbol,Any}()), :seed, nothing)
+    master_rng = seed_cfg === nothing ? make_rng(Int(0x9a9aa9a9)) : make_rng(Int(seed_cfg))
+
     # Train on mini-batches of (a, y)
-    st, last_loss = _train_det!(st, a_grid, p; hyper = hyper, y_scalar = p.y)
+    st, last_loss =
+        _train_det!(st, a_grid, p; hyper = hyper, y_scalar = p.y, master_rng = master_rng)
 
     # Evaluate trained policy on full grid
     Xin = reshape(a_grid, 1, :)
@@ -412,6 +418,9 @@ function solve_nn_stoch(
     # Hyperparameters and state init (shocks-active => NN with 2 inputs)
     hyper = _solver_hyper(cfg)
     st = init_state(Dict(cfg))
+    # Master RNG for stochastic solver
+    seed_cfg = get(get(cfg, :random, Dict{Symbol,Any}()), :seed, nothing)
+    master_rng = seed_cfg === nothing ? make_rng(Int(0x9a9aa9a9)) : make_rng(Int(seed_cfg))
     if hyper.lr !== nothing
         newopt = Optimisers.Adam(hyper.lr)
         newoptstate = Optimisers.setup(newopt, st.ps)
@@ -472,13 +481,14 @@ function solve_nn_stoch(
     # Run pretraining epochs (use up to half the budget, at least 25)
     pre_epochs = max(25, fld(hyper.epochs, 2))
     if pre_epochs > 0
+        seed_pre = derive_seed(master_rng, "nn/kernel/pretrain")
         fit_to_EGM!(
             st,
             egm_policy,
             cfg;
             epochs = pre_epochs,
             batch = hyper.batch,
-            seed = hyper.seed === nothing ? 42 : Int(hyper.seed),
+            seed = Int(seed_pre % typemax(Int)),
         )
     end
 
@@ -487,9 +497,9 @@ function solve_nn_stoch(
     tune_epochs = max(0, hyper.epochs - pre_epochs)
     if tune_epochs > 0
         y_grid = exp.(z_grid)
-        rng =
-            hyper.seed === nothing ? Random.default_rng() :
-            Random.MersenneTwister(Int(hyper.seed))
+        # Derive a dedicated RNG for minibatch sampling from the master RNG
+        seed_mb = derive_seed(master_rng, "nn/kernel/minibatch/stoch")
+        rng = make_rng(Int(seed_mb % typemax(Int)))
         mb = grid_minibatches(
             a_grid,
             y_grid;
