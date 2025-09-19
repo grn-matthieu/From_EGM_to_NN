@@ -1,33 +1,30 @@
 """
 ProjectionCoefficients
 
-Routines to compute and work with projection coefficients for policy/value
-approximations used by the projection solver.
+Helper for solving normal equations with optional Tikhonov regularisation.
 """
 module ProjectionCoefficients
 
-using LinearAlgebra: AbstractVecOrMat, transpose, I
+using LinearAlgebra
 
 export solve_coefficients
 
 """
-    solve_coefficients(B, y; λ=0)
+    solve_coefficients(B, y; lambda=0)
 
-Solve for projection coefficients in the least squares sense using the
-normal equations with optional Tikhonov regularization. `B` is the basis
-matrix and `y` the data vector or matrix with matching rows. Returns the
-coefficient vector or matrix. A positive `λ` adds `λ * I` to `B'B` for
-stability.
+Solve the least-squares problem `min ||B * θ - y||` using the normal equations.
+When `lambda > 0`, Tikhonov regularisation is applied: `(B'B + λI) θ = B'y`.
 """
 function solve_coefficients(
     B::AbstractMatrix{<:Real},
     y::AbstractVecOrMat{<:Real};
-    λ::Real = 0,
+    kwargs...,
 )
-    @assert size(B, 1) == size(y, 1) "Incompatible dimensions"
+    λ = get(kwargs, :lambda, 0.0)
+    λ = get(kwargs, Symbol("λ"), λ)
+    @assert size(B, 1) == size(y, 1) "Incompatible dimensions between basis and data"
     Bt = transpose(B)
-    coeffs = (Bt * B + λ * I) \ (Bt * y)
-    return coeffs
+    return (Bt * B + λ * I) \ (Bt * y)
 end
 
 end # module

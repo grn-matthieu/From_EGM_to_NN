@@ -1,6 +1,7 @@
 using Test
 using ThesisProject
 using ThesisProject.Chebyshev: chebyshev_basis, chebyshev_nodes
+using ThesisProject.CommonInterp: interp_pchip!
 using ThesisProject.EulerResiduals: euler_resid_det_2, euler_resid_stoch
 
 @testset "Projection solution accuracy and metadata" begin
@@ -27,19 +28,16 @@ using ThesisProject.EulerResiduals: euler_resid_det_2, euler_resid_stoch
     # Order should match requested
     @test sol_det.metadata[:order] == 3
 
-    # Validate residuals also on an explicit validation grid using the chosen order
-    a_val = chebyshev_nodes(cfg_det[:solver][:Nval], g_det[:a].min, g_det[:a].max)
-    # Rebuild basis at validation nodes using chosen order and recompute c
-    B_val = chebyshev_basis(a_val, sol_det.metadata[:order], g_det[:a].min, g_det[:a].max)
-    # Fit coefficients directly on the output grid for the check
-    # This check is light: just ensure evaluation is finite and interior residuals smallish
-    c_val = B_val * ones(size(B_val, 2)) .* 0.0 .+ B_val * zeros(size(B_val, 2))
-    # Evaluate with the provided policy directly instead
-    # (the solver already validated order via its own path; we just ensure residuals compute)
-    @test all(
-        isfinite,
-        euler_resid_det_2(p_det, a_val, B_val[:, 1:size(B_val, 2)] * zeros(size(B_val, 2))),
-    )
+    # Off-grid residual check via monotone interpolation
+    grid = sol_det.policy[:c].grid
+    values = sol_det.policy[:c].value
+    step = (grid[end] - grid[1]) / (length(grid) - 1)
+    a_off =
+        collect(range(grid[1] + step / 2, grid[end] - step / 2; length = length(grid) - 1))
+    c_off = similar(a_off)
+    interp_pchip!(c_off, grid, values, a_off)
+    resid_off = euler_resid_det_2(p_det, a_off, c_off)
+    @test maximum(abs.(resid_off)) < 3e-2
 
     # Stochastic projection: matrix residuals present and shaped
     cfg_st = deepcopy(SMOKE_STOCH_CFG)
