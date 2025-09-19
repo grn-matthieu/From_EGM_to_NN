@@ -106,11 +106,7 @@ function fit_to_EGM!(model_in, policy, cfg; epochs::Int, batch::Int, seed::Int =
     # Training loop
     nobs = length(a_grid) * length(y_grid)
     lr = try
-        get(
-            get(cfg, :solver, Dict{Symbol,Any}()),
-            :lr,
-            (opt isa Optimisers.Adam ? opt.eta : NaN),
-        )
+        get(get(cfg, :solver, Dict{Symbol,Any}()), :lr, (opt isa Optimisers.Adam ? opt.η : NaN))
     catch
         get(get(cfg, :solver, Dict{Symbol,Any}()), :lr, NaN)
     end
@@ -262,8 +258,8 @@ function pretrain_then_euler!(
     stabilize = get(solver_cfg, :stabilize, false)
     stab_method = get(solver_cfg, :stab_method, :log1p_square)
     residual_weighting = get(solver_cfg, :residual_weighting, :none)
-    weight_alpha = float(get(solver_cfg, :weight_alpha, 5.0))
-    weight_kappa = float(get(solver_cfg, :weight_kappa, 20.0))
+    weight_α = float(get(solver_cfg, :weight_α, 5.0))
+    weight_κ = float(get(solver_cfg, :weight_κ, 20.0))
     projection_kind = get(solver_cfg, :projection_kind, :softplus)
 
     # Phase 2: Euler residual training
@@ -278,14 +274,8 @@ function pretrain_then_euler!(
 
         maybe_weights =
             residual_weighting === :none ? nothing :
-            (; scheme = residual_weighting, alpha = weight_alpha, kappa = weight_kappa)
-        λ = anneal_lambda(
-            ep,
-            epochs;
-            λ_start = λ0,
-            λ_final = max(λ0, 1.0),
-            schedule = :cosine,
-        )
+            (; scheme = residual_weighting, α = weight_α, κ = weight_κ)
+        λ = anneal_λ(ep, epochs; λ_start = λ0, λ_final = max(λ0, 1.0), schedule = :cosine)
         L = total_loss(
             R,
             ap,

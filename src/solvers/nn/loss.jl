@@ -22,10 +22,10 @@ export check_finite_residuals,
 export violation, quadratic_penalty
 
 # Scheduling utility for constraint weight λ
-export anneal_lambda
+export anneal_λ
 
 """
-    anneal_lambda(epoch, E; λ_start=0.1, λ_final=5.0, schedule=:cosine) -> Float64
+    anneal_λ(epoch, E; λ_start=0.1, λ_final=5.0, schedule=:cosine) -> Float64
 
 Return an annealed constraint weight `λ` for a given `epoch` in `1:E`.
 
@@ -43,7 +43,7 @@ Behavior and guidance:
 Safety: result is clipped to [min(λ_start, λ_final), max(…)] to avoid small
 numerical excursions at the endpoints.
 """
-function anneal_lambda(
+function anneal_λ(
     epoch::Integer,
     E::Integer;
     λ_start::Real = 0.1,
@@ -474,16 +474,14 @@ function total_loss(
     ) + quadratic_penalty(ap, a_min; λ = λ, reduction = reduction)
 end
 
-# Robust keyword-handling wrapper to support both ASCII and Unicode kwargs
+# Robust keyword-handling wrapper for Unicode kwargs
 function constraint_weights(ap, a_min; form::Symbol = :exp, kwargs...)
-    # Accept both :α/:κ and ASCII :alpha/:kappa fallbacks
-    alpha =
-        haskey(kwargs, :α) ? kwargs[:α] : (haskey(kwargs, :alpha) ? kwargs[:alpha] : 5.0)
-    kappa =
-        haskey(kwargs, :κ) ? kwargs[:κ] : (haskey(kwargs, :kappa) ? kwargs[:kappa] : 20.0)
+    # Accept Unicode kwargs :α and :κ with defaults
+    α = get(kwargs, :α, 5.0)
+    κ = get(kwargs, :κ, 20.0)
     d = Float64.(distance_to_bound(ap, a_min))
-    alphaf = Float64(alpha)
-    kappaf = Float64(kappa)
+    alphaf = Float64(α)
+    kappaf = Float64(κ)
     w = if form === :exp
         1 .+ alphaf .* (1 .- exp.(-kappaf .* d))
     elseif form === :linear
@@ -506,8 +504,8 @@ Expected `cfg` fields (typically from `NNConfig`):
 - `stabilize::Bool`
 - `stab_method::Symbol`
 - `residual_weighting::Symbol`  (:none | :exp | :linear)
-- `weight_alpha::Float64`
-- `weight_kappa::Float64`
+- `weight_α::Float64`
+- `weight_κ::Float64`
 
 When `cfg.residual_weighting === :none`, no weights are applied (preserves
 previous unweighted behaviour).
@@ -518,8 +516,8 @@ function assemble_euler_loss(R, ap, a_min, cfg)
         constraint_weights(
             ap,
             a_min;
-            α = cfg.weight_alpha,
-            κ = cfg.weight_kappa,
+            α = cfg.weight_α,
+            κ = cfg.weight_κ,
             form = cfg.residual_weighting,
         )
     return euler_loss(

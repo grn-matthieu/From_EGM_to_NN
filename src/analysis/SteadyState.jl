@@ -44,13 +44,13 @@ function steady_state_analytic(model::AbstractModel)
     a_min = g[:a].min
     a_max = g[:a].max
     R = 1 + p.r
-    betaR = p.β * R
+    βR = p.β * R
 
-    if betaR < 1 - 1e-12
+    if βR < 1 - 1e-12
         a_ss = a_min
         c_ss = p.y + p.r * a_ss
         return (a_ss = a_ss, c_ss = c_ss, kind = :lower_bound)
-    elseif abs(betaR - 1) <= 1e-12
+    elseif abs(βR - 1) <= 1e-12
         # Indeterminate set; return canonical representative at the lower bound
         a_ss = a_min
         c_ss = p.y + p.r * a_ss

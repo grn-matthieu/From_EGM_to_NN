@@ -67,14 +67,14 @@ function _solver_hyper(cfg)
     return (
         epochs = Int(get(s, :epochs, 100)),
         batch = Int(get(s, :batch, 128)),
-        lr = float(get(s, :lr, get(s, :eta, 1e-3))),
+        lr = float(get(s, :lr, get(s, :η, 1e-3))),
         clip_norm = get(s, :clip_norm, nothing),
         projection_kind = pk isa Symbol ? pk : Symbol(pk),
         stabilize = get(s, :stabilize, false),
         stab_method = sm isa Symbol ? sm : Symbol(sm),
         residual_weighting = rw isa Symbol ? rw : Symbol(rw),
-        weight_alpha = float(get(s, :weight_alpha, 5.0)),
-        weight_kappa = float(get(s, :weight_kappa, 20.0)),
+        weight_α = float(get(s, :weight_α, 5.0)),
+        weight_κ = float(get(s, :weight_κ, 20.0)),
         pretrain = pretrain,
         seed = get(r, :seed, nothing),
     )
@@ -299,8 +299,8 @@ function solve_nn_det(
         stabilize = hyper.stabilize,
         stab_method = hyper.stab_method,
         residual_weighting = hyper.residual_weighting, # :none|:exp|:linear
-        weight_alpha = hyper.weight_alpha,
-        weight_kappa = hyper.weight_kappa,
+        weight_α = hyper.weight_α,
+        weight_κ = hyper.weight_κ,
     )
     loss_val = assemble_euler_loss(resid, a_next, a_min, cfgw)
 
@@ -531,8 +531,8 @@ function solve_nn_stoch(
         stabilize = hyper.stabilize,
         stab_method = hyper.stab_method,
         residual_weighting = hyper.residual_weighting,
-        weight_alpha = hyper.weight_alpha,
-        weight_kappa = hyper.weight_kappa,
+        weight_α = hyper.weight_α,
+        weight_κ = hyper.weight_κ,
     )
     loss_val = assemble_euler_loss(resid, a_next, a_min, cfgw)
 

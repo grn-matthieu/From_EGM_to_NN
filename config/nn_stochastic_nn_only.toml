@@ -2,8 +2,8 @@
 name = "BaselineConsumerSaving"
 
 [params]
-beta = 0.96
-sigma = 2.0
+β = 0.96
+σ = 2.0
 r = 0.02
 y = 1.0
 
@@ -15,7 +15,7 @@ N = 64
 [shocks]
 active = true
 method = "rouwenhorst"
-rho_shock = 0.9
+ρ_shock = 0.9
 s_shock = 0.10
 Nz = 7
 validate = true
@@ -32,9 +32,10 @@ projection_kind = "softplus"
 stabilize = true
 stab_method = "log1p_square"
 residual_weighting = "none"
-weight_alpha = 5.0
-weight_kappa = 20.0
+weight_α = 5.0
+weight_κ = 20.0
 pretrain = false
 
 [random]
 seed = 1234
+

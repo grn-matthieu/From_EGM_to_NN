@@ -52,30 +52,28 @@ using Test
         end
     end
 
-    # ascii params mapping: s -> σ
+    # reject ASCII shorthand parameter keys
     @test begin
         cfg = deepcopy(base)
-        # replace σ with s
         cfg[:params][:s] = cfg[:params][:σ]
         delete!(cfg[:params], :σ)
         try
             validate_config(cfg)
-            true
-        catch
             false
+        catch err
+            occursin("params.σ missing", sprint(showerror, err))
         end
     end
 
-    # ascii beta mapping: beta -> β
     @test begin
         cfg = deepcopy(base)
         cfg[:params][:beta] = cfg[:params][:β]
         delete!(cfg[:params], :β)
         try
             validate_config(cfg)
-            true
-        catch
             false
+        catch err
+            occursin("params.β missing", sprint(showerror, err))
         end
     end
 
@@ -121,7 +119,7 @@ using Test
         cfg[:shocks] = Dict{Symbol,Any}(
             :active => true,
             :method => "unknown",
-            :rho_shock => 0.5,
+            :ρ_shock => 0.5,
             :s_shock => 0.1,
             :Nz => 5,
         )
@@ -133,13 +131,13 @@ using Test
         end
     end
 
-    # shocks: rho out of range
+    # shocks: ρ out of range
     @test begin
         cfg = deepcopy(base)
         cfg[:shocks] = Dict{Symbol,Any}(
             :active => true,
             :method => "tauchen",
-            :rho_shock => 1.2,
+            :ρ_shock => 1.2,
             :s_shock => 0.1,
             :Nz => 5,
         )

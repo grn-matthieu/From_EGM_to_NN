@@ -13,7 +13,7 @@ using ..CommonInterp: interp_pchip!
 
 export solve_projection_det, solve_projection_stoch
 
-const BETA_SYM = Symbol(Char(0x03B2))
+const Β_SYM = Symbol(Char(0x03B2))
 const PI_TRANSITION_SYM = Symbol(Char(0x03A0))
 
 # -----------------------------------------------------------------------------
@@ -49,7 +49,7 @@ function solve_projection_det(
     maxit::Int = 1000,
     orders::AbstractVector{Int} = Int[],
     Nval::Int = model_grids[:a].N,
-    lambda::Real = 0.0,
+    λ::Real = 0.0,
 )::NamedTuple
     start_time = time_ns()
 
@@ -58,7 +58,7 @@ function solve_projection_det(
     Na = model_grids[:a].N
     a_grid = chebyshev_nodes(Na, a_min, a_max)
     a_out = model_grids[:a].grid
-    beta = getproperty(model_params, BETA_SYM)
+    β = getproperty(model_params, Β_SYM)
     income = model_params.y
     R = 1 + model_params.r
 
@@ -87,7 +87,7 @@ function solve_projection_det(
     for order in candidate_orders
         B = B_cache[:, 1:(order+1)]
         c = clamp.(0.5 .* available_grid, cmin, available_grid)
-        coeffs = solve_coefficients(B, c; lambda = lambda)
+        coeffs = solve_coefficients(B, c; λ = λ)
         a_next = similar(c)
         c_next = similar(c)
         c_new = similar(c)
@@ -100,11 +100,11 @@ function solve_projection_det(
             Bnext = chebyshev_basis(a_next, order, a_min, a_max)
             c_next .= Bnext * coeffs
             @. c_new = clamp(
-                model_utility.u_prime_inv(beta * R * model_utility.u_prime(c_next)),
+                model_utility.u_prime_inv(β * R * model_utility.u_prime(c_next)),
                 cmin,
                 available_grid,
             )
-            coeffs = solve_coefficients(B, c_new; lambda = lambda)
+            coeffs = solve_coefficients(B, c_new; λ = λ)
             delta = maximum(abs.(c_new .- c))
             c .= c_new
             if delta < tol
@@ -170,7 +170,7 @@ function solve_projection_stoch(
     maxit::Int = 1000,
     orders::AbstractVector{Int} = Int[],
     Nval::Int = model_grids[:a].N,
-    lambda::Real = 0.0,
+    λ::Real = 0.0,
 )::NamedTuple
     start_time = time_ns()
 
@@ -185,7 +185,7 @@ function solve_projection_stoch(
     transition = getproperty(model_shocks, PI_TRANSITION_SYM)
     Nz = length(z_grid)
 
-    beta = getproperty(model_params, BETA_SYM)
+    β = getproperty(model_params, Β_SYM)
     R = 1 + model_params.r
 
     candidate_orders = isempty(orders) ? Int[Na-1] : orders
@@ -216,7 +216,7 @@ function solve_projection_stoch(
             @views @. c[:, j] = clamp(0.5 * available, cmin, available)
         end
 
-        coeffs = solve_coefficients(B, c; lambda = lambda)
+        coeffs = solve_coefficients(B, c; λ = λ)
         a_next = similar(c)
         c_new = similar(c)
         expected_marginal = similar(a_grid)
@@ -237,13 +237,13 @@ function solve_projection_stoch(
                 end
                 available = income .+ R .* a_grid .- a_min
                 @views @. c_new[:, j] = clamp(
-                    model_utility.u_prime_inv(beta * R * expected_marginal),
+                    model_utility.u_prime_inv(β * R * expected_marginal),
                     cmin,
                     available,
                 )
             end
 
-            coeffs = solve_coefficients(B, c_new; lambda = lambda)
+            coeffs = solve_coefficients(B, c_new; λ = λ)
             delta = maximum(abs.(c_new .- c))
             c .= c_new
             resid_mat = euler_resid_stoch(model_params, a_grid, z_grid, transition, c)

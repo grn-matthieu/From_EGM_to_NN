@@ -120,7 +120,7 @@ function solve(
             grid_stride = 1,
             nMC = 1,
             shock_noise = NaN,
-            lambda_penalty = NaN,
+            λ_penalty = NaN,
         )
     end
 

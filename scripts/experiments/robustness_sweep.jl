@@ -6,8 +6,8 @@ Robustness sweep over β and σ for the baseline EGM (deterministic and stochast
 Produces: `outputs/egm_robustness_sweep.csv`
 
 Configure via env vars (optional):
-  BETA_LIST  e.g. "0.92,0.95,0.98"
-  SIGMA_LIST e.g. "1.0,2.0,3.0"
+  Β_LIST  e.g. "0.92,0.95,0.98"
+  Σ_LIST e.g. "1.0,2.0,3.0"
 
 Run:
   julia --project=. scripts/experiments/robustness_sweep.jl [--Na=..] [--Nz=..] [--tol=..] [--tol_pol=..]
@@ -129,15 +129,15 @@ function main()
     base_cfg = ThesisProject.load_config(joinpath(ROOT, "config", "simple_baseline.yaml"))
     ThesisProject.validate_config(base_cfg)
 
-    betas = parse_list("BETA_LIST", [0.92, 0.95, 0.96, 0.98])
-    sigmas = parse_list("SIGMA_LIST", [1.0, 2.0, 3.0, 4.0])
+    βs = parse_list("Β_LIST", [0.92, 0.95, 0.96, 0.98])
+    σs = parse_list("Σ_LIST", [1.0, 2.0, 3.0, 4.0])
 
     ts = Dates.format(now(UTC), dateformat"yyyy-mm-ddTHH:MM:SSZ")
     header = [
         "timestamp",
         "case",
-        "beta",
-        "sigma",
+        "β",
+        "σ",
         "status",
         "error",
         "run_id",
@@ -155,7 +155,7 @@ function main()
 
     rows = Vector{NTuple{17,Any}}()
 
-    for b in betas, s in sigmas
+    for b in βs, s in σs
         for stochastic in (false, true)
             cfg = deepcopy(base_cfg)
             cfg[:params][:β] = b

@@ -81,7 +81,7 @@ function init_state(cfg::AbstractDict)::NNState
 
     # Optimiser (default Adam; lr from cfg if provided)
     solver_cfg = get(cfg, :solver, Dict{Symbol,Any}())
-    lr = get(solver_cfg, :lr, get(solver_cfg, :eta, 1e-3))
+    lr = get(solver_cfg, :lr, get(solver_cfg, :η, 1e-3))
     opt = Optimisers.Adam(lr)
     optstate = Optimisers.setup(opt, ps)
 

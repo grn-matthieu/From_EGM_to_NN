@@ -263,7 +263,7 @@ using Printf
 using Random
 
 using ..NNData: grid_minibatches
-using ..NNLoss: anneal_lambda
+using ..NNLoss: anneal_λ
 using ..NNMixedPrecision: with_mixed_precision, to_fp32
 # Example usage in a training loop (insert at appropriate call site):
 # with_mixed_precision(model, params, batch; mp=cfg.mixed_precision, loss_scale=cfg.loss_scale) do (pmp, bmp)
@@ -274,10 +274,10 @@ using ..NNInit: NNState, init_state
 
 export train!, dummy_epoch!
 
-## Default lambda scheduling parameters (overridable via cfg)
-const DEFAULT_LAMBDA_START = 0.1
-const DEFAULT_LAMBDA_FINAL = 5.0
-const DEFAULT_LAMBDA_SCHEDULE = :cosine
+## Default λ scheduling parameters (overridable via cfg)
+const DEFAULT_Λ_START = 0.1
+const DEFAULT_Λ_FINAL = 5.0
+const DEFAULT_Λ_SCHEDULE = :cosine
 
 """
     curriculum(epoch, E; stages=default_stages()) -> NamedTuple
@@ -375,13 +375,13 @@ function log_row!(
     grid_stride = nothing,
     nMC = nothing,
     shock_noise = nothing,
-    lambda_penalty = nothing,
+    λ_penalty = nothing,
 )
     open(lg.path, lg.header_written[] ? "a" : "w") do io
         if !lg.header_written[]
             println(
                 io,
-                "timestamp,epoch,step,split,loss,grad_norm,lr,stage,grid_stride,nMC,shock_noise,lambda_penalty",
+                "timestamp,epoch,step,split,loss,grad_norm,lr,stage,grid_stride,nMC,shock_noise,λ_penalty",
             )
             lg.header_written[] = true
         end
@@ -405,7 +405,7 @@ function log_row!(
             _i(grid_stride),
             _i(nMC),
             _f(shock_noise),
-            _f(lambda_penalty),
+            _f(λ_penalty),
         )
         nothing
     end
@@ -563,7 +563,7 @@ function _step!(
         getfield(state.opt, :η)
     catch
         try
-            getfield(state.opt, :eta)
+            getfield(state.opt, :η)
         catch
             try
                 getfield(state.opt, :lr)

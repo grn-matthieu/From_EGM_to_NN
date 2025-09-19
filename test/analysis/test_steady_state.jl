@@ -4,21 +4,21 @@ using ThesisProject
 @testset "Analytic steady state regimes" begin
     cfg = deepcopy(SMOKE_CFG)
     r = cfg[:params][:r]
-    # 1) beta*R < 1 -> lower bound
+    # 1) β*R < 1 -> lower bound
     cfg1 = deepcopy(cfg)
     cfg1[:params][:β] = 0.90
     m1 = build_model(cfg1)
     ss1 = ThesisProject.steady_state_analytic(m1)
     @test ss1.kind == :lower_bound
 
-    # 2) beta*R ≈ 1 -> interior
+    # 2) β*R ≈ 1 -> interior
     cfg2 = deepcopy(cfg)
     cfg2[:params][:β] = 1.0 / (1.0 + r)
     m2 = build_model(cfg2)
     ss2 = ThesisProject.steady_state_analytic(m2)
     @test ss2.kind == :interior
 
-    # 3) beta*R > 1 -> upper bound (use beta = 1.0)
+    # 3) β*R > 1 -> upper bound (use β = 1.0)
     cfg3 = deepcopy(cfg)
     cfg3[:params][:β] = 1.0
     m3 = build_model(cfg3)

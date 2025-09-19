@@ -32,9 +32,10 @@ solver:
   stabilize: true
   stab_method: log1p_square
   residual_weighting: none
-  weight_alpha: 5.0
-  weight_kappa: 20.0
+  weight_α: 5.0
+  weight_κ: 20.0
 
 random:
   seed: 1234
+
 

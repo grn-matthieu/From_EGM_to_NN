@@ -13,7 +13,7 @@ using ThesisProject
     )
 
     # constraint_weights linear form and error branch
-    w_lin = ThesisProject.NNLoss.constraint_weights(ap, a_min; alpha = 2.0, form = :linear)
+    w_lin = ThesisProject.NNLoss.constraint_weights(ap, a_min; α = 2.0, form = :linear)
     @test all(w_lin .>= 1)
     @test ThesisProject.NNLoss.euler_loss(R; weights = w_lin) >= 0
     @test_throws ArgumentError ThesisProject.NNLoss.constraint_weights(
@@ -33,8 +33,8 @@ using ThesisProject
         stabilize = false,
         stab_method = :log1p_square,
         residual_weighting = :none,
-        weight_alpha = 5.0,
-        weight_kappa = 20.0,
+        weight_α = 5.0,
+        weight_κ = 20.0,
     )
     L_none = ThesisProject.NNLoss.assemble_euler_loss(R, ap, a_min, cfg_none)
     @test isapprox(L_none, ThesisProject.NNLoss.euler_mse(R))
@@ -43,8 +43,8 @@ using ThesisProject
         stabilize = true,
         stab_method = :log1p_square,
         residual_weighting = :exp,
-        weight_alpha = 3.0,
-        weight_kappa = 10.0,
+        weight_α = 3.0,
+        weight_κ = 10.0,
     )
     @test isfinite(ThesisProject.NNLoss.assemble_euler_loss(R, ap, a_min, cfg_exp))
 
@@ -52,8 +52,8 @@ using ThesisProject
         stabilize = false,
         stab_method = :log1p_square,
         residual_weighting = :linear,
-        weight_alpha = 2.0,
-        weight_kappa = 10.0,
+        weight_α = 2.0,
+        weight_κ = 10.0,
     )
     @test isfinite(ThesisProject.NNLoss.assemble_euler_loss(R, ap, a_min, cfg_lin))
 end

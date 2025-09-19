@@ -30,8 +30,8 @@ end
 
 Base.@kwdef mutable struct Adam <: Optimizer
     lr::Float64
-    beta1::Float64 = 0.9
-    beta2::Float64 = 0.999
+    β1::Float64 = 0.9
+    β2::Float64 = 0.999
     eps::Float64 = 1e-8
     first_moment::Vector{Array{Float64}} = Array{Float64}[]
     second_moment::Vector{Array{Float64}} = Array{Float64}[]
@@ -91,8 +91,8 @@ end
 
 function update!(opt::Adam, params::Vector{<:AbstractArray}, grads::Vector{<:AbstractArray})
     opt.step += 1
-    β1 = opt.beta1
-    β2 = opt.beta2
+    β1 = opt.β1
+    β2 = opt.β2
     eps = opt.eps
     b1_corr = 1 - β1^opt.step
     b2_corr = 1 - β2^opt.step
@@ -117,8 +117,8 @@ function make_optimizer(
     lr::Real = 1e-3,
     momentum::Real = 0.0,
     decay::Real = 0.99,
-    beta1::Real = 0.9,
-    beta2::Real = 0.999,
+    β1::Real = 0.9,
+    β2::Real = 0.999,
     eps::Real = 1e-8,
 )::Optimizer
     lname = Symbol(lowercase(String(name)))
@@ -127,28 +127,23 @@ function make_optimizer(
     elseif lname === :rmsprop
         return RMSProp(; lr = float(lr), decay = float(decay), eps = float(eps))
     elseif lname === :adam
-        return Adam(;
-            lr = float(lr),
-            beta1 = float(beta1),
-            beta2 = float(beta2),
-            eps = float(eps),
-        )
+        return Adam(; lr = float(lr), β1 = float(β1), β2 = float(β2), eps = float(eps))
     else
         throw(ArgumentError("Unknown optimizer name $(name)"))
     end
 end
 
 """
-    step_lr(lr0, epoch; step_size=10, gamma=0.5)
+    step_lr(lr0, epoch; step_size=10, γ=0.5)
 
-Piecewise-constant schedule that multiplies `lr0` by `gamma` every `step_size`
+Piecewise-constant schedule that multiplies `lr0` by `γ` every `step_size`
 epochs (1-based).
 """
-function step_lr(lr0::Float64, epoch::Int; step_size::Int = 10, gamma::Float64 = 0.5)
+function step_lr(lr0::Float64, epoch::Int; step_size::Int = 10, γ::Float64 = 0.5)
     step_size >= 1 || throw(ArgumentError("step_size must be >= 1, got $(step_size)"))
-    (0.0 < gamma <= 1.0) || throw(ArgumentError("gamma must lie in (0, 1], got $(gamma)"))
+    (0.0 < γ <= 1.0) || throw(ArgumentError("γ must lie in (0, 1], got $(γ)"))
     drops = floor((epoch - 1) / step_size)
-    return lr0 * gamma^drops
+    return lr0 * γ^drops
 end
 
 """

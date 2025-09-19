@@ -5,11 +5,11 @@ using ThesisProject
     # Short aliases
     L = ThesisProject.NNLoss
 
-    # anneal_lambda: edge and basic schedules
-    @test L.anneal_lambda(1, 1) == float(5.0) # E <= 1 returns final
-    v1 = L.anneal_lambda(1, 5; λ_start = 0.0, λ_final = 1.0, schedule = :linear)
+    # anneal_λ: edge and basic schedules
+    @test L.anneal_λ(1, 1) == float(5.0) # E <= 1 returns final
+    v1 = L.anneal_λ(1, 5; λ_start = 0.0, λ_final = 1.0, schedule = :linear)
     @test isapprox(v1, 0.0; atol = 1e-12)
-    vlast = L.anneal_lambda(5, 5; λ_start = 0.0, λ_final = 1.0, schedule = :cosine)
+    vlast = L.anneal_λ(5, 5; λ_start = 0.0, λ_final = 1.0, schedule = :cosine)
     @test isapprox(vlast, 1.0; atol = 1e-12)
 
     # stabilize_residuals
@@ -55,8 +55,8 @@ using ThesisProject
     # assemble_euler_loss with NamedTuple config
     cfg = (
         residual_weighting = :exp,
-        weight_alpha = 2.0,
-        weight_kappa = 10.0,
+        weight_α = 2.0,
+        weight_κ = 10.0,
         stabilize = false,
         stab_method = :log1p_square,
     )

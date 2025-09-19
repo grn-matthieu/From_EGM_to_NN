@@ -18,9 +18,9 @@ const DEFAULT_CONFIG = joinpath(dirname(@__DIR__), "config", "simple_baseline.ya
 usage() = """
 Usage:
     julia --project scripts/run_nn_baseline.jl --config <path> [--epochs <Int>] [--lr <Float64>] [--batch <Int>] [--seed <Int>] \
-                 [--opt <adam|rmsprop|sgd>] [--beta1 <Float64>] [--beta2 <Float64>] [--eps <Float64>] \
-                 [--mom <Float64>] [--rho <Float64>] [--lr_schedule <none|cosine|step>] \
-                 [--eta_min <Float64>] [--step_size <Int>] [--gamma <Float64>]
+                 [--opt <adam|rmsprop|sgd>] [--β1 <Float64>] [--β2 <Float64>] [--eps <Float64>] \
+                 [--mom <Float64>] [--ρ <Float64>] [--lr_schedule <none|cosine|step>] \
+                 [--η_min <Float64>] [--step_size <Int>] [--γ <Float64>]
 
 Options:
     --config   Path to YAML config (required)
@@ -30,15 +30,15 @@ Options:
     --seed     RNG seed (default 42)
     --smoke    Force quick run (epochs=1 if unset, batch<=64, CPU)
     --opt      Optimizer (adam|rmsprop|sgd)
-    --beta1    Adam/RMSProp beta1
-    --beta2    Adam beta2
+    --β1    Adam/RMSProp β1
+    --β2    Adam β2
     --eps      Epsilon for Adam/RMSProp/SGD
     --mom      Momentum for SGD
-    --rho      Rho for RMSProp
+    --ρ      Ρ for RMSProp
     --lr_schedule  Learning rate schedule (none|cosine|step)
-    --eta_min  Min LR for cosine
+    --η_min  Min LR for cosine
     --step_size Step size for step schedule
-    --gamma    Decay factor for step schedule
+    --γ    Decay factor for step schedule
     --all-methods   Run benchmarks for all supported methods (egm,vi,nn)
     --methods       Comma-separated list of methods to run (egm,vi,nn)
 """
@@ -57,15 +57,15 @@ function parse_args(argv::Vector{String})::NamedTuple
         "smoke" => false,
         # optimizer and schedule
         "opt" => nothing,
-        "beta1" => nothing,
-        "beta2" => nothing,
+        "β1" => nothing,
+        "β2" => nothing,
         "eps" => nothing,
         "mom" => nothing,
-        "rho" => nothing,
+        "ρ" => nothing,
         "lr_schedule" => nothing,
-        "eta_min" => nothing,
+        "η_min" => nothing,
         "step_size" => nothing,
-        "gamma" => nothing,
+        "γ" => nothing,
         "all_methods" => false,
         "methods" => nothing,
     )
@@ -83,15 +83,15 @@ function parse_args(argv::Vector{String})::NamedTuple
         a == "--seed" && (opt["seed"] = parse(Int, argv[i+=1]); i += 1; continue)
         a == "--smoke" && (opt["smoke"] = true; i += 1; continue)
         a == "--opt" && (opt["opt"] = argv[i+=1]; i += 1; continue)
-        a == "--beta1" && (opt["beta1"] = parse(Float64, argv[i+=1]); i += 1; continue)
-        a == "--beta2" && (opt["beta2"] = parse(Float64, argv[i+=1]); i += 1; continue)
+        a == "--β1" && (opt["β1"] = parse(Float64, argv[i+=1]); i += 1; continue)
+        a == "--β2" && (opt["β2"] = parse(Float64, argv[i+=1]); i += 1; continue)
         a == "--eps" && (opt["eps"] = parse(Float64, argv[i+=1]); i += 1; continue)
         a == "--mom" && (opt["mom"] = parse(Float64, argv[i+=1]); i += 1; continue)
-        a == "--rho" && (opt["rho"] = parse(Float64, argv[i+=1]); i += 1; continue)
+        a == "--ρ" && (opt["ρ"] = parse(Float64, argv[i+=1]); i += 1; continue)
         a == "--lr_schedule" && (opt["lr_schedule"] = argv[i+=1]; i += 1; continue)
-        a == "--eta_min" && (opt["eta_min"] = parse(Float64, argv[i+=1]); i += 1; continue)
+        a == "--η_min" && (opt["η_min"] = parse(Float64, argv[i+=1]); i += 1; continue)
         a == "--step_size" && (opt["step_size"] = parse(Int, argv[i+=1]); i += 1; continue)
-        a == "--gamma" && (opt["gamma"] = parse(Float64, argv[i+=1]); i += 1; continue)
+        a == "--γ" && (opt["γ"] = parse(Float64, argv[i+=1]); i += 1; continue)
         a == "--all-methods" && (opt["all_methods"] = true; i += 1; continue)
         a == "--methods" && (opt["methods"] = argv[i+=1]; i += 1; continue)
         error("Unknown arg: $a")
@@ -106,15 +106,15 @@ function parse_args(argv::Vector{String})::NamedTuple
         smoke = opt["smoke"],
         # optimizer & schedule
         opt = opt["opt"],
-        beta1 = opt["beta1"],
-        beta2 = opt["beta2"],
+        β1 = opt["β1"],
+        β2 = opt["β2"],
         eps = opt["eps"],
         mom = opt["mom"],
-        rho = opt["rho"],
+        ρ = opt["ρ"],
         lr_schedule = opt["lr_schedule"],
-        eta_min = opt["eta_min"],
+        η_min = opt["η_min"],
         step_size = opt["step_size"],
-        gamma = opt["gamma"],
+        γ = opt["γ"],
         all_methods = opt["all_methods"],
         methods = opt["methods"],
     )
@@ -150,11 +150,11 @@ function apply_overrides!(cfg::AbstractDict, opt)::Nothing
     if opt.opt !== nothing
         solver_cfg[:optimizer] = String(opt.opt)
     end
-    if opt.beta1 !== nothing
-        solver_cfg[:beta1] = opt.beta1
+    if opt.β1 !== nothing
+        solver_cfg[:β1] = opt.β1
     end
-    if opt.beta2 !== nothing
-        solver_cfg[:beta2] = opt.beta2
+    if opt.β2 !== nothing
+        solver_cfg[:β2] = opt.β2
     end
     if opt.eps !== nothing
         solver_cfg[:eps] = opt.eps
@@ -162,20 +162,20 @@ function apply_overrides!(cfg::AbstractDict, opt)::Nothing
     if opt.mom !== nothing
         solver_cfg[:mom] = opt.mom
     end
-    if opt.rho !== nothing
-        solver_cfg[:rho] = opt.rho
+    if opt.ρ !== nothing
+        solver_cfg[:ρ] = opt.ρ
     end
     if opt.lr_schedule !== nothing
         solver_cfg[:lr_schedule] = Symbol(opt.lr_schedule)
     end
-    if opt.eta_min !== nothing
-        solver_cfg[:eta_min] = opt.eta_min
+    if opt.η_min !== nothing
+        solver_cfg[:η_min] = opt.η_min
     end
     if opt.step_size !== nothing
         solver_cfg[:step_size] = opt.step_size
     end
-    if opt.gamma !== nothing
-        solver_cfg[:gamma] = opt.gamma
+    if opt.γ !== nothing
+        solver_cfg[:γ] = opt.γ
     end
 
     cfg[:solver] = solver_cfg

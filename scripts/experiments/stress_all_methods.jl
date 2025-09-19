@@ -1,14 +1,14 @@
 #!/usr/bin/env julia
 
 """
-Stress test all methods (EGM, Projection, Perturbation) across values of beta and sigma.
+Stress test all methods (EGM, Projection, Perturbation) across values of β and σ.
 
 Runs both deterministic and stochastic cases by toggling `shocks.active`.
 Logs successes and failures (with error types/messages and stacktraces) to CSV.
 
 Configure via env vars (optional):
-  - BETA_LIST   e.g. "0.92,0.95,0.98"
-  - SIGMA_LIST  e.g. "1.0,2.0,3.0"
+  - Β_LIST   e.g. "0.92,0.95,0.98"
+  - Σ_LIST  e.g. "1.0,2.0,3.0"
   - METHODS     e.g. "EGM,Projection,Perturbation" (defaults to all)
 
 CLI flags (optional):
@@ -184,11 +184,11 @@ function main()
     params0 = base_cfg[:params]
     @assert haskey(params0, Symbol("\u03b2")) "Config :params must include :\\u03b2"
     @assert haskey(params0, Symbol("\u03c3")) "Config :params must include :\\u03c3"
-    beta_key = Symbol("\u03b2")
-    sigma_key = Symbol("\u03c3")
+    β_key = Symbol("\u03b2")
+    σ_key = Symbol("\u03c3")
 
-    betas = parse_float_list("BETA_LIST", [0.92, 0.95, 0.96, 0.98])
-    sigmas = parse_float_list("SIGMA_LIST", [1.0, 2.0, 3.0, 4.0])
+    βs = parse_float_list("Β_LIST", [0.92, 0.95, 0.96, 0.98])
+    σs = parse_float_list("Σ_LIST", [1.0, 2.0, 3.0, 4.0])
     methods = parse_methods("METHODS", [:EGM, :Projection, :Perturbation])
 
     ts = Dates.format(now(UTC), dateformat"yyyy-mm-ddTHH:MM:SSZ")
@@ -197,8 +197,8 @@ function main()
         "timestamp",
         "method",
         "case",
-        "beta",
-        "sigma",
+        "β",
+        "σ",
         "status",
         "error_type",
         "error_message",
@@ -220,12 +220,12 @@ function main()
 
     rows = Vector{NTuple{22,Any}}()
 
-    for m in methods, b in betas, s in sigmas
+    for m in methods, b in βs, s in σs
         for stochastic in (false, true)
             cfg = deepcopy(base_cfg)
             # Parameters: write only to keys detected from config
-            cfg[:params][beta_key] = b
-            cfg[:params][sigma_key] = s
+            cfg[:params][β_key] = b
+            cfg[:params][σ_key] = s
 
             case = stochastic ? "stochastic" : "deterministic"
             status, payload = safe_solve(cfg; method = m, stochastic, opts)
