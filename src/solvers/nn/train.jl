@@ -1,32 +1,71 @@
 using Dates
 using Printf
+using Lux
+using .NNMixedPrecision: to_fp32, UseFP16, UseBF16
 
-function bench_mixedprecision(cfg; warmup_epochs = 1, run_epochs = 2)
+"""
+    bench_mixedprecision(cfg; warmup_epochs=1, run_epochs=2, on_row=nothing)
+
+Benchmark FP32/FP16/BF16 training on the fixed batch stored in `cfg[:batch]`.
+
+- RNG isolation: seeds are derived via `cfg[:random][:seed]` (or `cfg[:seed]`
+  fallback) without mutating `Random.default_rng()`.
+- Logging: pass an `on_row` callback to receive per-mode metrics instead of
+  writing CSV files. The callback receives a NamedTuple
+  `(:mp, :epochs, :wall_time_s, :loss, :feas, :loss_scale)`.
+"""
+function bench_mixedprecision(cfg; warmup_epochs = 1, run_epochs = 2, on_row = nothing)
     # Settings
     mp_modes = [(nothing, "FP32"), (UseFP16(), "FP16"), (UseBF16(), "BF16")]
     results = NamedTuple[]
-    now = Dates.now()
-    timestamp = Dates.format(now, dateformat"yyyymmdd_HHMMSS")
-    outdir = "results/nn/mixedprec"
-    isdir(outdir) || mkpath(outdir)
-    csv_path = joinpath(outdir, "bench_$(timestamp).csv")
-    header = "mp,epochs,wall_time_s,loss,feas,loss_scale"
-    open(csv_path, "w") do io
-        println(io, header)
-    end
+    # No direct CSV output; caller can pass `on_row` for logging.
 
     # Helper: run training for a given mp mode
     function run_one(mp, mp_name)
-        Random.seed!(cfg.seed)
-        # Deepcopy model/params/batch if needed for isolation
-        # (Assume init_state and batch generation are deterministic with seed)
-        state = init_state(cfg)
+        # Derive local RNG via cfg.random.seed to avoid global Random.seed!
+        cfg2 = deepcopy(cfg)
+        cfg2 = cfg2 isa Dict{Symbol,Any} ? cfg2 : Dict{Symbol,Any}(cfg2)
+        if haskey(cfg2, :seed)
+            rand_cfg = Dict{Symbol,Any}(get(cfg2, :random, Dict{Symbol,Any}()))
+            rand_cfg[:seed] = cfg2[:seed]
+            cfg2[:random] = rand_cfg
+        elseif haskey(cfg2, :random)
+            cfg2[:random] = Dict{Symbol,Any}(cfg2[:random])
+        end
+        batch = get(cfg2, :batch, nothing)
+        batch === nothing &&
+            throw(ArgumentError("bench_mixedprecision requires cfg[:batch]=(X, Y)"))
+        state = NNInit.init_state(cfg2)
         # Local mutable bindings for parameters and optimiser state
         ps_local = state.ps
         optstate_local = state.optstate
         opt_local = state.opt
-        batch = cfg.batch
-        loss_scale = get(cfg, :loss_scale, 1.0)
+        loss_scale = get(cfg2, :loss_scale, 1.0)
+        cast_params_tree(x, ::Type{T}) where {T} = x
+        cast_params_tree(x::NamedTuple, ::Type{T}) where {T} =
+            map(v -> cast_params_tree(v, T), x)
+        cast_params_tree(x::Tuple, ::Type{T}) where {T} =
+            map(v -> cast_params_tree(v, T), x)
+        cast_params_tree(x::AbstractArray, ::Type{T}) where {T} = convert.(T, x)
+
+        function _compute_loss(p_now, batch_now)
+            X, Y = batch_now
+            ŷ, st2 = Lux.apply(state.model, X, p_now, state.st)
+            diff32 = to_fp32(ŷ .- Y)
+            s = sum(abs2, diff32)
+            return Float64(s / length(diff32))
+        end
+
+        function loss_eval(ps)
+            if mp === nothing
+                return _compute_loss(ps, batch)
+            else
+                T = NNMixedPrecision.eltype_from(mp)
+                ps_mp = cast_params_tree(ps, T)
+                batch_mp = NNMixedPrecision.cast_batch(batch, T)
+                return _compute_loss(ps_mp, batch_mp)
+            end
+        end
         feas = 0.0
         loss = NaN
         wall_time = 0.0
@@ -55,42 +94,24 @@ function bench_mixedprecision(cfg; warmup_epochs = 1, run_epochs = 2)
 
             # Warmup epochs (not timed) -- single-step per epoch on the provided batch
             for _ = 1:warmup_epochs
-                # Define loss evaluated using mixed-precision views but returning an FP32/FP64-safe scalar
-                loss_master(ps_local) =
-                    with_mixed_precision(
-                        state.model,
-                        ps_local,
-                        batch;
-                        mp = mp,
-                        loss_scale = loss_scale,
-                    ) do (pmp, bmp)
-                        # Expect minibatch as (X, Y)
-                        X, Y = bmp
-                        ŷ, st2 = Lux.apply(state.model, X, pmp, state.st)
-                        # Upcast residuals to FP32 before reduction for numerical safety
-                        diff32 = to_fp32(ŷ .- Y)
-                        s = sum(abs2, diff32)
-                        return Float64(s / length(diff32))
-                    end
-
                 # Compute grads w.r.t. master params and update optimiser
-                gs = first(Zygote.gradient(loss_master, ps_local))
+                gs = first(Zygote.gradient(loss_eval, ps_local))
                 # Optional gradient clipping if configured
-                clip_norm = get(cfg, :clip_norm, nothing)
+                clip_norm = get(cfg2, :clip_norm, nothing)
                 if clip_norm !== nothing && isfinite(clip_norm) && clip_norm > 0
                     gnorm = _grad_global_l2norm_local(gs)
                     if gnorm > clip_norm
-                        α = clip_norm / (gnorm + 1e-12)
-                        foreach_array_leaf(gs) do g
-                            @. g = α * g
+                        scale = clip_norm / (gnorm + 1e-12)
+                        NNTrain.foreach_array_leaf(gs) do g
+                            @. g = scale * g
                         end
                     end
                 end
 
                 # Optimiser update
                 if opt_local isa NNOptim.Optimizer
-                    pvec = collect_array_leaves(ps_local)
-                    gvec = collect_array_leaves(gs)
+                    pvec = NNTrain.collect_array_leaves(ps_local)
+                    gvec = NNTrain.collect_array_leaves(gs)
                     update!(opt_local, pvec, gvec)
                 else
                     optstate_local, ps_local =
@@ -101,37 +122,22 @@ function bench_mixedprecision(cfg; warmup_epochs = 1, run_epochs = 2)
             # Timed epochs
             t0 = time()
             for _ = 1:run_epochs
-                loss_master(ps_local) =
-                    with_mixed_precision(
-                        state.model,
-                        ps_local,
-                        batch;
-                        mp = mp,
-                        loss_scale = loss_scale,
-                    ) do (pmp, bmp)
-                        X, Y = bmp
-                        ŷ, st2 = Lux.apply(state.model, X, pmp, state.st)
-                        diff32 = to_fp32(ŷ .- Y)
-                        s = sum(abs2, diff32)
-                        return Float64(s / length(diff32))
-                    end
-
-                gs = first(Zygote.gradient(loss_master, ps_local))
+                gs = first(Zygote.gradient(loss_eval, ps_local))
                 # Optional clipping
-                clip_norm = get(cfg, :clip_norm, nothing)
+                clip_norm = get(cfg2, :clip_norm, nothing)
                 if clip_norm !== nothing && isfinite(clip_norm) && clip_norm > 0
                     gnorm = _grad_global_l2norm_local(gs)
                     if gnorm > clip_norm
-                        α = clip_norm / (gnorm + 1e-12)
-                        foreach_array_leaf(gs) do g
-                            @. g = α * g
+                        scale = clip_norm / (gnorm + 1e-12)
+                        NNTrain.foreach_array_leaf(gs) do g
+                            @. g = scale * g
                         end
                     end
                 end
 
                 if opt_local isa NNOptim.Optimizer
-                    pvec = collect_array_leaves(ps_local)
-                    gvec = collect_array_leaves(gs)
+                    pvec = NNTrain.collect_array_leaves(ps_local)
+                    gvec = NNTrain.collect_array_leaves(gs)
                     update!(opt_local, pvec, gvec)
                 else
                     optstate_local, ps_local =
@@ -141,19 +147,7 @@ function bench_mixedprecision(cfg; warmup_epochs = 1, run_epochs = 2)
             wall_time = time() - t0
 
             # Evaluate final loss/feasibility on the trained weights
-            loss = with_mixed_precision(
-                state.model,
-                ps_local,
-                batch;
-                mp = mp,
-                loss_scale = loss_scale,
-            ) do (pmp, bmp)
-                X, Y = bmp
-                ŷ, st2 = Lux.apply(state.model, X, pmp, state.st)
-                diff32 = to_fp32(ŷ .- Y)
-                s = sum(abs2, diff32)
-                return Float64(s / length(diff32))
-            end
+            loss = loss_eval(ps_local)
             feas = isfinite(loss) ? 1.0 : 0.0
         catch err
             @warn "Error in $mp_name benchmark: $err"
@@ -193,18 +187,16 @@ function bench_mixedprecision(cfg; warmup_epochs = 1, run_epochs = 2)
             # best-effort; continue
         end
 
-        # Write CSV row
-        open(csv_path, "a") do io
-            @printf(
-                io,
-                "%s,%d,%.6f,%.6e,%.3f,%.1f\n",
-                mp_name,
-                run_epochs,
-                wall_time,
-                loss,
-                feas,
-                loss_scale
-            )
+        # Optional logging hook instead of direct CSV emission
+        if on_row !== nothing
+            on_row((
+                mp = mp_name,
+                epochs = run_epochs,
+                wall_time_s = wall_time,
+                loss = loss,
+                feas = feas,
+                loss_scale = loss_scale,
+            ))
         end
         return (
             mp = mp_name,
@@ -232,7 +224,7 @@ function bench_mixedprecision(cfg; warmup_epochs = 1, run_epochs = 2)
         feas_fp16 = results[fp16].feas
         if isfinite(t_fp16) && isfinite(loss_fp16) && feas_fp16 >= 0.99
             println(@sprintf("FP16 speedup = %.2fx", t_fp32 / t_fp16))
-            println(@sprintf("Δloss = %.3e", loss_fp16 - loss_fp32))
+            println(@sprintf("delta_loss = %.3e", loss_fp16 - loss_fp32))
         else
             println("FP16 UNSTABLE")
         end
@@ -245,7 +237,7 @@ function bench_mixedprecision(cfg; warmup_epochs = 1, run_epochs = 2)
         feas_bf16 = results[bf16].feas
         if isfinite(t_bf16) && isfinite(loss_bf16) && feas_bf16 >= 0.99
             println(@sprintf("BF16 speedup = %.2fx", t_fp32 / t_bf16))
-            println(@sprintf("Δloss = %.3e", loss_bf16 - loss_fp32))
+            println(@sprintf("delta_loss = %.3e", loss_bf16 - loss_fp32))
         else
             println("BF16 UNSTABLE")
         end

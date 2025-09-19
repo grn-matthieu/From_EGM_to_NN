@@ -40,6 +40,27 @@ const NNInit = ThesisProject.NNInit
     @test NNTrain.should_stop!(es, 1.02)   # second bad step triggers stop (num_bad=2)
 end
 
+@testset "NNTrain bench_mixedprecision smoke" begin
+    cfg = Dict{Symbol,Any}(deepcopy(SMOKE_CFG))
+    # Ensure reproducible RNG via cfg.random.seed
+    cfg[:random] = Dict{Symbol,Any}(get(cfg, :random, Dict{Symbol,Any}()))
+    cfg[:random][:seed] = 42
+    # Minimal batch: 1 feature x 4 samples
+    X = rand(Float32, 1, 4)
+    Y = rand(Float32, 1, 4)
+    cfg[:batch] = (X, Y)
+    rows = NamedTuple[]
+    res = ThesisProject.bench_mixedprecision(
+        cfg;
+        warmup_epochs = 0,
+        run_epochs = 0,
+        on_row = r -> push!(rows, r),
+    )
+    @test length(res) == 3
+    @test all(haskey(r, :mp) && haskey(r, :loss) for r in res)
+    @test length(rows) == 3
+end
+
 @testset "NNTrain _step! + train!" begin
     # Small deterministic config and synthetic data
     cfg = deepcopy(SMOKE_CFG)
