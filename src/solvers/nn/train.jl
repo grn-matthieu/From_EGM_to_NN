@@ -1,249 +1,7 @@
 using Dates
 using Printf
 using Lux
-using .NNMixedPrecision: to_fp32, UseFP16, UseBF16
-
-"""
-    bench_mixedprecision(cfg; warmup_epochs=1, run_epochs=2, on_row=nothing)
-
-Benchmark FP32/FP16/BF16 training on the fixed batch stored in `cfg[:batch]`.
-
-- RNG isolation: seeds are derived via `cfg[:random][:seed]` (or `cfg[:seed]`
-  fallback) without mutating `Random.default_rng()`.
-- Logging: pass an `on_row` callback to receive per-mode metrics instead of
-  writing CSV files. The callback receives a NamedTuple
-  `(:mp, :epochs, :wall_time_s, :loss, :feas, :loss_scale)`.
-"""
-function bench_mixedprecision(cfg; warmup_epochs = 1, run_epochs = 2, on_row = nothing)
-    # Settings
-    mp_modes = [(nothing, "FP32"), (UseFP16(), "FP16"), (UseBF16(), "BF16")]
-    results = NamedTuple[]
-    # No direct CSV output; caller can pass `on_row` for logging.
-
-    # Helper: run training for a given mp mode
-    function run_one(mp, mp_name)
-        # Derive local RNG via cfg.random.seed to avoid global Random.seed!
-        cfg2 = deepcopy(cfg)
-        cfg2 = cfg2 isa Dict{Symbol,Any} ? cfg2 : Dict{Symbol,Any}(cfg2)
-        if haskey(cfg2, :seed)
-            rand_cfg = Dict{Symbol,Any}(get(cfg2, :random, Dict{Symbol,Any}()))
-            rand_cfg[:seed] = cfg2[:seed]
-            cfg2[:random] = rand_cfg
-        elseif haskey(cfg2, :random)
-            cfg2[:random] = Dict{Symbol,Any}(cfg2[:random])
-        end
-        batch = get(cfg2, :batch, nothing)
-        batch === nothing &&
-            throw(ArgumentError("bench_mixedprecision requires cfg[:batch]=(X, Y)"))
-        state = NNInit.init_state(cfg2)
-        # Local mutable bindings for parameters and optimiser state
-        ps_local = state.ps
-        optstate_local = state.optstate
-        opt_local = state.opt
-        loss_scale = get(cfg2, :loss_scale, 1.0)
-        cast_params_tree(x, ::Type{T}) where {T} = x
-        cast_params_tree(x::NamedTuple, ::Type{T}) where {T} =
-            map(v -> cast_params_tree(v, T), x)
-        cast_params_tree(x::Tuple, ::Type{T}) where {T} =
-            map(v -> cast_params_tree(v, T), x)
-        cast_params_tree(x::AbstractArray, ::Type{T}) where {T} = convert.(T, x)
-
-        function _compute_loss(p_now, batch_now)
-            X, Y = batch_now
-            ŷ, st2 = Lux.apply(state.model, X, p_now, state.st)
-            diff32 = to_fp32(ŷ .- Y)
-            s = sum(abs2, diff32)
-            return Float64(s / length(diff32))
-        end
-
-        function loss_eval(ps)
-            if mp === nothing
-                return _compute_loss(ps, batch)
-            else
-                T = NNMixedPrecision.eltype_from(mp)
-                ps_mp = cast_params_tree(ps, T)
-                batch_mp = NNMixedPrecision.cast_batch(batch, T)
-                return _compute_loss(ps_mp, batch_mp)
-            end
-        end
-        feas = 0.0
-        loss = NaN
-        wall_time = 0.0
-        try
-            # Helper: local grad norm (avoid depending on other private helpers)
-            function _grad_global_l2norm_local(grads)
-                s = 0.0
-                _rec(x) = begin
-                    if x isa NamedTuple
-                        for v in values(x)
-                            _rec(v)
-                        end
-                    elseif x isa Tuple
-                        for v in x
-                            _rec(v)
-                        end
-                    elseif x isa AbstractArray
-                        s += sum(abs2, x)
-                    else
-                        return
-                    end
-                end
-                _rec(grads)
-                return sqrt(s)
-            end
-
-            # Warmup epochs (not timed) -- single-step per epoch on the provided batch
-            for _ = 1:warmup_epochs
-                # Compute grads w.r.t. master params and update optimiser
-                gs = first(Zygote.gradient(loss_eval, ps_local))
-                # Optional gradient clipping if configured
-                clip_norm = get(cfg2, :clip_norm, nothing)
-                if clip_norm !== nothing && isfinite(clip_norm) && clip_norm > 0
-                    gnorm = _grad_global_l2norm_local(gs)
-                    if gnorm > clip_norm
-                        scale = clip_norm / (gnorm + 1e-12)
-                        NNTrain.foreach_array_leaf(gs) do g
-                            @. g = scale * g
-                        end
-                    end
-                end
-
-                # Optimiser update
-                if opt_local isa NNOptim.Optimizer
-                    pvec = NNTrain.collect_array_leaves(ps_local)
-                    gvec = NNTrain.collect_array_leaves(gs)
-                    update!(opt_local, pvec, gvec)
-                else
-                    optstate_local, ps_local =
-                        Optimisers.update(optstate_local, ps_local, gs)
-                end
-            end
-
-            # Timed epochs
-            t0 = time()
-            for _ = 1:run_epochs
-                gs = first(Zygote.gradient(loss_eval, ps_local))
-                # Optional clipping
-                clip_norm = get(cfg2, :clip_norm, nothing)
-                if clip_norm !== nothing && isfinite(clip_norm) && clip_norm > 0
-                    gnorm = _grad_global_l2norm_local(gs)
-                    if gnorm > clip_norm
-                        scale = clip_norm / (gnorm + 1e-12)
-                        NNTrain.foreach_array_leaf(gs) do g
-                            @. g = scale * g
-                        end
-                    end
-                end
-
-                if opt_local isa NNOptim.Optimizer
-                    pvec = NNTrain.collect_array_leaves(ps_local)
-                    gvec = NNTrain.collect_array_leaves(gs)
-                    update!(opt_local, pvec, gvec)
-                else
-                    optstate_local, ps_local =
-                        Optimisers.update(optstate_local, ps_local, gs)
-                end
-            end
-            wall_time = time() - t0
-
-            # Evaluate final loss/feasibility on the trained weights
-            loss = loss_eval(ps_local)
-            feas = isfinite(loss) ? 1.0 : 0.0
-        catch err
-            @warn "Error in $mp_name benchmark: $err"
-            wall_time = NaN
-            loss = NaN
-            feas = 0.0
-        end
-        # After run, if the original state is an NNState, copy trained arrays back
-        function _copy_tree_arrays!(dest, src)
-            if dest isa NamedTuple && src isa NamedTuple
-                for k in keys(dest)
-                    _copy_tree_arrays!(getfield(dest, k), getfield(src, k))
-                end
-            elseif dest isa Tuple && src isa Tuple
-                for i in eachindex(dest)
-                    _copy_tree_arrays!(dest[i], src[i])
-                end
-            elseif dest isa AbstractArray && src isa AbstractArray
-                @assert size(dest) == size(src)
-                dest .= src
-            else
-                # numbers or unsupported leaves are ignored
-            end
-            return dest
-        end
-
-        # Copy back into state.ps so the caller-observed state reflects training
-        try
-            _copy_tree_arrays!(state.ps, ps_local)
-            # Update optstate in-place if possible
-            try
-                state.optstate = optstate_local
-            catch
-                # if NNState fields are immutable, ignore
-            end
-        catch
-            # best-effort; continue
-        end
-
-        # Optional logging hook instead of direct CSV emission
-        if on_row !== nothing
-            on_row((
-                mp = mp_name,
-                epochs = run_epochs,
-                wall_time_s = wall_time,
-                loss = loss,
-                feas = feas,
-                loss_scale = loss_scale,
-            ))
-        end
-        return (
-            mp = mp_name,
-            wall_time = wall_time,
-            loss = loss,
-            feas = feas,
-            loss_scale = loss_scale,
-        )
-    end
-
-    # Run all modes
-    for (mp, mp_name) in mp_modes
-        push!(results, run_one(mp, mp_name))
-    end
-
-    # Print summary
-    fp32 = findfirst(r -> r.mp == "FP32", results)
-    fp16 = findfirst(r -> r.mp == "FP16", results)
-    bf16 = findfirst(r -> r.mp == "BF16", results)
-    if fp32 !== nothing && fp16 !== nothing
-        t_fp32 = results[fp32].wall_time
-        t_fp16 = results[fp16].wall_time
-        loss_fp32 = results[fp32].loss
-        loss_fp16 = results[fp16].loss
-        feas_fp16 = results[fp16].feas
-        if isfinite(t_fp16) && isfinite(loss_fp16) && feas_fp16 >= 0.99
-            println(@sprintf("FP16 speedup = %.2fx", t_fp32 / t_fp16))
-            println(@sprintf("delta_loss = %.3e", loss_fp16 - loss_fp32))
-        else
-            println("FP16 UNSTABLE")
-        end
-    end
-    if fp32 !== nothing && bf16 !== nothing
-        t_fp32 = results[fp32].wall_time
-        t_bf16 = results[bf16].wall_time
-        loss_fp32 = results[fp32].loss
-        loss_bf16 = results[bf16].loss
-        feas_bf16 = results[bf16].feas
-        if isfinite(t_bf16) && isfinite(loss_bf16) && feas_bf16 >= 0.99
-            println(@sprintf("BF16 speedup = %.2fx", t_fp32 / t_bf16))
-            println(@sprintf("delta_loss = %.3e", loss_bf16 - loss_fp32))
-        else
-            println("BF16 UNSTABLE")
-        end
-    end
-    return results
-end
+using ..NNUtils: to_fp32
 """
 NNTrain
 
@@ -255,8 +13,7 @@ module NNTrain
 using Lux
 using Zygote
 using Optimisers
-include("optim.jl")
-using .NNOptim
+# Local optimizer implementation removed; use Optimisers.jl instead
 using Statistics
 using Dates
 using Printf
@@ -264,7 +21,13 @@ using Random
 
 using ..NNData: grid_minibatches
 using ..NNLoss: anneal_λ
-using ..NNMixedPrecision: with_mixed_precision, to_fp32
+using ..NNUtils:
+    to_fp32,
+    foreach_array_leaf,
+    collect_array_leaves,
+    grad_global_l2norm,
+    scale_grads!,
+    _copy_tree_arrays!
 # Example usage in a training loop (insert at appropriate call site):
 # with_mixed_precision(model, params, batch; mp=cfg.mixed_precision, loss_scale=cfg.loss_scale) do (pmp, bmp)
 #     # forward, loss, grads (upcast for reductions), update master FP32
@@ -455,45 +218,7 @@ end
 
 # ---- Small utilities over parameter trees ----
 
-"""Apply function `f(::AbstractArray)` to each array leaf in a nested tree."""
-function foreach_array_leaf(x, f::F) where {F}
-    if x isa NamedTuple
-        for v in values(x)
-            foreach_array_leaf(v, f)
-        end
-    elseif x isa Tuple
-        for v in x
-            foreach_array_leaf(v, f)
-        end
-    elseif x isa AbstractArray
-        f(x)
-    elseif x === nothing
-        return
-    else
-        # numbers or other leaves are ignored
-        return
-    end
-end
-
-"""Compute global L2 norm of a gradient tree (sum of leaf Frobenius norms)."""
-function grad_global_l2norm(grads)::Float64
-    s = 0.0
-    foreach_array_leaf(grads) do g
-        s += sum(abs2, g)
-    end
-    return sqrt(s)
-end
-
-"""Scale all array leaves by factor `α` in place."""
-function scale_grads!(grads, α::Real)
-    foreach_array_leaf(grads) do g
-        @. g = α * g
-    end
-    return grads
-end
-
-
-# ---- Core training step ----
+# ---- Core training step (helpers come from ..NNUtils) ----
 
 """
     _loss_and_state(model, ps, st, x, y)
@@ -507,14 +232,7 @@ function _loss_and_state(model, ps, st, x, y)
     return mean(abs2, ŷ .- y), st2
 end
 
-# Collect array leaves utility for params/grads vectors
-collect_array_leaves(x) = begin
-    acc = Vector{AbstractArray}()
-    foreach_array_leaf(x) do a
-        push!(acc, a)
-    end
-    acc
-end
+# collect_array_leaves provided by ..NNUtils
 
 """
     _step!(state::NNState, x, y; clip_norm=nothing)
@@ -547,16 +265,8 @@ function _step!(
         scale_grads!(gs, clip_norm / (gnorm + 1e-12))
     end
 
-    # Optimiser update (prefer NNOptim if available)
-    new_ps = state.ps
-    new_optstate = state.optstate
-    if state.opt isa NNOptim.Optimizer
-        pvec = collect_array_leaves(new_ps)
-        gvec = collect_array_leaves(gs)
-        update!(state.opt, pvec, gvec)
-    else
-        new_optstate, new_ps = Optimisers.update(state.optstate, state.ps, gs)
-    end
+    # Optimiser update: use Optimisers API
+    new_optstate, new_ps = Optimisers.update(state.optstate, state.ps, gs)
 
     # Learning rate (best-effort; may be absent in some rules)
     lr = try

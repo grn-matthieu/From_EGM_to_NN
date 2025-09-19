@@ -16,6 +16,7 @@ using ..API: get_grids, get_shocks, build_model
 using ..NNConstraints: project_savings
 using ..NNData: grid_minibatches
 using ..NNInit: NNState, init_state
+using ..NNUtils: _copy_tree_arrays!
 
 export fit_to_EGM!, pretrain_then_euler!
 
@@ -167,24 +168,7 @@ function fit_to_EGM!(model_in, policy, cfg; epochs::Int, batch::Int, seed::Int =
     )
 end
 
-# Recursively copy array contents from src -> dest (matching structure)
-function _copy_tree_arrays!(dest, src)
-    if dest isa NamedTuple && src isa NamedTuple
-        for k in keys(dest)
-            _copy_tree_arrays!(getfield(dest, k), getfield(src, k))
-        end
-    elseif dest isa Tuple && src isa Tuple
-        for i in eachindex(dest)
-            _copy_tree_arrays!(dest[i], src[i])
-        end
-    elseif dest isa AbstractArray && src isa AbstractArray
-        @assert size(dest) == size(src)
-        dest .= src
-    else
-        # numbers or unsupported leaves are ignored
-    end
-    return dest
-end
+# use shared _copy_tree_arrays! from ..NNUtils
 
 """
     pretrain_then_euler!(model, policy, cfg; Nwarm::Int, epochs::Int, batch::Int, λ0::Float64=0.0)

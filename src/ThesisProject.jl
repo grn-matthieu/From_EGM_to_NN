@@ -43,7 +43,7 @@ include("solvers/egm/kernel.jl")
 include("solvers/perturbation/kernel.jl")
 
 # nn (order matters: provide deps before kernel)
-include("solvers/nn/mixedprec.jl")
+include("solvers/nn/utils.jl")         # NNUtils (shared helpers)
 include("solvers/nn/loss.jl")          # NNLoss
 include("solvers/nn/constraints.jl")   # NNConstraints
 include("solvers/nn/device.jl")        # NNDevice (device helpers for GPU/CPU)
