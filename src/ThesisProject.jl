@@ -1,3 +1,5 @@
+__precompile__()
+
 """
 ThesisProject
 
@@ -7,7 +9,7 @@ types and entry points, and `methods/*` for adapters that call solver kernels.
 """
 module ThesisProject
 
-__precompile__(false)
+using PrecompileTools
 
 # --- Includes ---
 # 1) spine
@@ -106,4 +108,17 @@ export load_config,
 # --- Extensions ---
 include("viz/api.jl")      # visualization API stubs; enabled by Plots extension
 export plot_policy, plot_euler_errors
+
+@setup_workload begin
+    cfg_path = joinpath(@__DIR__, "..", "config", "smoke_config", "smoke_config.yaml")
+    if isfile(cfg_path)
+        @compile_workload begin
+            cfg = load_config(cfg_path)
+            validate_config(cfg)
+            build_model(cfg)
+            build_method(cfg)
+        end
+    end
+end
+
 end # module
