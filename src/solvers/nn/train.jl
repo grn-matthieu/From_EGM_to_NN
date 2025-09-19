@@ -24,8 +24,8 @@ using ..NNLoss: anneal_λ
 using ..NNUtils:
     to_fp32,
     foreach_array_leaf,
-    collect_array_leaves,
-    grad_global_l2norm,
+    collect_params_leaves,
+    grad_global_l2norm_params,
     scale_grads!,
     _copy_tree_arrays!
 # Example usage in a training loop (insert at appropriate call site):
@@ -36,6 +36,17 @@ using ..NNUtils:
 using ..NNInit: NNState, init_state
 
 export train!, dummy_epoch!
+
+# Prefer parameter-aware collectors when available (Flux/Functors wrappers in NNUtils)
+# Create safe local forwarders (avoid method-extension of imported names)
+const collect_array_leaves = collect_params_leaves
+function grad_global_l2norm(x)
+    try
+        return grad_global_l2norm_params(x)
+    catch
+        return NNUtils.grad_global_l2norm(x)
+    end
+end
 
 ## Default λ scheduling parameters (overridable via cfg)
 const DEFAULT_Λ_START = 0.1
