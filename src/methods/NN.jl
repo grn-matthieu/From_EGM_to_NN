@@ -11,6 +11,8 @@ import ..API: solve
 using ..NNKernel: solve_nn_det, solve_nn_stoch
 using ..ValueFunction: compute_value_policy
 using ..Determinism: canonicalize_cfg, hash_hex
+using ..NNTrain: CSVLogger, log_row!
+using Dates
 
 export NNMethod, build_nn_method
 
@@ -93,6 +95,34 @@ function solve(
             verbose = method.opts.verbose,
             projection_kind = projection_kind,
         )
+
+    # --- Optional logging (outside kernels) ---
+    # Enable with cfg[:solver][:log_csv] = true (optional cfg[:solver][:log_dir])
+    solver_cfg = get(cfg, :solver, Dict{Symbol,Any}())
+    if get(solver_cfg, :log_csv, false) === true
+        logdir = get(solver_cfg, :log_dir, joinpath(pwd(), "results", "nn", "baseline"))
+        isdir(logdir) || mkpath(logdir)
+        logpath = joinpath(
+            String(logdir),
+            "run_" * Dates.format(Dates.now(), dateformat"yyyymmdd_HHMMSS") * ".csv",
+        )
+        lg = CSVLogger(logpath)
+        loss_for_log = get(sol.opts, :last_epoch_loss, get(sol.opts, :loss, NaN))
+        log_row!(
+            lg;
+            epoch = Int(get(sol.opts, :epochs, 0)),
+            step = Int(get(sol.opts, :epochs, 0)),
+            split = "train",
+            loss = float(loss_for_log),
+            grad_norm = NaN,
+            lr = float(get(sol.opts, :lr, NaN)),
+            stage = :final,
+            grid_stride = 1,
+            nMC = 1,
+            shock_noise = NaN,
+            lambda_penalty = NaN,
+        )
+    end
 
     # --- Euler errors vectorization for policy packaging ---
     ee = sol.resid

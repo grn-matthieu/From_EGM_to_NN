@@ -32,7 +32,8 @@ using ..API: build_model, build_method, solve
 using Statistics: mean
 using Printf
 using Dates
-using ..NNTrain: CSVLogger, log_row!
+# logging moved out of kernels; keep Dates only for timestamps in opts if needed
+# no CSV logging here
 using ..Determinism: make_rng, derive_seed
 
 export solve_nn_det, solve_nn_stoch
@@ -301,31 +302,11 @@ function solve_nn_det(
         loss = loss_val,
         projection_kind = projection_kind,
         feasibility = feas,
-    )
-    # --- Logging via NNTrain.CSVLogger ---
-    logdir = joinpath(pwd(), "results", "nn", "baseline")
-    logpath = joinpath(
-        logdir,
-        "run_" * Dates.format(Dates.now(), dateformat"yyyymmdd_HHMMSS") * ".csv",
-    )
-    mkpath(logdir)
-    mkpath(logdir)
-    lg = CSVLogger(logpath)
-    log_row!(
-        lg;
-        epoch = Int(hyper.epochs),
-        step = Int(hyper.epochs),
-        split = "train",
-        loss = float(isfinite(last_loss) ? last_loss : loss_val),
-        grad_norm = NaN,
+        epochs = Int(hyper.epochs),
+        batch = Int(hyper.batch),
         lr = float(hyper.lr),
-        stage = :final,
-        grid_stride = 1,
-        nMC = 1,
-        shock_noise = NaN,
-        lambda_penalty = NaN,
+        last_epoch_loss = float(isfinite(last_loss) ? last_loss : loss_val),
     )
-    @info "NN baseline log written" path = logpath
 
     return (
         a_grid = a_grid,
@@ -570,29 +551,11 @@ function solve_nn_stoch(
         loss = loss_val,
         projection_kind = projection_kind,
         feasibility = feas,
-    )
-    # --- Logging via NNTrain.CSVLogger (stochastic) ---
-    logdir = joinpath(pwd(), "results", "nn", "baseline")
-    logpath = joinpath(
-        logdir,
-        "run_" * Dates.format(Dates.now(), dateformat"yyyymmdd_HHMMSS") * ".csv",
-    )
-    lg = CSVLogger(logpath)
-    log_row!(
-        lg;
-        epoch = Int(hyper.epochs),
-        step = Int(hyper.epochs),
-        split = "train",
-        loss = float(isfinite(last_loss) ? last_loss : loss_val),
-        grad_norm = NaN,
+        epochs = Int(hyper.epochs),
+        batch = Int(hyper.batch),
         lr = float(hyper.lr),
-        stage = :final,
-        grid_stride = 1,
-        nMC = 1,
-        shock_noise = NaN,
-        lambda_penalty = NaN,
+        last_epoch_loss = float(isfinite(last_loss) ? last_loss : loss_val),
     )
-    @info "NN training log written" path = logpath
 
     return (
         a_grid = a_grid,
