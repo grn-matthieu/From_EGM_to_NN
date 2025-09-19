@@ -24,7 +24,7 @@ using Random
 
 using ..EulerResiduals: euler_resid_det_2, euler_resid_stoch!
 using ..NNLoss: assemble_euler_loss
-using ..NNConstraints: project_savings, project_savings_clip
+using ..NNConstraints: project_savings, project_savings_clip, smooth_pos
 using ..NNInit: init_state, NNState
 using ..NNData: grid_minibatches
 using ..NNPretrain: fit_to_EGM!
@@ -77,6 +77,7 @@ function _solver_hyper(cfg)
         weight_κ = float(get(s, :weight_κ, 20.0)),
         pretrain = pretrain,
         seed = get(r, :seed, nothing),
+        verbose = get(s, :verbose, false),
     )
 end
 
@@ -108,13 +109,13 @@ function _batch_loss_det(ps, st, model, X, p, a_min; hyper)
 
     # Current consumption
     R = 1 + p.r
-    c = clamp.(yvec .+ R .* a .- a′, 1.0e-12, Inf)
+    c = smooth_pos.(yvec .+ R .* a .- a′; eps = 1.0e-12, beta = 1.0)
 
     # Second forward: predict a" at (a′, y)
     Xin2 = in_dim_expected == 1 ? a′ : vcat(a′, reshape(yvec, 1, :))
     ŷ2_raw, _ = Lux.apply(model, Xin2, ps, st2)
     a″ = project_savings(ŷ2_raw, a_min; kind = hyper.projection_kind)
-    c′ = clamp.(yvec .+ R .* a′ .- a″, 1.0e-12, Inf)
+    c′ = smooth_pos.(yvec .+ R .* a′ .- a″; eps = 1.0e-12, beta = 1.0)
 
     # Euler residuals for the batch
     β = getfield(p, Symbol("β"))
@@ -131,7 +132,7 @@ end
 Run a simple mini-batch training loop for the deterministic case.
 Updates `state` in-place and returns final average loss.
 """
-function _train_det!(state, a_grid, p; hyper, y_scalar, master_rng)
+function _train_det!(state, a_grid, p; hyper, y_scalar, master_rng, device::Symbol = :cpu)
     # Mini-batches over (a, y). Use a singleton y-grid for determinism.
     y_grid = [float(y_scalar)]
     # Derive a dedicated RNG for minibatch sampling from the master RNG
@@ -145,6 +146,7 @@ function _train_det!(state, a_grid, p; hyper, y_scalar, master_rng)
         shuffle = true,
         rng = rng,
         drop_last = false,
+        device = device,
     )
 
     last_loss = NaN
@@ -169,6 +171,9 @@ function _train_det!(state, a_grid, p; hyper, y_scalar, master_rng)
             cnt += 1
         end
         last_loss = cnt == 0 ? NaN : sumL / cnt
+        if hyper.verbose
+            @printf("[deterministic train] epoch=%d loss=%.6e\n", epoch, last_loss)
+        end
     end
     return state, last_loss
 end
@@ -196,7 +201,7 @@ function _batch_loss_stoch(ps, st, model, X, p, a_min, z_grid, P; hyper)
     # Forward current policy a' and consumption c
     ŷ_raw, st2 = Lux.apply(model, X, ps, st)
     ap = vec(project_savings(ŷ_raw, a_min; kind = hyper.projection_kind))
-    c = clamp.(y .+ R .* a .- ap, 1.0e-12, Inf)
+    c = smooth_pos.(y .+ R .* a .- ap; eps = 1.0e-12, beta = 1.0)
 
     # Emu computed via batched next-period evaluation below
     # Batched over shocks (single Lux.apply): recompute Emu efficiently
@@ -207,7 +212,7 @@ function _batch_loss_stoch(ps, st, model, X, p, a_min, z_grid, P; hyper)
     Xbig = vcat(reshape(ap_rep, 1, :), reshape(yprime_rep, 1, :))
     y2_raw_all, _ = Lux.apply(model, Xbig, ps, st2)
     ap2_all = vec(project_savings(y2_raw_all, a_min; kind = hyper.projection_kind))
-    cp_all = clamp.(yprime_rep .+ R .* ap_rep .- ap2_all, 1.0e-12, Inf)
+    cp_all = smooth_pos.(yprime_rep .+ R .* ap_rep .- ap2_all; eps = 1.0e-12, beta = 1.0)
     c_rep = repeat(c, Nz)
     ratio_all = (cp_all ./ c_rep) .^ (-σ)
     W = P[jidx, :]
@@ -277,9 +282,59 @@ function solve_nn_det(
     seed_cfg = get(get(cfg, :random, Dict{Symbol,Any}()), :seed, nothing)
     master_rng = seed_cfg === nothing ? make_rng(Int(0x9a9aa9a9)) : make_rng(Int(seed_cfg))
 
+    # Optional supervised pretraining to EGM policy (robust, improves residuals)
+    pre_epochs = hyper.pretrain ? max(25, fld(hyper.epochs, 2)) : 0
+    if pre_epochs > 0
+        # Build an EGM baseline solution to generate targets for (a)
+        egm_cfg = try
+            deepcopy(cfg)
+        catch
+            Dict{Symbol,Any}(pairs(cfg))
+        end
+        egm_solver = get(egm_cfg, :solver, Dict{Symbol,Any}())
+        egm_solver[:method] = :EGM
+        egm_cfg[:solver] = egm_solver
+        # Ensure top-level method selector points to EGM as well (avoid recursion)
+        egm_cfg[:method] = :EGM
+        mobj = build_model(egm_cfg)
+        egm_method = build_method(egm_cfg)
+        egm_sol = solve(mobj, egm_method, egm_cfg)
+        a_next_egm = egm_sol.policy[:a].value  # (Na,)
+
+        # EGM policy mapping used by fit_to_EGM!
+        function egm_policy(a_vec, y_vec)
+            # deterministic: single column a_next_egm
+            out = similar(a_vec)
+            @inbounds for k in eachindex(a_vec)
+                out[k] = interp_linear(a_grid, a_next_egm, a_vec[k])
+            end
+            return out
+        end
+
+        seed_pre = derive_seed(master_rng, "nn/kernel/pretrain")
+        fit_to_EGM!(
+            st,
+            egm_policy,
+            cfg;
+            epochs = pre_epochs,
+            batch = hyper.batch,
+            seed = Int(seed_pre % typemax(Int)),
+        )
+    end
+
     # Train on mini-batches of (a, y)
-    st, last_loss =
-        _train_det!(st, a_grid, p; hyper = hyper, y_scalar = p.y, master_rng = master_rng)
+    # Determine device for minibatches from config
+    solver_cfg = get(cfg, :solver, Dict{Symbol,Any}())
+    device = get(solver_cfg, :device, :cpu)
+    st, last_loss = _train_det!(
+        st,
+        a_grid,
+        p;
+        hyper = hyper,
+        y_scalar = p.y,
+        master_rng = master_rng,
+        device = device,
+    )
 
     # Evaluate trained policy on full grid
     Xin = reshape(a_grid, 1, :)
@@ -287,7 +342,7 @@ function solve_nn_det(
     a_next = project_savings(vec(ŷ_raw), a_min; kind = hyper.projection_kind)
     @. a_next = min(a_next, a_max)
     R = 1 + p.r
-    c = clamp.(p.y .+ R .* a_grid .- a_next, 1.0e-12, Inf)
+    c = smooth_pos.(p.y .+ R .* a_grid .- a_next; eps = 1.0e-12, beta = 1.0)
 
     resid = euler_resid_det_2(p, a_grid, c)
 
@@ -430,6 +485,8 @@ function solve_nn_stoch(
         egm_solver = get(egm_cfg, :solver, Dict{Symbol,Any}())
         egm_solver[:method] = :EGM
         egm_cfg[:solver] = egm_solver
+        # Ensure top-level method selector points to EGM as well (avoid recursion)
+        egm_cfg[:method] = :EGM
         mobj = build_model(egm_cfg)
         egm_method = build_method(egm_cfg)
         egm_sol = solve(mobj, egm_method, egm_cfg)
@@ -467,6 +524,7 @@ function solve_nn_stoch(
         # Derive a dedicated RNG for minibatch sampling from the master RNG
         seed_mb = derive_seed(master_rng, "nn/kernel/minibatch/stoch")
         rng = make_rng(Int(seed_mb % typemax(Int)))
+        device = get(get(cfg, :solver, Dict{Symbol,Any}()), :device, :cpu)
         mb = grid_minibatches(
             a_grid,
             y_grid;
@@ -475,6 +533,7 @@ function solve_nn_stoch(
             shuffle = true,
             rng = rng,
             drop_last = false,
+            device = device,
         )
         for epoch = 1:tune_epochs
             sumL = 0.0
@@ -506,6 +565,9 @@ function solve_nn_stoch(
                 cnt += 1
             end
             last_loss = cnt == 0 ? NaN : sumL / cnt
+            if hyper.verbose
+                @printf("[stochastic tune] epoch=%d loss=%.6e\n", epoch, last_loss)
+            end
         end
     end
 
@@ -520,7 +582,7 @@ function solve_nn_stoch(
         ap = vec(project_savings(ŷ_raw, a_min; kind = hyper.projection_kind))
         ap = clamp.(ap, a_min, a_max)
         a_next[:, j] = ap
-        c[:, j] = clamp.(y .+ R .* a_grid .- ap, cmin, Inf)
+        c[:, j] = smooth_pos.(y .+ R .* a_grid .- ap; eps = cmin, beta = 1.0)
     end
 
     resid = similar(c)

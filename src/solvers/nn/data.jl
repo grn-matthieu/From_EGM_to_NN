@@ -8,6 +8,7 @@ module NNData
 
 using Random
 using ..Determinism: make_rng
+using ..NNDevice: to_device
 
 export grid_minibatches
 
@@ -24,6 +25,7 @@ struct GridMB{TA,TY,TT,TR,TEl}
     N::Int
     drop_last::Bool
     antithetic::Bool
+    device::Symbol
 end
 
 Base.length(it::GridMB) = it.drop_last ? div(it.N, it.batch) : cld(it.N, it.batch)
@@ -80,6 +82,17 @@ function _iterate_with_state(
         @inbounds Y[1, :] = it.targets[CartesianIndex.(ia, iy)]
     end
 
+    # Move batch to device if requested
+    if it.device !== :cpu
+        try
+            Xd = to_device(X, it.device)
+            Yd = to_device(Y, it.device)
+            return (Xd, Yd), (ord, last + 1)
+        catch
+            return (X, Y), (ord, last + 1)
+        end
+    end
+
     return (X, Y), (ord, last + 1)
 end
 
@@ -124,6 +137,7 @@ function grid_minibatches(
     seed::Union{Nothing,Integer} = nothing,
     drop_last::Bool = false,
     antithetic::Bool = false,
+    device::Symbol = :cpu,
 )
     Na = length(a_grid)
     Ny = length(y_grid)
@@ -155,6 +169,7 @@ function grid_minibatches(
         N,
         drop_last,
         antithetic,
+        device,
     )
 end
 

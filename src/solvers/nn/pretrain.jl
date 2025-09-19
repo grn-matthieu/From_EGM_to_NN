@@ -82,6 +82,7 @@ function fit_to_EGM!(model_in, policy, cfg; epochs::Int, batch::Int, seed::Int =
         projection_kind_raw isa Symbol ? projection_kind_raw : Symbol(projection_kind_raw)
 
     # Assemble minibatch iterator over (a,y)
+    device = get(get(cfg, :solver, Dict{Symbol,Any}()), :device, :cpu)
     mb = grid_minibatches(
         a_grid,
         y_grid;
@@ -90,6 +91,7 @@ function fit_to_EGM!(model_in, policy, cfg; epochs::Int, batch::Int, seed::Int =
         shuffle = true,
         rng = rng,
         drop_last = false,
+        device = device,
     )
 
     function l2_loss_and_state(ps_local, st_local, X, targets)

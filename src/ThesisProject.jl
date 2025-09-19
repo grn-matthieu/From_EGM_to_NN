@@ -46,6 +46,7 @@ include("solvers/perturbation/kernel.jl")
 include("solvers/nn/mixedprec.jl")
 include("solvers/nn/loss.jl")          # NNLoss
 include("solvers/nn/constraints.jl")   # NNConstraints
+include("solvers/nn/device.jl")        # NNDevice (device helpers for GPU/CPU)
 include("solvers/nn/init.jl")          # NNInit
 include("solvers/nn/data.jl")          # NNData
 include("solvers/nn/train.jl")         # NNTrain

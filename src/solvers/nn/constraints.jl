@@ -6,7 +6,7 @@ unconstrained outputs to feasible savings `a′ ≥ a_min`).
 """
 module NNConstraints
 
-export softplus, project_savings_softplus, project_savings_clip, project_savings
+export softplus, project_savings_softplus, project_savings_clip, project_savings, smooth_pos
 
 """
     softplus(x)
@@ -90,6 +90,22 @@ Kinds:
     return kind === :softplus ? project_savings_softplus(ap_raw, a_min) :
            kind === :clip ? project_savings_clip(ap_raw, a_min) :
            error("unknown projection kind")
+end
+
+"""
+    smooth_pos(x; eps=1e-8, beta=20.0)
+
+Smooth positivity helper that returns elementwise values strictly greater than
+`eps` while keeping non-zero derivatives. Implemented using the module
+`softplus` with a sharpness parameter `beta` by scaling the input and
+rescaling the output to keep magnitudes comparable.
+
+Callers that previously used a hard lower bound of `1e-12` can pass
+`eps=1e-12` to preserve the same numerical floor while gaining smooth
+gradients.
+"""
+@inline function smooth_pos(x; eps::Float64 = 1e-8, beta::Float64 = 20.0)
+    return eps .+ (softplus.(beta .* x) ./ beta)
 end
 
 end # module

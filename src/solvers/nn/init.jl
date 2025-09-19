@@ -10,6 +10,7 @@ using Lux
 using Optimisers
 
 using ..Determinism: make_rng, derive_seed, canonicalize_cfg
+using ..NNDevice: move_tree_to_device, is_cuda_available
 
 export NNState, build_nn, init_state
 
@@ -78,6 +79,18 @@ function init_state(cfg::AbstractDict)::NNState
 
     # Lux params/state
     ps, st = Lux.setup(rng_params, model)
+
+    # Move parameters/state to device if requested
+    solver_cfg = get(cfg, :solver, Dict{Symbol,Any}())
+    device = get(solver_cfg, :device, :cpu)
+    if device === :cuda && !is_cuda_available()
+        @warn "CUDA requested but not available; falling back to CPU"
+        device = :cpu
+    end
+    if device !== :cpu
+        ps = move_tree_to_device(ps, device)
+        st = move_tree_to_device(st, device)
+    end
 
     # Optimiser (default Adam; lr from cfg if provided)
     solver_cfg = get(cfg, :solver, Dict{Symbol,Any}())

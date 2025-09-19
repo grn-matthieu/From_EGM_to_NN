@@ -39,6 +39,7 @@ Options:
     --η_min  Min LR for cosine
     --step_size Step size for step schedule
     --γ    Decay factor for step schedule
+    --device  Device to run on (cpu|cuda). If unset, uses config value or defaults to cpu in smoke mode.
     --all-methods   Run benchmarks for all supported methods (egm,vi,nn)
     --methods       Comma-separated list of methods to run (egm,vi,nn)
 """
@@ -68,6 +69,7 @@ function parse_args(argv::Vector{String})::NamedTuple
         "γ" => nothing,
         "all_methods" => false,
         "methods" => nothing,
+        "device" => nothing,
     )
     i = 1
     while i ≤ length(argv)
@@ -92,6 +94,7 @@ function parse_args(argv::Vector{String})::NamedTuple
         a == "--η_min" && (opt["η_min"] = parse(Float64, argv[i+=1]); i += 1; continue)
         a == "--step_size" && (opt["step_size"] = parse(Int, argv[i+=1]); i += 1; continue)
         a == "--γ" && (opt["γ"] = parse(Float64, argv[i+=1]); i += 1; continue)
+        a == "--device" && (opt["device"] = argv[i+=1]; i += 1; continue)
         a == "--all-methods" && (opt["all_methods"] = true; i += 1; continue)
         a == "--methods" && (opt["methods"] = argv[i+=1]; i += 1; continue)
         error("Unknown arg: $a")
@@ -117,6 +120,7 @@ function parse_args(argv::Vector{String})::NamedTuple
         γ = opt["γ"],
         all_methods = opt["all_methods"],
         methods = opt["methods"],
+        device = opt["device"],
     )
 end
 
@@ -176,6 +180,10 @@ function apply_overrides!(cfg::AbstractDict, opt)::Nothing
     end
     if opt.γ !== nothing
         solver_cfg[:γ] = opt.γ
+    end
+    if opt.device !== nothing
+        # allow string like "cpu" or "cuda"
+        solver_cfg[:device] = Symbol(opt.device)
     end
 
     cfg[:solver] = solver_cfg
@@ -260,7 +268,6 @@ function run_nn(
         cfg_local[:random] = get!(cfg_local, :random, Dict{Symbol,Any}())
         cfg_local[:random][:seed] = seed
     end
-    solver_cfg[:device] = :cpu
     cfg_local[:solver] = solver_cfg
 
     t0 = Dates.now()
@@ -353,8 +360,10 @@ function main(args::Vector{String} = ARGS)
         else
             solver_cfg[:batch] = 64
         end
-        # Try to respect any device flag; harmless if unused elsewhere
-        solver_cfg[:device] = :cpu
+        # If no device specified by CLI or config, default to CPU in smoke mode
+        if !haskey(solver_cfg, :device)
+            solver_cfg[:device] = :cpu
+        end
     end
     cfg[:solver] = solver_cfg
 

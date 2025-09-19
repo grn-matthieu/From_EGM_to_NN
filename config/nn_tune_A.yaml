@@ -1,0 +1,44 @@
+model:
+  name: cs
+
+params:
+  β: 0.96
+  σ: 2.0
+  r: 0.02
+  y: 1.0
+  ρ_shock: 0.95
+  σ_shock: 0.10
+
+grids:
+  Na: 300
+  a_min: 0.0
+  a_max: 20.0
+
+shocks:
+  active: false
+
+utility:
+  u_type: CRRA
+
+solver:
+  method: NN
+  tol: 1.0e-6
+  maxit: 10000
+  verbose: true
+  interp_kind: linear
+  Nval: 50
+  # NN training hyperparameters
+  epochs: 400        # total epochs (pretrain uses half by default)
+  batch: 128
+  lr: 5.0e-5
+  hidden: [128, 128]
+  pretrain: true
+  clip_norm: null
+  stabilize: true
+  stab_method: log1p_square
+  residual_weighting: exp
+  weight_α: 10.0
+  weight_κ: 20.0
+
+random:
+  seed: 1234
