@@ -1,14 +1,20 @@
-# Ignore all outputs from robustness and other runs
+# Experiment outputs and generated artifacts
 runs/
+outputs/
+!outputs/
+!outputs/README.md
+results/
+!results/
+!results/.gitkeep
+
+# Asset handling
 *.png
-# Allow committed PNGs in docs (e.g., graphs/images)
 !docs/*.png
 !docs/**/*.png
 
-# Keep PNGs in outputs ignored
-outputs/*.png
-outputs/**/*.png
-*.csv
+# Data files produced by experiments
+outputs/**/*.csv
+results/**/*.csv
 
 # Ignore Julia compiled files and environments
 *.jl.cov
@@ -37,9 +43,8 @@ Thumbs.db
 # Ignore info files
 *.info
 
-# Ignore xlsx files
-*.xlsx
-# Local temp files
+# Local temp files and CI leftovers
 tmp*.txt
 temp_head.txt
+*.xlsx
 10_day_plan_maxgranular_full.xlsx
