@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [ main, master ]
+    tags: [ 'v*' ]
   pull_request:
 
 jobs:
@@ -80,3 +81,27 @@ jobs:
 
       - name: Smoke (deterministic and stochastic)
         run: julia --project=. scripts/ci/smoke.jl
+
+  release-artifacts:
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.11'
+
+      - name: Instantiate project
+        run: julia --project=. -e 'using Pkg; Pkg.instantiate()'
+
+      - name: Generate publication figures
+        run: julia --project=. scripts/experiments/make_figures_simple.jl
+
+      - name: Archive docs/figures
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: figures-${{ github.ref_name }}
+          path: docs/figures
