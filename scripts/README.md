@@ -8,7 +8,7 @@
 | `experiments/compare_methods_deviations.jl` | Compare perturbation, projection, and NN responses around steady state | Produces deviation tables in `outputs/diagnostics` |
 | `experiments/stress_all_methods.jl` | Stress test methods on kinks and occasionally binding constraints | Heavy runtime; batch configurable |
 | `experiments/generate_baseline_csv.jl` | Export baseline residuals and policies for paper tables | CSVs in `results/benchmarks` |
-| `dev/run_nn_baseline.jl` | Convenience launcher for the NN training loop | Mirrors `bench_mixedprecision` options |
+| `dev/run_nn_baseline.jl` | Convenience launcher for the NN training loop | Run-time options mirror training helpers |
 | `dev/run_pretrain.jl` | Run NN pretraining against EGM targets | Requires existing EGM solution |
 | `dev/coverage_report.jl` | Generate lcov coverage artefacts | Use after `Pkg.test()` with coverage enabled |
 

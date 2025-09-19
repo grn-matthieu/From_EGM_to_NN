@@ -69,7 +69,7 @@ All keys are symbolised inside Julia. Use `validate_config(cfg)` to receive desc
 | Stochastic shocks                 | ✅  | ✅         | ⚠️ (linear)  | ✅             |
 | Handles kinks / non-smoothness    | ✅  | ✅         | ❌           | ✅             |
 | Automatic differentiation         | ❌  | ❌         | ⚠️ (manual)  | ✅ (Zygote)    |
-| Mixed-precision support           | ❌  | ❌         | ❌           | ✅             |
+| Mixed-precision support           | ❌  | ❌         | ❌           | Deprecated     |
 | CSV logging built-in              | ❌  | ❌         | ❌           | ✅ (optional)  |
 
 ## Reproducibility
@@ -102,7 +102,7 @@ julia --project -e 'using Pkg; Pkg.test()'
 Additional property tests check:
 - EGM policy monotonicity by verifying marginal utility ordering over random grids.
 - Projection residuals at off-grid test points.
-- Neural-network feasibility and mixed-precision parity on representative draws (skipped when hardware support is absent).
+- Neural-network feasibility on representative draws.
 
 Install Aqua.jl and JET.jl for deeper hygiene/type checks:
 ```bash
@@ -117,7 +117,7 @@ This repository is released under the [MIT License](LICENSE). When using it in a
 
 - **Slow first load:** ensure you have Julia ≥1.11; precompile reduces latency after the first `using ThesisProject`.
 - **BLAS multithreading issues:** set `JULIA_NUM_THREADS` to the desired value or `1` for deterministic comparisons.
-- **GPU mixed precision:** currently, only CPU mixed precision is exercised; GPU kernels can be added by extending `solvers/nn/mixedprec.jl`.
+- **Mixed precision:** explicit mixed-precision utilities have been removed from the public API. Use `NNUtils.to_fp32` to convert tensors back to Float32 where needed. If you require GPU mixed-precision kernels, extend `src/solvers/nn/` with project-specific implementations.
 
 Happy experimenting!
 
