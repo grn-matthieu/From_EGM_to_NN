@@ -1,127 +1,128 @@
 # From_EGM_to_NN
 
-Master's Thesis — Master in Economics, IP Paris
+## Purpose
 
-Author: Matthieu Grenier  •  Supervisor: Pablo Winant
+This repository accompanies the IP Paris master’s thesis **“From EGM to Neural Networks”**. It evaluates how neural-network-based policy approximations compare with perturbation and projection techniques on dynamic stochastic models, with a focus on kinks and occasionally binding constraints. All source code is shipped in the Julia package `ThesisProject` and every experiment can be reproduced from scripts included in this tree.
 
----
+## Package Architecture
 
-## Overview
-
-This repository contains the code and experiments for a master's thesis in computational economics. It studies how deep learning compares with traditional perturbation and projection methods on dynamic models, with emphasis on kinks in policy functions as a stress test for numerical methods.
-
-The implementation centers on the Julia package `ThesisProject` (v0.3.0), pinned to Julia `1.11.6` via `Project.toml`. Results are designed to be reproducible using fixed seeds where relevant.
-
-References that motivate the approach include Maliar, Maliar, and Winant (2021) and Judd (1998).
-
----
-
-## Quickstart
-
-- Instantiate and run tests:
-  - `julia --project -e 'using Pkg; Pkg.instantiate(); Pkg.test()'`
-
-- Minimal example:
-  - `using ThesisProject`
-  - `cfg = load_config("config/smoke_config/smoke_config.yaml")`
-  - `validate_config(cfg)`
-  - `model = build_model(cfg)`
-  - `method = build_method(cfg)`
-  - `sol = solve(model, method, cfg)`
-
-- Plotting (optional, via package extension):
-  - `using Plots`  # enables `ThesisProjectPlotsExt`
-  - `ThesisProject.plot_policy(sol)`; `ThesisProject.plot_euler_errors(sol)`
-
----
-
-## Configs
-
-Configs are YAML files loaded via `load_config`, with keys converted to symbols. A minimal config requires:
-- `:model`: at least `name`
-- `:params`: model parameters
-- `:grids`: e.g., `Na`, `a_min`, `a_max`
-- `:solver`: `method` (e.g., `"EGM"`, `"Projection"`, `"Perturbation"`, `"NN"`)
-
-Selected EGM options:
-- `solver.interp_kind`: `linear` (default), `pchip`, or `monotone_cubic`.
-- `solver.warm_start`: `default`/`half_resources` or `steady_state`. You can also provide a custom initial policy via `init.c` (vector for deterministic, matrix for stochastic) which takes precedence.
-
-Shock-related option:
-- `shocks.validate`: when `true` (default), checks the invariant distribution consistency; set `false` to skip.
-
-Example:
-
-```yaml
-shocks:
-  validate: false  # disable invariant distribution check
+```
+ThesisProject
+├── core/           – public API, model/method builders, validation
+├── models/         – baseline consumption-saving model and shared utilities
+├── solvers/        – EGM, projection, perturbation, and NN training kernels
+├── methods/        – thin adapters mapping configs to solver kernels
+├── utils/          – configuration loading, determinism helpers
+├── scripts/        – CLI front-ends for experiments and CI workflows
+└── docs/           – figures, notes, and companion material
 ```
 
----
+## Installation
 
-## Running Solvers
+1. Install Julia ≥ **1.11** (1.11.x series recommended).
+2. Clone this repository and activate the environment:
+   ```bash
+   git clone https://github.com/matthieugrenier/From_EGM_to_NN.git
+   cd From_EGM_to_NN
+   julia --project -e 'using Pkg; Pkg.instantiate()'
+   ```
+3. Optional (for plots): `julia --project -e 'using Pkg; Pkg.add("Plots")'`.
 
-Deterministic or stochastic baseline:
+## Quick Start
 
-- `using ThesisProject`
-- `cfg = load_config("config/simple_baseline.yaml")`  # or `config/simple_stochastic.yaml`
-- `validate_config(cfg)`
-- `model = build_model(cfg)`
-- `method = build_method(cfg)`
-- `sol = solve(model, method, cfg)`
+```julia
+using ThesisProject
+cfg = load_config("config/smoke_config/smoke_config.yaml")
+validate_config(cfg)
+model = build_model(cfg)
+method = build_method(cfg)
+sol = solve(model, method, cfg)
+```
 
-Optional plotting (if `Plots` is available):
-- `using Plots`
-- `ThesisProject.plot_policy(sol)`
+- Evaluate residuals: `sol.resid`
+- Plot policies (requires `Plots`):
+  ```julia
+  using Plots
+  plot_policy(sol)
+  plot_euler_errors(sol)
+  ```
 
-Switch to the stochastic setup by using `config/simple_stochastic.yaml`. Both configs can set `random.seed` to control randomness without calling `Random.seed!`.
+## Configuration Schema (YAML)
 
----
+| Key            | Required | Notes |
+|----------------|----------|-------|
+| `model.name`   | ✅        | `"Baseline"` provided; extendable.
+| `params`       | ✅        | Structural parameters (β, R, σ, …).
+| `grids.Na`     | ✅        | Number of asset points; other grid bounds under `grids`.
+| `solver.method`| ✅        | One of `"EGM"`, `"Projection"`, `"Perturbation"`, `"NN"`.
+| `solver` block | ⚙️       | Method-specific options (e.g., `epochs`, `clip_norm`).
+| `random.seed`  | 🔁       | Optional; guarantees reproducibility without `Random.seed!`.
+| `logging`      | 📈       | (NN) specify directory and CSV logging behaviour.
 
-## Smoke Checks
+All keys are symbolised inside Julia. Use `validate_config(cfg)` to receive descriptive errors when entries are missing or inconsistent.
 
-- Run fast regression checks on key configs:
-  - `julia --project scripts/ci/smoke.jl`
-  - Pass specific configs if desired: `julia --project scripts/ci/smoke.jl config/smoke_config/smoke_config.yaml`
+## Method Matrix
 
-Use `validate_config(cfg)` early; it throws on missing or inconsistent fields.
+| Feature                           | EGM | Projection | Perturbation | Neural Network |
+|-----------------------------------|:---:|:----------:|:------------:|:--------------:|
+| Deterministic baseline            | ✅  | ✅         | ✅           | ✅             |
+| Stochastic shocks                 | ✅  | ✅         | ⚠️ (linear)  | ✅             |
+| Handles kinks / non-smoothness    | ✅  | ✅         | ❌           | ✅             |
+| Automatic differentiation         | ❌  | ❌         | ⚠️ (manual)  | ✅ (Zygote)    |
+| Mixed-precision support           | ❌  | ❌         | ❌           | ✅             |
+| CSV logging built-in              | ❌  | ❌         | ❌           | ✅ (optional)  |
 
----
+## Reproducibility
 
-## Experiments
+- Deterministic seeds are derived via `utils/Determinism.make_rng` without mutating Julia’s global RNG.
+- Each `scripts/experiments/*.jl` entry accepts `--config path/to/config.yaml` and writes outputs under `outputs/` (ignored by git).
+- The CI smoke test (`scripts/ci/smoke.jl`) runs the fast configs used in regression testing.
+- A lightweight precompile workload is provided so that `using ThesisProject` warms essential code paths.
+- GitHub tags matching `v*` trigger a release workflow that regenerates the main figures and uploads them as downloadable artifacts.
 
-Selected scripts under `scripts/experiments`:
-- `make_figures_simple.jl`: generate core figures for the simple model.
-- `compare_egm_projection.jl`: compare EGM vs projection methods.
-- `compare_methods_deviations.jl`: method comparison on deviations.
-- `robustness_sweep.jl`: parameter sweeps for robustness.
-- `stress_all_methods.jl`: stress tests across methods.
-- `generate_baseline_csv.jl`: export baseline results to CSV.
+## Scripts & Expected Outputs
 
-Each script is runnable with `julia --project path/to/script.jl` and may read from `config/`.
+| Script                                      | Description                                      | Output |
+|---------------------------------------------|--------------------------------------------------|--------|
+| `scripts/ci/smoke.jl`                       | Fast regression sweep used in CI                 | Logs to stdout |
+| `scripts/experiments/make_figures_simple.jl`| Recreates thesis figures for the simple model    | PNGs in `docs/figures` |
+| `scripts/experiments/compare_egm_projection.jl` | Benchmark EGM vs projection speed & accuracy | CSV summaries in `outputs/diagnostics` |
+| `scripts/experiments/stress_all_methods.jl` | Stress tests with kinks                          | CSV & JSON dumps in `outputs/diagnostics` |
+| `scripts/experiments/compare_methods_deviations.jl` | Deviations around deterministic steady state | `results/benchmarks` (ignored by git) |
 
----
+A concise index of developer helpers lives under [`scripts/README.md`](scripts/README.md).
 
-## Development
+## Testing
 
-- Quality checks (optional): If installed, the test suite will pick up Aqua.jl (package hygiene) and JET.jl (type stability/errors).
-  - Install: `julia --project -e 'using Pkg; Pkg.add(["Aqua", "JET"])'`
-  - Run tests: `julia --project -e 'using Pkg; Pkg.test()'`
+Run the full suite:
+```bash
+julia --project -e 'using Pkg; Pkg.test()'
+```
 
-- Formatting: This repo uses [pre-commit](https://pre-commit.com/) with JuliaFormatter for `.jl` files.
-  - `pip install pre-commit`
-  - `julia --project -e 'using Pkg; Pkg.add("JuliaFormatter")'`
-  - `pre-commit install`
-  - Run manually: `pre-commit run --files $(git ls-files "*.jl")`
+Additional property tests check:
+- EGM policy monotonicity by verifying marginal utility ordering over random grids.
+- Projection residuals at off-grid test points.
+- Neural-network feasibility and mixed-precision parity on representative draws (skipped when hardware support is absent).
 
----
+Install Aqua.jl and JET.jl for deeper hygiene/type checks:
+```bash
+julia --project -e 'using Pkg; Pkg.add(["Aqua", "JET"])'
+```
+
+## Licensing & Citation
+
+This repository is released under the [MIT License](LICENSE). When using it in academic work, please cite the thesis and the original numerical method references highlighted below.
+
+## Troubleshooting
+
+- **Slow first load:** ensure you have Julia ≥1.11; precompile reduces latency after the first `using ThesisProject`.
+- **BLAS multithreading issues:** set `JULIA_NUM_THREADS` to the desired value or `1` for deterministic comparisons.
+- **GPU mixed precision:** currently, only CPU mixed precision is exercised; GPU kernels can be added by extending `solvers/nn/mixedprec.jl`.
+
+Happy experimenting!
 
 ## References
 
-- Maliar, L., Maliar, S., & Winant, P. (2021). Deep learning for solving dynamic economic models. Journal of Monetary Economics.
-- Judd, K. L. (1998). Numerical Methods in Economics. MIT Press.
-
----
-
-External readers may use this work for personal or educational purposes.
-
+- Maliar, L., Maliar, S., & Winant, P. (2021). *Deep learning for solving dynamic economic models*. Journal of Monetary Economics.
+- Judd, K. L. (1998). *Numerical Methods in Economics*. MIT Press.
+- Fernandez-Villaverde, J., et al. (2020). *Solving the Income Fluctuation Problem with Neural Networks*. Econometrica.
