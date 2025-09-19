@@ -6,7 +6,7 @@ and their in-place variants, used for accuracy metrics and training losses.
 """
 module EulerResiduals
 
-using ..CommonInterp: interp_linear!
+using ..CommonInterp: interp_linear!, interp_linear
 using ..API
 
 export euler_resid_det,
@@ -114,25 +114,6 @@ function euler_resid_stoch!(
     σ = model_params.σ
     R = (1 + model_params.r)
 
-    # simple scalar linear interpolation helper over a_grid
-    lin1(x::AbstractVector{<:Real}, y::AbstractVector{<:Real}, xq::Real) = begin
-        n = length(x)
-        if xq <= x[1]
-            return y[1]
-        elseif xq >= x[end]
-            return y[end]
-        else
-            j = searchsortedfirst(x, xq)
-            j = clamp(j, 2, n)
-            x0 = x[j-1]
-            x1 = x[j]
-            y0 = y[j-1]
-            y1 = y[j]
-            t = (xq - x0) / (x1 - x0)
-            return (1 - t) * y0 + t * y1
-        end
-    end
-
     @inbounds for j = 1:Nz
         y = exp(z_grid[j])
         for i = 1:Na
@@ -140,7 +121,7 @@ function euler_resid_stoch!(
             ap = R * a_grid[i] + y - c_ij
             Emu = 0.0
             for jp = 1:Nz
-                cp = lin1(a_grid, view(c, :, jp), ap)
+                cp = interp_linear(a_grid, view(c, :, jp), ap)
                 Emu += Pz[j, jp] * (max(cp, 1e-12) / c_ij)^(-σ)
             end
             resid[i, j] = abs(1.0 - β * R * Emu)

@@ -8,11 +8,33 @@ call sites.
 module CommonInterp
 
 export InterpKind, LinearInterp, MonotoneCubicInterp
-export interp_linear!, interp_pchip!
+export interp_linear!, interp_linear, interp_pchip!
 
 abstract type InterpKind end
 struct LinearInterp <: InterpKind end
 struct MonotoneCubicInterp <: InterpKind end
+
+Base.@propagate_inbounds function _interp_linear_scalar(
+    u::Real,
+    x::AbstractVector,
+    y::AbstractVector,
+    n::Int,
+)
+    if u <= x[1]
+        return y[1]
+    elseif u >= x[n]
+        return y[n]
+    else
+        j = searchsortedfirst(x, u)
+        j = clamp(j, 2, n)
+        x0 = x[j-1]
+        x1 = x[j]
+        y0 = y[j-1]
+        y1 = y[j]
+        t = (u - x0) / (x1 - x0)
+        return (1 - t) * y0 + t * y1
+    end
+end
 
 """
     interp_linear!(out, x, y, xq)
@@ -29,24 +51,31 @@ function interp_linear!(
     @assert length(x) == length(y)
     n = length(x)
     @inbounds for k in eachindex(xq)
-        u = xq[k]
-        if u <= x[1]
-            out[k] = y[1]
-        elseif u >= x[end]
-            out[k] = y[end]
-        else
-            j = searchsortedfirst(x, u)
-            j = clamp(j, 2, n)
-            x0 = x[j-1]
-            x1 = x[j]
-            y0 = y[j-1]
-            y1 = y[j]
-            t = (u - x0) / (x1 - x0)
-            out[k] = (1 - t) * y0 + t * y1
-        end
+        out[k] = _interp_linear_scalar(xq[k], x, y, n)
     end
     return out
 end
+
+"""
+    interp_linear(x, y, xq)
+
+Linear interpolation of points `(x, y)` at query locations `xq`. Accepts a scalar
+or vector `xq` and returns the interpolated value(s).
+"""
+function interp_linear(x::AbstractVector, y::AbstractVector, xq::AbstractVector)
+    @assert length(x) == length(y)
+    T = promote_type(eltype(y), eltype(xq))
+    out = similar(xq, T)
+    interp_linear!(out, x, y, xq)
+    return out
+end
+
+function interp_linear(x::AbstractVector, y::AbstractVector, xq::Real)
+    @assert length(x) == length(y)
+    return _interp_linear_scalar(xq, x, y, length(x))
+end
+
+
 
 """
     interp_pchip!(out, x, y, xq)

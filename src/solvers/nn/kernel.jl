@@ -28,6 +28,7 @@ using ..NNConstraints: project_savings, project_savings_clip
 using ..NNInit: init_state, NNState
 using ..NNData: grid_minibatches
 using ..NNPretrain: fit_to_EGM!
+using ..CommonInterp: interp_linear
 using ..API: build_model, build_method, solve
 using Statistics: mean
 using Printf
@@ -417,24 +418,6 @@ function solve_nn_stoch(
     egm_sol = solve(mobj, egm_method, egm_cfg)
     a_next_egm = egm_sol.policy[:a].value  # (Na, Nz)
 
-    # Efficient 1D linear interpolation on a-grid
-    lin1(x::AbstractVector{<:Real}, y::AbstractVector{<:Real}, xq::Real) = begin
-        n = length(x)
-        if xq <= x[1]
-            return y[1]
-        elseif xq >= x[end]
-            return y[end]
-        else
-            j = searchsortedfirst(x, xq)
-            j = clamp(j, 2, n)
-            x0 = x[j-1]
-            x1 = x[j]
-            y0 = y[j-1]
-            y1 = y[j]
-            t = (xq - x0) / (x1 - x0)
-            return (1 - t) * y0 + t * y1
-        end
-    end
     # Map y to nearest z index
     function egm_policy(a_vec, y_vec)
         out = similar(a_vec)
@@ -442,7 +425,7 @@ function solve_nn_stoch(
             z = log(y_vec[k])
             j = searchsortedfirst(z_grid, z)
             j = clamp(j, 1, Nz)
-            out[k] = lin1(a_grid, view(a_next_egm, :, j), a_vec[k])
+            out[k] = interp_linear(a_grid, view(a_next_egm, :, j), a_vec[k])
         end
         return out
     end
