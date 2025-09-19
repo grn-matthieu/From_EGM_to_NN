@@ -1,0 +1,40 @@
+[model]
+name = "BaselineConsumerSaving"
+
+[params]
+beta = 0.96
+sigma = 2.0
+r = 0.02
+y = 1.0
+
+[grids.a]
+min = 0.0
+max = 20.0
+N = 64
+
+[shocks]
+active = true
+method = "rouwenhorst"
+rho_shock = 0.9
+s_shock = 0.10
+Nz = 7
+validate = true
+
+[utility]
+u_type = "CRRA"
+
+[solver]
+method = "NN"
+epochs = 20
+batch = 128
+lr = 1.0e-3
+projection_kind = "softplus"
+stabilize = true
+stab_method = "log1p_square"
+residual_weighting = "none"
+weight_alpha = 5.0
+weight_kappa = 20.0
+pretrain = false
+
+[random]
+seed = 1234

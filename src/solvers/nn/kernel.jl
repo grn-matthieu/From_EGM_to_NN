@@ -50,6 +50,20 @@ function _solver_hyper(cfg)
     pk = get(s, :projection_kind, :softplus)
     sm = get(s, :stab_method, :log1p_square)
     rw = get(s, :residual_weighting, :none)
+    pre_raw = get(s, :pretrain, true)
+    pretrain = if pre_raw isa Bool
+        pre_raw
+    elseif pre_raw isa Integer
+        pre_raw != 0
+    elseif pre_raw isa AbstractString
+        !(strip(lowercase(pre_raw)) in ("false", "0", "off", "no"))
+    elseif pre_raw isa Symbol
+        !(strip(lowercase(String(pre_raw))) in ("false", "0", "off", "no"))
+    elseif pre_raw === nothing
+        false
+    else
+        pre_raw !== false
+    end
     return (
         epochs = Int(get(s, :epochs, 100)),
         batch = Int(get(s, :batch, 128)),
@@ -61,6 +75,7 @@ function _solver_hyper(cfg)
         residual_weighting = rw isa Symbol ? rw : Symbol(rw),
         weight_alpha = float(get(s, :weight_alpha, 5.0)),
         weight_kappa = float(get(s, :weight_kappa, 20.0)),
+        pretrain = pretrain,
         seed = get(r, :seed, nothing),
     )
 end
@@ -403,35 +418,36 @@ function solve_nn_stoch(
         )
     end
 
-    # --- Supervised pretraining to EGM policy (robust, improves residuals) ---
-    # Build an EGM baseline solution to generate targets for (a, z)
-    egm_cfg = try
-        deepcopy(cfg)
-    catch
-        Dict{Symbol,Any}(pairs(cfg))
-    end
-    egm_solver = get(egm_cfg, :solver, Dict{Symbol,Any}())
-    egm_solver[:method] = :EGM
-    egm_cfg[:solver] = egm_solver
-    mobj = build_model(egm_cfg)
-    egm_method = build_method(egm_cfg)
-    egm_sol = solve(mobj, egm_method, egm_cfg)
-    a_next_egm = egm_sol.policy[:a].value  # (Na, Nz)
-
-    # Map y to nearest z index
-    function egm_policy(a_vec, y_vec)
-        out = similar(a_vec)
-        @inbounds for k in eachindex(a_vec)
-            z = log(y_vec[k])
-            j = searchsortedfirst(z_grid, z)
-            j = clamp(j, 1, Nz)
-            out[k] = interp_linear(a_grid, view(a_next_egm, :, j), a_vec[k])
-        end
-        return out
-    end
-    # Run pretraining epochs (use up to half the budget, at least 25)
-    pre_epochs = max(25, fld(hyper.epochs, 2))
+    # --- Optional supervised pretraining to EGM policy (robust, improves residuals) ---
+    pre_epochs = hyper.pretrain ? max(25, fld(hyper.epochs, 2)) : 0
     if pre_epochs > 0
+        # Build an EGM baseline solution to generate targets for (a, z)
+        egm_cfg = try
+            deepcopy(cfg)
+        catch
+            Dict{Symbol,Any}(pairs(cfg))
+        end
+        egm_solver = get(egm_cfg, :solver, Dict{Symbol,Any}())
+        egm_solver[:method] = :EGM
+        egm_cfg[:solver] = egm_solver
+        mobj = build_model(egm_cfg)
+        egm_method = build_method(egm_cfg)
+        egm_sol = solve(mobj, egm_method, egm_cfg)
+        a_next_egm = egm_sol.policy[:a].value  # (Na, Nz)
+
+        # Map y to nearest z index
+        function egm_policy(a_vec, y_vec)
+            out = similar(a_vec)
+            @inbounds for k in eachindex(a_vec)
+                z = log(y_vec[k])
+                j = searchsortedfirst(z_grid, z)
+                j = clamp(j, 1, Nz)
+                out[k] = interp_linear(a_grid, view(a_next_egm, :, j), a_vec[k])
+            end
+            return out
+        end
+
+        # Run pretraining epochs (use up to half the budget, at least 25)
         seed_pre = derive_seed(master_rng, "nn/kernel/pretrain")
         fit_to_EGM!(
             st,
@@ -537,6 +553,9 @@ function solve_nn_stoch(
         epochs = Int(hyper.epochs),
         batch = Int(hyper.batch),
         lr = float(hyper.lr),
+        pretrain = hyper.pretrain,
+        pretrain_epochs = Int(pre_epochs),
+        tune_epochs = Int(tune_epochs),
         last_epoch_loss = float(isfinite(last_loss) ? last_loss : loss_val),
     )
 
