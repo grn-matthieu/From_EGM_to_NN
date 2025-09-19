@@ -18,7 +18,7 @@ Exports: `solve_nn_det`, `solve_nn_stoch`.
 module NNKernel
 
 using Lux
-using Zygote
+using Lux.Training: TrainState, single_train_step!, AutoZygote
 using Optimisers
 using Random
 
@@ -82,7 +82,7 @@ function _solver_hyper(cfg)
 end
 
 """
-    _batch_loss_det(ps, st, model, X, p, a_min; hyper)
+    _batch_loss_det(model, ps, st, X, p, a_min; hyper)
 
 Differentiable per-batch loss for deterministic model based on Euler residuals.
 The NN predicts next assets a' from inputs. We compute c = y + R a - a' (projected),
@@ -90,7 +90,7 @@ then a second forward pass at (a', y) to compute c', forming residuals
     |1 - β R (c/c')^σ|.
 Returns a scalar Float64 loss.
 """
-function _batch_loss_det(ps, st, model, X, p, a_min; hyper)
+function _batch_loss_det(model, ps, st, X, p, a_min; hyper)
     # Inputs: X is either 1xB (a) or 2xB (a,y). Deterministic case => treat y scalar p.y
     a = @view X[1, :]
     B = size(X, 2)
@@ -102,28 +102,30 @@ function _batch_loss_det(ps, st, model, X, p, a_min; hyper)
     catch
         size(getfield(ps, 1).weight, 2)
     end
+
     # First forward: predict a' at (a, y) using expected input dimension
     Xin1 = in_dim_expected == 1 ? @views(view(X, 1:1, :)) : X
-    ŷ1_raw, st2 = Lux.apply(model, Xin1, ps, st)
-    a′ = project_savings(ŷ1_raw, a_min; kind = hyper.projection_kind)
+    y_hat1, st2 = Lux.apply(model, Xin1, ps, st)
+    ap = project_savings(y_hat1, a_min; kind = hyper.projection_kind)
 
     # Current consumption
     R = 1 + p.r
-    c = smooth_pos.(yvec .+ R .* a .- a′; eps = 1.0e-12, beta = 1.0)
+    c = smooth_pos.(yvec .+ R .* a .- ap; eps = 1.0e-12, beta = 1.0)
 
     # Second forward: predict a" at (a′, y)
-    Xin2 = in_dim_expected == 1 ? a′ : vcat(a′, reshape(yvec, 1, :))
-    ŷ2_raw, _ = Lux.apply(model, Xin2, ps, st2)
-    a″ = project_savings(ŷ2_raw, a_min; kind = hyper.projection_kind)
-    c′ = smooth_pos.(yvec .+ R .* a′ .- a″; eps = 1.0e-12, beta = 1.0)
+    Xin2 = in_dim_expected == 1 ? ap : vcat(ap, reshape(yvec, 1, :))
+    y_hat2, st3 = Lux.apply(model, Xin2, ps, st2)
+    ap_next = project_savings(y_hat2, a_min; kind = hyper.projection_kind)
+    c_next = smooth_pos.(yvec .+ R .* ap .- ap_next; eps = 1.0e-12, beta = 1.0)
 
     # Euler residuals for the batch
-    β = getfield(p, Symbol("β"))
-    σ = getfield(p, Symbol("σ"))
-    resid = abs.(1 .- β .* R .* (c ./ c′) .^ σ)
+    beta = getfield(p, Symbol("β"))
+    sigma = getfield(p, Symbol("σ"))
+    resid = abs.(1 .- beta .* R .* (c ./ c_next) .^ sigma)
 
     # Assemble loss with optional stabilization/weights near a_min
-    return assemble_euler_loss(resid, a′, a_min, hyper)
+    loss = assemble_euler_loss(resid, ap, a_min, hyper)
+    return loss, st3
 end
 
 """
@@ -149,25 +151,24 @@ function _train_det!(state, a_grid, p; hyper, y_scalar, master_rng, device::Symb
         device = device,
     )
 
+    backend = AutoZygote()
+    a_min = first(a_grid)
+    objective = let hyper = hyper, p = p, a_min = a_min
+        (model, ps, st, X) -> begin
+            loss, st_new = _batch_loss_det(model, ps, st, X, p, a_min; hyper = hyper)
+            return loss, st_new, NamedTuple()
+        end
+    end
+
+    train_state = TrainState(state.model, state.ps, state.st, state.opt)
+
     last_loss = NaN
     for epoch = 1:hyper.epochs
         sumL = 0.0
         cnt = 0
         for (X, _) in mb
-            loss_only(ps_local) =
-                _batch_loss_det(ps_local, state.st, state.model, X, p, a_grid[1]; hyper)
-            L, back = Zygote.pullback(loss_only, state.ps)
-            gs = back(1.0)[1]
-            new_optstate, new_ps = Optimisers.update(state.optstate, state.ps, gs)
-            state = NNState(
-                model = state.model,
-                ps = new_ps,
-                st = state.st,
-                opt = state.opt,
-                optstate = new_optstate,
-                rngs = state.rngs,
-            )
-            sumL += float(L)
+            _, loss, _, train_state = single_train_step!(backend, objective, X, train_state)
+            sumL += float(loss)
             cnt += 1
         end
         last_loss = cnt == 0 ? NaN : sumL / cnt
@@ -175,50 +176,136 @@ function _train_det!(state, a_grid, p; hyper, y_scalar, master_rng, device::Symb
             @printf("[deterministic train] epoch=%d loss=%.6e\n", epoch, last_loss)
         end
     end
-    return state, last_loss
+
+    new_state = NNState(
+        model = train_state.model,
+        ps = train_state.parameters,
+        st = train_state.states,
+        opt = train_state.optimizer,
+        optstate = train_state.optimizer_state,
+        rngs = state.rngs,
+    )
+
+    return new_state, last_loss
+end
+
+function _train_stoch!(
+    state,
+    a_grid,
+    z_grid,
+    P,
+    p;
+    hyper,
+    master_rng,
+    device::Symbol = :cpu,
+    epochs::Integer = 0,
+)
+    epochs <= 0 && return state, NaN
+
+    y_grid = exp.(z_grid)
+    seed_mb = derive_seed(master_rng, "nn/kernel/minibatch/stoch")
+    rng = make_rng(Int(seed_mb % typemax(Int)))
+    mb = grid_minibatches(
+        a_grid,
+        y_grid;
+        targets = nothing,
+        batch = hyper.batch,
+        shuffle = true,
+        rng = rng,
+        drop_last = false,
+        device = device,
+    )
+
+    backend = AutoZygote()
+    a_min = first(a_grid)
+    objective = let hyper = hyper, p = p, a_min = a_min, z_grid = z_grid, P = P
+        (model, ps, st, X) -> begin
+            loss, st_new = _batch_loss_stoch(
+                model,
+                ps,
+                st,
+                X,
+                p,
+                a_min,
+                z_grid,
+                P;
+                hyper = hyper,
+            )
+            return loss, st_new, NamedTuple()
+        end
+    end
+
+    train_state = TrainState(state.model, state.ps, state.st, state.opt)
+
+    last_loss = NaN
+    for epoch = 1:epochs
+        sumL = 0.0
+        cnt = 0
+        for (X, _) in mb
+            _, loss, _, train_state = single_train_step!(backend, objective, X, train_state)
+            sumL += float(loss)
+            cnt += 1
+        end
+        last_loss = cnt == 0 ? NaN : sumL / cnt
+        if hyper.verbose
+            @printf("[stochastic tune] epoch=%d loss=%.6e\n", epoch, last_loss)
+        end
+    end
+
+    new_state = NNState(
+        model = train_state.model,
+        ps = train_state.parameters,
+        st = train_state.states,
+        opt = train_state.optimizer,
+        optstate = train_state.optimizer_state,
+        rngs = state.rngs,
+    )
+
+    return new_state, last_loss
 end
 
 """
-    _batch_loss_stoch(ps, st, model, X, p, a_min, z_grid, P; hyper)
+    _batch_loss_stoch(model, ps, st, X, p, a_min, z_grid, P; hyper)
 
 Differentiable per-batch stochastic Euler residual loss. Uses discrete expectation
 over next-period shocks with transition matrix `P`.
 X must be 2×B with rows (a, y) where y = exp(z_j) for some j in z_grid.
 """
-function _batch_loss_stoch(ps, st, model, X, p, a_min, z_grid, P; hyper)
+function _batch_loss_stoch(model, ps, st, X, p, a_min, z_grid, P; hyper)
     @assert size(X, 1) >= 2 "stochastic batch requires (a,y) features"
     a = @view X[1, :]
     y = @view X[2, :]
     B = size(X, 2)
     R = 1 + p.r
-    β = getfield(p, Symbol("β"))
-    σ = getfield(p, Symbol("σ"))
+    beta = getfield(p, Symbol("β"))
+    sigma = getfield(p, Symbol("σ"))
 
     # Map y -> z index j
     zvals = log.(y)
     jidx = clamp.(searchsortedfirst.(Ref(z_grid), zvals), 1, length(z_grid))
 
     # Forward current policy a' and consumption c
-    ŷ_raw, st2 = Lux.apply(model, X, ps, st)
-    ap = vec(project_savings(ŷ_raw, a_min; kind = hyper.projection_kind))
+    y_hat, st2 = Lux.apply(model, X, ps, st)
+    ap = vec(project_savings(y_hat, a_min; kind = hyper.projection_kind))
     c = smooth_pos.(y .+ R .* a .- ap; eps = 1.0e-12, beta = 1.0)
 
     # Emu computed via batched next-period evaluation below
-    # Batched over shocks (single Lux.apply): recompute Emu efficiently
     Nz = length(z_grid)
     yprimes = exp.(z_grid)
     ap_rep = repeat(ap, Nz)
     yprime_rep = repeat(yprimes, inner = B)
     Xbig = vcat(reshape(ap_rep, 1, :), reshape(yprime_rep, 1, :))
-    y2_raw_all, _ = Lux.apply(model, Xbig, ps, st2)
-    ap2_all = vec(project_savings(y2_raw_all, a_min; kind = hyper.projection_kind))
+    y_hat_all, st3 = Lux.apply(model, Xbig, ps, st2)
+    ap2_all = vec(project_savings(y_hat_all, a_min; kind = hyper.projection_kind))
     cp_all = smooth_pos.(yprime_rep .+ R .* ap_rep .- ap2_all; eps = 1.0e-12, beta = 1.0)
     c_rep = repeat(c, Nz)
-    ratio_all = (cp_all ./ c_rep) .^ (-σ)
+    ratio_all = (cp_all ./ c_rep) .^ (-sigma)
     W = P[jidx, :]
     Emu = vec(sum(reshape(vec(W) .* ratio_all, B, Nz); dims = 2))
-    resid = abs.(1 .- β .* R .* Emu)
-    return assemble_euler_loss(resid, ap, a_min, hyper)
+    resid = abs.(1 .- beta .* R .* Emu)
+
+    loss = assemble_euler_loss(resid, ap, a_min, hyper)
+    return loss, st3
 end
 
 """
@@ -261,6 +348,7 @@ function solve_nn_det(
     # Hyperparameters and state init
     hyper = _solver_hyper(cfg)
     st = init_state(Dict(cfg))
+    solver_cfg = get(cfg, :solver, Dict{Symbol,Any}())
     # Ensure optimiser LR and optional clip_norm (NNState is immutable)
     if hyper.lr !== nothing
         newopt = Optimisers.Adam(hyper.lr)
@@ -517,59 +605,19 @@ function solve_nn_stoch(
     end
 
     # --- Residual-based fine-tuning on stochastic Euler equation ---
-    last_loss = NaN
     tune_epochs = max(0, hyper.epochs - pre_epochs)
-    if tune_epochs > 0
-        y_grid = exp.(z_grid)
-        # Derive a dedicated RNG for minibatch sampling from the master RNG
-        seed_mb = derive_seed(master_rng, "nn/kernel/minibatch/stoch")
-        rng = make_rng(Int(seed_mb % typemax(Int)))
-        device = get(get(cfg, :solver, Dict{Symbol,Any}()), :device, :cpu)
-        mb = grid_minibatches(
-            a_grid,
-            y_grid;
-            targets = nothing,
-            batch = hyper.batch,
-            shuffle = true,
-            rng = rng,
-            drop_last = false,
-            device = device,
-        )
-        for epoch = 1:tune_epochs
-            sumL = 0.0
-            cnt = 0
-            for (X, _) in mb
-                loss_only(ps_local) = _batch_loss_stoch(
-                    ps_local,
-                    st.st,
-                    st.model,
-                    X,
-                    p,
-                    a_min,
-                    z_grid,
-                    P;
-                    hyper = hyper,
-                )
-                L, back = Zygote.pullback(loss_only, st.ps)
-                gs = back(1.0)[1]
-                new_optstate, new_ps = Optimisers.update(st.optstate, st.ps, gs)
-                st = NNState(
-                    model = st.model,
-                    ps = new_ps,
-                    st = st.st,
-                    opt = st.opt,
-                    optstate = new_optstate,
-                    rngs = st.rngs,
-                )
-                sumL += float(L)
-                cnt += 1
-            end
-            last_loss = cnt == 0 ? NaN : sumL / cnt
-            if hyper.verbose
-                @printf("[stochastic tune] epoch=%d loss=%.6e\n", epoch, last_loss)
-            end
-        end
-    end
+    device = get(solver_cfg, :device, :cpu)
+    st, last_loss = _train_stoch!(
+        st,
+        a_grid,
+        z_grid,
+        P,
+        p;
+        hyper = hyper,
+        master_rng = master_rng,
+        device = device,
+        epochs = tune_epochs,
+    )
 
     # Evaluate trained policy on full grid for each shock state
     c = Array{Float64}(undef, Na, Nz)
