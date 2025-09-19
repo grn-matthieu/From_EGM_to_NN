@@ -69,3 +69,29 @@ end
     @test sol.converged === true
     @test sol.max_resid < 1e-3
 end
+
+@testset "EGM policy monotonicity" begin
+    for seed in (42, 99)
+        cfg = deepcopy(SMOKE_CFG)
+        cfg[:random] = get(cfg, :random, Dict{Symbol,Any}())
+        cfg[:random][:seed] = seed
+        cfg[:grids][:Na] = 40
+        model = build_model(cfg)
+        params = get_params(model)
+        grids = get_grids(model)
+        utility = get_utility(model)
+
+        sol = ThesisProject.EGMKernel.solve_egm_det(
+            params,
+            grids,
+            utility;
+            tol = 1e-6,
+            tol_pol = 1e-6,
+            maxit = 400,
+            interp_kind = LinearInterp(),
+        )
+
+        @test all(diff(sol.a_next) .>= -1e-8)
+        @test all(diff(sol.c) .>= -1e-8)
+    end
+end

@@ -10,6 +10,8 @@ using .NNMixedPrecision:
     cast_batch,
     with_mixed_precision
 
+supports_fp16 = NNMixedPrecision.eltype_from(UseFP16()) == Float16
+
 @testset "mixed-precision helpers" begin
     # to_mp and to_fp32 conversions
     a32 = Float32[1.0, 2.5, -3.0]
@@ -58,4 +60,22 @@ using .NNMixedPrecision:
         f = fn,
     )
     @test isfinite(res)
+end
+
+@testset "mixed-precision bench parity" begin
+    supports_fp16 || @test_skip "Float16 execution not supported on this platform"
+    cfg = Dict{Symbol,Any}(deepcopy(SMOKE_CFG))
+    cfg[:random] = Dict{Symbol,Any}(get(cfg, :random, Dict{Symbol,Any}()))
+    cfg[:random][:seed] = 7
+    X = rand(Float32, 1, 8)
+    Y = rand(Float32, 1, 8)
+    cfg[:batch] = (X, Y)
+    rows = NNTrain.bench_mixedprecision(cfg; warmup_epochs = 0, run_epochs = 0)
+    @test length(rows) == 3
+    base_loss = first(filter(r -> r.mp == "FP32", rows)).loss
+    for row in rows
+        @test row.feas >= 0.99 || isnan(row.feas)
+        @test !isnan(row.loss)
+        @test sign(row.loss - base_loss) in (-1, 0, 1)
+    end
 end

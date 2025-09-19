@@ -97,3 +97,20 @@ end
     st3 = NNTrain.dummy_epoch!(; n = 32, batch = 8, epochs = 1)
     @test st3 isa NNInit.NNState
 end
+
+@testset "NNTrain feasibility on random draws" begin
+    cfg = deepcopy(SMOKE_CFG)
+    state = NNInit.init_state(cfg)
+    rng = Random.default_rng()
+    for _ = 1:5
+        x = rand(rng, Float32, 1, 16)
+        y = rand(rng, Float32, 1, 16)
+        new_state, loss, gnorm, _ = NNTrain._step!(state, x, y; clip_norm = 10.0)
+        @test isfinite(loss)
+        @test gnorm >= 0
+        for arr in NNTrain.collect_array_leaves(new_state.ps)
+            @test all(isfinite, arr)
+        end
+        state = new_state
+    end
+end
