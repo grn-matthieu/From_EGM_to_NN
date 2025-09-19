@@ -18,7 +18,129 @@ using ..NNData: grid_minibatches
 using ..NNInit: NNState, init_state
 using ..NNUtils: _copy_tree_arrays!
 
-export fit_to_EGM!, pretrain_then_euler!
+export fit_to_EGM!,
+    pretrain_then_euler!, fit_to_EGM_from_baseline!, pretrain_then_euler_from_baseline!
+
+
+"""
+    fit_to_EGM_from_baseline!(state_or_model, cfg; epochs::Int, batch::Int, seed::Int=42)
+
+Builds an EGM baseline (using `cfg`) and calls `fit_to_EGM!` with the
+constructed EGM policy. This moves the responsibility for building the EGM
+baseline out of kernels and centralizes it in `NNPretrain`.
+"""
+function fit_to_EGM_from_baseline!(
+    state_or_model,
+    cfg;
+    epochs::Int,
+    batch::Int,
+    seed::Int = 42,
+)
+    # Build EGM baseline configuration
+    egm_cfg = try
+        deepcopy(cfg)
+    catch
+        Dict{Symbol,Any}(pairs(cfg))
+    end
+    egm_solver = get(egm_cfg, :solver, Dict{Symbol,Any}())
+    egm_solver[:method] = :EGM
+    egm_cfg[:solver] = egm_solver
+    egm_cfg[:method] = :EGM
+
+    mobj = build_model(egm_cfg)
+    egm_method = build_method(egm_cfg)
+    egm_sol = solve(mobj, egm_method, egm_cfg)
+    g = get_grids(mobj)
+    a_grid = g[:a].grid
+
+    a_next_egm = egm_sol.policy[:a].value
+
+    egm_policy = function (a_vec, y_vec)
+        out = similar(a_vec)
+        @inbounds for k in eachindex(a_vec)
+            out[k] = interp_linear(a_grid, a_next_egm, a_vec[k])
+        end
+        return out
+    end
+
+    return fit_to_EGM!(
+        state_or_model,
+        egm_policy,
+        cfg;
+        epochs = epochs,
+        batch = batch,
+        seed = seed,
+    )
+end
+
+
+"""
+    pretrain_then_euler_from_baseline!(state_or_model, cfg; Nwarm::Int, epochs::Int, batch::Int, λ0::Float64=0.0)
+
+Builds an EGM baseline and calls `pretrain_then_euler!` with a constructed
+policy. This centralizes EGM baseline construction and keeps kernels focused on
+residual training and evaluation.
+"""
+function pretrain_then_euler_from_baseline!(
+    state_or_model,
+    cfg;
+    Nwarm::Int,
+    epochs::Int,
+    batch::Int,
+    λ0::Float64 = 0.0,
+)
+    egm_cfg = try
+        deepcopy(cfg)
+    catch
+        Dict{Symbol,Any}(pairs(cfg))
+    end
+    egm_solver = get(egm_cfg, :solver, Dict{Symbol,Any}())
+    egm_solver[:method] = :EGM
+    egm_cfg[:solver] = egm_solver
+    egm_cfg[:method] = :EGM
+
+    mobj = build_model(egm_cfg)
+    egm_method = build_method(egm_cfg)
+    egm_sol = solve(mobj, egm_method, egm_cfg)
+    g = get_grids(mobj)
+    a_grid = g[:a].grid
+    S = get_shocks(mobj)
+    z_grid = S === nothing ? nothing : S.zgrid
+
+    a_next_egm = egm_sol.policy[:a].value
+
+    if z_grid === nothing
+        egm_policy = function (a_vec, y_vec)
+            out = similar(a_vec)
+            @inbounds for k in eachindex(a_vec)
+                out[k] = interp_linear(a_grid, a_next_egm, a_vec[k])
+            end
+            return out
+        end
+    else
+        Nz = length(z_grid)
+        egm_policy = function (a_vec, y_vec)
+            out = similar(a_vec)
+            @inbounds for k in eachindex(a_vec)
+                z = log(y_vec[k])
+                j = searchsortedfirst(z_grid, z)
+                j = clamp(j, 1, Nz)
+                out[k] = interp_linear(a_grid, view(a_next_egm, :, j), a_vec[k])
+            end
+            return out
+        end
+    end
+
+    return pretrain_then_euler!(
+        state_or_model,
+        egm_policy,
+        cfg;
+        Nwarm = Nwarm,
+        epochs = epochs,
+        batch = batch,
+        λ0 = λ0,
+    )
+end
 
 """
     fit_to_EGM!(model, policy, cfg; epochs::Int, batch::Int, seed::Int=42) -> NamedTuple

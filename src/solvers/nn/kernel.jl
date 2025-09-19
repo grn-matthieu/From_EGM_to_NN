@@ -27,7 +27,11 @@ using ..NNLoss: assemble_euler_loss
 using ..NNConstraints: project_savings, project_savings_clip, smooth_pos
 using ..NNInit: init_state, NNState
 using ..NNData: grid_minibatches
-using ..NNPretrain: fit_to_EGM!
+using ..NNPretrain:
+    fit_to_EGM!,
+    pretrain_then_euler!,
+    pretrain_then_euler_from_baseline!,
+    fit_to_EGM_from_baseline!
 using ..CommonInterp: interp_linear
 using ..API: build_model, build_method, solve
 using Statistics: mean
@@ -373,56 +377,36 @@ function solve_nn_det(
     # Optional supervised pretraining to EGM policy (robust, improves residuals)
     pre_epochs = hyper.pretrain ? max(25, fld(hyper.epochs, 2)) : 0
     if pre_epochs > 0
-        # Build an EGM baseline solution to generate targets for (a)
-        egm_cfg = try
-            deepcopy(cfg)
-        catch
-            Dict{Symbol,Any}(pairs(cfg))
-        end
-        egm_solver = get(egm_cfg, :solver, Dict{Symbol,Any}())
-        egm_solver[:method] = :EGM
-        egm_cfg[:solver] = egm_solver
-        # Ensure top-level method selector points to EGM as well (avoid recursion)
-        egm_cfg[:method] = :EGM
-        mobj = build_model(egm_cfg)
-        egm_method = build_method(egm_cfg)
-        egm_sol = solve(mobj, egm_method, egm_cfg)
-        a_next_egm = egm_sol.policy[:a].value  # (Na,)
-
-        # EGM policy mapping used by fit_to_EGM!
-        function egm_policy(a_vec, y_vec)
-            # deterministic: single column a_next_egm
-            out = similar(a_vec)
-            @inbounds for k in eachindex(a_vec)
-                out[k] = interp_linear(a_grid, a_next_egm, a_vec[k])
-            end
-            return out
-        end
-
-        seed_pre = derive_seed(master_rng, "nn/kernel/pretrain")
-        fit_to_EGM!(
+        # Delegate supervised pretraining to NNPretrain wrapper that builds the
+        # EGM baseline and runs warmup + Euler fine-tuning. Kernels should not
+        # be responsible for constructing EGM targets.
+        pretrain_then_euler_from_baseline!(
             st,
-            egm_policy,
             cfg;
-            epochs = pre_epochs,
+            Nwarm = pre_epochs,
+            epochs = hyper.epochs,
             batch = hyper.batch,
-            seed = Int(seed_pre % typemax(Int)),
+            λ0 = 0.0,
+        )
+
+        # The wrapper includes the residual fine-tuning; skip the separate `_train_det!` call.
+        solver_cfg = get(cfg, :solver, Dict{Symbol,Any}())
+        device = get(solver_cfg, :device, :cpu)
+        last_loss = NaN
+    else
+        # No warmup: simple residual-only training
+        solver_cfg = get(cfg, :solver, Dict{Symbol,Any}())
+        device = get(solver_cfg, :device, :cpu)
+        st, last_loss = _train_det!(
+            st,
+            a_grid,
+            p;
+            hyper = hyper,
+            y_scalar = p.y,
+            master_rng = master_rng,
+            device = device,
         )
     end
-
-    # Train on mini-batches of (a, y)
-    # Determine device for minibatches from config
-    solver_cfg = get(cfg, :solver, Dict{Symbol,Any}())
-    device = get(solver_cfg, :device, :cpu)
-    st, last_loss = _train_det!(
-        st,
-        a_grid,
-        p;
-        hyper = hyper,
-        y_scalar = p.y,
-        master_rng = master_rng,
-        device = device,
-    )
 
     # Evaluate trained policy on full grid
     Xin = reshape(a_grid, 1, :)
@@ -564,60 +548,36 @@ function solve_nn_stoch(
     # --- Optional supervised pretraining to EGM policy (robust, improves residuals) ---
     pre_epochs = hyper.pretrain ? max(25, fld(hyper.epochs, 2)) : 0
     if pre_epochs > 0
-        # Build an EGM baseline solution to generate targets for (a, z)
-        egm_cfg = try
-            deepcopy(cfg)
-        catch
-            Dict{Symbol,Any}(pairs(cfg))
-        end
-        egm_solver = get(egm_cfg, :solver, Dict{Symbol,Any}())
-        egm_solver[:method] = :EGM
-        egm_cfg[:solver] = egm_solver
-        # Ensure top-level method selector points to EGM as well (avoid recursion)
-        egm_cfg[:method] = :EGM
-        mobj = build_model(egm_cfg)
-        egm_method = build_method(egm_cfg)
-        egm_sol = solve(mobj, egm_method, egm_cfg)
-        a_next_egm = egm_sol.policy[:a].value  # (Na, Nz)
-
-        # Map y to nearest z index
-        function egm_policy(a_vec, y_vec)
-            out = similar(a_vec)
-            @inbounds for k in eachindex(a_vec)
-                z = log(y_vec[k])
-                j = searchsortedfirst(z_grid, z)
-                j = clamp(j, 1, Nz)
-                out[k] = interp_linear(a_grid, view(a_next_egm, :, j), a_vec[k])
-            end
-            return out
-        end
-
-        # Run pretraining epochs (use up to half the budget, at least 25)
-        seed_pre = derive_seed(master_rng, "nn/kernel/pretrain")
-        fit_to_EGM!(
+        # Delegate supervised pretraining to NNPretrain wrapper that builds an
+        # EGM baseline and performs the warmup + Euler fine-tuning.
+        pretrain_then_euler_from_baseline!(
             st,
-            egm_policy,
             cfg;
-            epochs = pre_epochs,
+            Nwarm = pre_epochs,
+            epochs = hyper.epochs,
             batch = hyper.batch,
-            seed = Int(seed_pre % typemax(Int)),
+            λ0 = 0.0,
+        )
+
+        # Wrapper already ran the residual fine-tuning; skip extra tuning step
+        device = get(solver_cfg, :device, :cpu)
+        last_loss = NaN
+    else
+        # No warmup: residual-only fine-tuning
+        tune_epochs = max(0, hyper.epochs - pre_epochs)
+        device = get(solver_cfg, :device, :cpu)
+        st, last_loss = _train_stoch!(
+            st,
+            a_grid,
+            z_grid,
+            P,
+            p;
+            hyper = hyper,
+            master_rng = master_rng,
+            device = device,
+            epochs = tune_epochs,
         )
     end
-
-    # --- Residual-based fine-tuning on stochastic Euler equation ---
-    tune_epochs = max(0, hyper.epochs - pre_epochs)
-    device = get(solver_cfg, :device, :cpu)
-    st, last_loss = _train_stoch!(
-        st,
-        a_grid,
-        z_grid,
-        P,
-        p;
-        hyper = hyper,
-        master_rng = master_rng,
-        device = device,
-        epochs = tune_epochs,
-    )
 
     # Evaluate trained policy on full grid for each shock state
     c = Array{Float64}(undef, Na, Nz)
