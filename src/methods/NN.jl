@@ -1,0 +1,81 @@
+"""
+NN
+
+Adapter exposing a neural-network-based solver (simple 2-layer MLP) through `API.solve`.
+For now this is a stub that calls into `NNKernel` which provides a placeholder implementation.
+"""
+module NN
+using ..API
+import ..API: solve
+using ..NNKernel: solve_nn_det, solve_nn_stoch
+using ..ValueFunction: compute_value_policy
+using ..Determinism: canonicalize_cfg, hash_hex
+
+export NNMethod, build_nn_method
+
+struct NNMethod <: AbstractMethod
+    opts::NamedTuple
+end
+
+function build_nn_method(cfg::AbstractDict)
+    return NNMethod((
+        name = haskey(cfg, :method) ? cfg[:method] : cfg[:solver][:method],
+        epochs = get(cfg[:solver], :epochs, 10),
+        batch = get(cfg[:solver], :batch, 64),
+        lr = get(cfg[:solver], :lr, 1e-3),
+        verbose = get(cfg[:solver], :verbose, false),
+    ))
+end
+
+function solve(
+    model::AbstractModel,
+    method::NNMethod,
+    cfg::AbstractDict;
+    rng = nothing,
+)::Solution
+    p = get_params(model)
+    g = get_grids(model)
+    S = get_shocks(model)
+    U = get_utility(model)
+
+    sol =
+        S === nothing ? solve_nn_det(p, g, U; opts = method.opts) :
+        solve_nn_stoch(p, g, S, U; opts = method.opts)
+
+    ee = sol.resid
+    ee_vec = ee isa AbstractMatrix ? vec(maximum(ee, dims = 2)) : ee
+    ee_mat = ee isa AbstractMatrix ? ee : nothing
+
+    policy = Dict{Symbol,Any}(
+        :c => (;
+            value = sol.c,
+            grid = sol.a_grid,
+            euler_errors = ee_vec,
+            euler_errors_mat = ee_mat,
+        ),
+        :a => (; value = sol.a_next, grid = sol.a_grid),
+    )
+
+    value = compute_value_policy(p, g, S, U, policy)
+
+    model_id = hash_hex(canonicalize_cfg(cfg))
+    diagnostics = (;
+        model_id = model_id,
+        method = method.opts.name,
+        seed = sol.opts.seed,
+        runtime = sol.opts.runtime,
+    )
+
+    metadata = Dict{Symbol,Any}(
+        :iters => sol.iters,
+        :max_it => sol.opts.epochs,
+        :converged => sol.converged,
+        :max_resid => sol.max_resid,
+        :tol => nothing,
+        :julia_version => string(VERSION),
+    )
+
+    return Solution(policy, value, diagnostics, metadata, model, method)
+end
+
+end # module

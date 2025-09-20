@@ -55,10 +55,12 @@ include("core/method_factory.jl")
 # 7) simulation
 include("sim/panel.jl")
 using .SimPanel: simulate_panel
+include("solvers/nn/kernel.jl")
 
 # 8) analysis
 include("analysis/SteadyState.jl")
 using .SteadyState: steady_state_analytic, steady_state_from_policy
+include("methods/NN.jl")
 
 # NN evaluation / pretrain helpers removed
 using .API:
