@@ -48,3 +48,4 @@ tmp*.txt
 temp_head.txt
 *.xlsx
 10_day_plan_maxgranular_full.xlsx
+.github/*.md

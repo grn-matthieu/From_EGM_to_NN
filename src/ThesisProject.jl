@@ -42,23 +42,13 @@ include("solvers/projection/kernel.jl")
 include("solvers/egm/kernel.jl")
 include("solvers/perturbation/kernel.jl")
 
-# nn (order matters: provide deps before kernel)
-include("solvers/nn/utils.jl")         # NNUtils (shared helpers)
-include("solvers/nn/loss.jl")          # NNLoss
-include("solvers/nn/constraints.jl")   # NNConstraints
-include("solvers/nn/device.jl")        # NNDevice (device helpers for GPU/CPU)
-include("solvers/nn/init.jl")          # NNInit
-include("solvers/nn/data.jl")          # NNData
-include("solvers/nn/train.jl")         # NNTrain
-include("solvers/nn/eval.jl")          # NNEval
-include("solvers/nn/pretrain.jl")      # NNPretrain
-include("solvers/nn/kernel.jl")        # NNKernel (uses modules above)
+# NN solver removed - includes deleted to rebuild from scratch
 
 # 5) methods (adapters)
 include("methods/EGM.jl")
 include("methods/Projection.jl")
 include("methods/Perturbation.jl")
-include("methods/NN.jl")   # NN adapter
+# NN method adapter removed
 
 # 6) method factory
 include("core/method_factory.jl")
@@ -71,8 +61,7 @@ using .SimPanel: simulate_panel
 include("analysis/SteadyState.jl")
 using .SteadyState: steady_state_analytic, steady_state_from_policy
 
-using .NNEval: eval_nn, write_eval_report
-using .NNPretrain: fit_to_EGM!
+# NN evaluation / pretrain helpers removed
 using .API:
     AbstractModel,
     AbstractMethod,
@@ -98,9 +87,7 @@ export load_config,
     get_grids,
     get_shocks,
     get_utility,
-    eval_nn,
-    write_eval_report,
-    fit_to_EGM!,
+    # NN exports removed - will reintroduce when rebuilt
     simulate_panel,
     steady_state_analytic,
     steady_state_from_policy,

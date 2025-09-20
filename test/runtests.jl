@@ -67,12 +67,6 @@ end
 @testset "Kernels - Perturbation" begin
     include("methods/test_perturbation_kernel.jl")
 end
-@testset "Kernels - NN" begin
-    include("methods/test_nn_kernel.jl")
-end
-@testset "NN - Method Adapter" begin
-    include("methods/test_nn_method.jl")
-end
 
 # --- Core/shared utilities ---
 @testset "Core - Residuals" begin
@@ -103,32 +97,7 @@ end
     include("core/test_config_validator.jl")
 end
 
-# --- NN ---
-@testset "NN - Init" begin
-    include("methods/test_nn_init.jl")
-end
-@testset "NN - Data" begin
-    include("methods/loss_test.jl")
-end
-@testset "NN - Loss" begin
-    include("nn/test_loss.jl")
-    include("nn/test_loss_extras.jl")
-end
-@testset "NN - Constraints" begin
-    include("nn/constraints_test.jl")
-    include("nn/test_constraints_extras.jl")
-end
-@testset "NN - Train" begin
-    include("methods/test_nn_train.jl")
-end
-
-@testset "NN - Eval" begin
-    include("nn/eval_tests.jl")
-end
-
-@testset "Coverage - Boost" begin
-    include("coverage/coverage_boost.jl")
-end
+# NN tests removed - neural-network solver being rebuilt
 
 @testset "Coverage - More" begin
     include("coverage/coverage_more.jl")
@@ -139,11 +108,7 @@ end
 end
 
 @testset "Coverage - NNLoss" begin
-    include("coverage/coverage_nnloss.jl")
-end
-
-@testset "Coverage - NNTrain" begin
-    include("coverage/coverage_nntrain.jl")
+    # NNLoss coverage removed
 end
 
 @testset "Coverage - Core API" begin

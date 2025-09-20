@@ -83,6 +83,14 @@ function main(args::Vector{String} = ARGS)
         return
     end
 
+    # Check whether NN modules are available; if not, instruct user to rebuild NN solver
+    if !isdefined(ThesisProject, :NNInit)
+        println(
+            "Neural-network solver modules are not present in this checkout.\nPlease reintroduce `src/solvers/nn/` or rebuild the solver before running pretraining.",
+        )
+        return
+    end
+
     # Build NN state (weights live in-place in state)
     state = ThesisProject.NNInit.init_state(cfg)
 
