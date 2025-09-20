@@ -12,14 +12,39 @@ using Optimisers
 using Random
 using Statistics
 
-using ..API: get_grids, get_shocks, build_model
+using ..API: get_grids, get_shocks, build_model, build_method, solve
 using ..NNConstraints: project_savings
 using ..NNData: grid_minibatches
 using ..NNInit: NNState, init_state
 using ..NNUtils: _copy_tree_arrays!
+using ..CommonInterp: interp_linear
 
 export fit_to_EGM!,
     pretrain_then_euler!, fit_to_EGM_from_baseline!, pretrain_then_euler_from_baseline!
+
+
+"""
+    _as_dict(cfg)
+
+Safely coerce various `cfg` shapes into a `Dict{Symbol,Any}` for local
+mutation. Accepts `AbstractDict`, `NamedTuple`, or other pair-iterateable
+objects. Falls back to an empty `Dict` when coercion fails.
+"""
+function _as_dict(cfg)
+    try
+        if cfg isa AbstractDict
+            return Dict{Symbol,Any}(pairs(cfg))
+        else
+            return Dict{Symbol,Any}(pairs(deepcopy(cfg)))
+        end
+    catch
+        try
+            return Dict{Symbol,Any}(pairs(cfg))
+        catch
+            return Dict{Symbol,Any}()
+        end
+    end
+end
 
 
 """
@@ -36,13 +61,10 @@ function fit_to_EGM_from_baseline!(
     batch::Int,
     seed::Int = 42,
 )
-    # Build EGM baseline configuration
-    egm_cfg = try
-        deepcopy(cfg)
-    catch
-        Dict{Symbol,Any}(pairs(cfg))
-    end
+    # Build EGM baseline configuration (safe mutable Dict)
+    egm_cfg = _as_dict(cfg)
     egm_solver = get(egm_cfg, :solver, Dict{Symbol,Any}())
+    egm_solver = egm_solver isa Dict ? egm_solver : Dict{Symbol,Any}(pairs(egm_solver))
     egm_solver[:method] = :EGM
     egm_cfg[:solver] = egm_solver
     egm_cfg[:method] = :EGM
@@ -89,12 +111,9 @@ function pretrain_then_euler_from_baseline!(
     batch::Int,
     λ0::Float64 = 0.0,
 )
-    egm_cfg = try
-        deepcopy(cfg)
-    catch
-        Dict{Symbol,Any}(pairs(cfg))
-    end
+    egm_cfg = _as_dict(cfg)
     egm_solver = get(egm_cfg, :solver, Dict{Symbol,Any}())
+    egm_solver = egm_solver isa Dict ? egm_solver : Dict{Symbol,Any}(pairs(egm_solver))
     egm_solver[:method] = :EGM
     egm_cfg[:solver] = egm_solver
     egm_cfg[:method] = :EGM

@@ -375,7 +375,11 @@ function solve_nn_det(
     master_rng = seed_cfg === nothing ? make_rng(Int(0x9a9aa9a9)) : make_rng(Int(seed_cfg))
 
     # Optional supervised pretraining to EGM policy (robust, improves residuals)
-    pre_epochs = hyper.pretrain ? max(25, fld(hyper.epochs, 2)) : 0
+    # Only attempt supervised pretraining when a full `:model` config is
+    # available. Other call sites (e.g. tests) may call `solve_nn_det` with the
+    # fallback zero-arg config `Dict{}`; attempting to build an EGM baseline
+    # from that empty config raises an assertion in `build_model`.
+    pre_epochs = (hyper.pretrain && haskey(cfg, :model)) ? max(25, fld(hyper.epochs, 2)) : 0
     if pre_epochs > 0
         # Delegate supervised pretraining to NNPretrain wrapper that builds the
         # EGM baseline and runs warmup + Euler fine-tuning. Kernels should not
