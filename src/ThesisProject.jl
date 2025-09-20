@@ -48,7 +48,6 @@ include("solvers/perturbation/kernel.jl")
 include("methods/EGM.jl")
 include("methods/Projection.jl")
 include("methods/Perturbation.jl")
-# NN method adapter removed
 
 # 6) method factory
 include("core/method_factory.jl")
