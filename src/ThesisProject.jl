@@ -42,12 +42,14 @@ include("solvers/projection/kernel.jl")
 include("solvers/egm/kernel.jl")
 include("solvers/perturbation/kernel.jl")
 
-# NN solver removed - includes deleted to rebuild from scratch
+# NN solver
+include("solvers/nn/kernel.jl")
 
 # 5) methods (adapters)
 include("methods/EGM.jl")
 include("methods/Projection.jl")
 include("methods/Perturbation.jl")
+include("methods/NN.jl")
 
 # 6) method factory
 include("core/method_factory.jl")
@@ -55,12 +57,10 @@ include("core/method_factory.jl")
 # 7) simulation
 include("sim/panel.jl")
 using .SimPanel: simulate_panel
-include("solvers/nn/kernel.jl")
 
 # 8) analysis
 include("analysis/SteadyState.jl")
 using .SteadyState: steady_state_analytic, steady_state_from_policy
-include("methods/NN.jl")
 
 # NN evaluation / pretrain helpers removed
 using .API:
@@ -88,7 +88,6 @@ export load_config,
     get_grids,
     get_shocks,
     get_utility,
-    # NN exports removed - will reintroduce when rebuilt
     simulate_panel,
     steady_state_analytic,
     steady_state_from_policy,
