@@ -2,8 +2,8 @@
 @testset "Core stability" begin
     # Test loading side
     config = deepcopy(SMOKE_CFG)
-    @test config isa AbstractDict
-    @test all(k -> haskey(config, k), (:model, :params, :grids)) # Fundamental keys in the config
+    @test config isa NamedTuple || config isa AbstractDict
+    @test all(k -> cfg_has(config, k), (:model, :params, :grids)) # Fundamental keys in the config
     @test begin # Test to validate a config we know to be stable
         try
             validate_config(config)
@@ -21,7 +21,7 @@
     params = get_params(model)
     grids = get_grids(model)
     @test params isa NamedTuple
-    @test grids isa NamedTuple
+    @test grids isa NamedTuple || grids isa AbstractDict
 
     # Test solver building
     method = build_method(config)
@@ -33,19 +33,20 @@
         try
             sol = solve(model, method, config)
             @test isa(sol, ThesisProject.API.Solution)
-            @test isa(sol.policy, AbstractDict)
-            @test haskey(sol.policy, :c) && haskey(sol.policy, :a)
-            @test length(sol.policy[:c].value) == grids[:a].N
-            @test length(sol.policy[:a].value) == grids[:a].N
+            @test sol.policy isa NamedTuple || sol.policy isa AbstractDict
+            @test cfg_has(sol.policy, :c) && cfg_has(sol.policy, :a)
+            a_grid = cfg_get(grids, :a)
+            @test length(cfg_get(sol.policy, :c).value) == a_grid.N
+            @test length(cfg_get(sol.policy, :a).value) == a_grid.N
             @test sol.metadata[:converged] === true
 
             # Test the tolerance check (ignore the first point where BC is not binding)
-            @test maximum(sol.policy[:c].euler_errors[min(2, end):end]) < 1e-5
+            @test maximum(cfg_get(sol.policy, :c).euler_errors[min(2, end):end]) < 1e-5
             # Policy bounds : does the asset policy respect the constraints?
-            @test all(sol.policy[:a].value .>= grids[:a].min)
-            @test all(sol.policy[:a].value .<= grids[:a].max)
+            @test all(cfg_get(sol.policy, :a).value .>= a_grid.min)
+            @test all(cfg_get(sol.policy, :a).value .<= a_grid.max)
             # Monotonicity check
-            @test is_nondec(sol.policy[:a].value; tol = 1e-8)
+            @test is_nondec(cfg_get(sol.policy, :a).value; tol = 1e-8)
         catch err
             @warn "solve failed" err = (err, catch_backtrace())
             @test false

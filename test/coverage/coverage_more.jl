@@ -15,10 +15,10 @@ end
 
 # Exercise API factory/error stubs in src/core/api.jl
 @testset "API factory stubs" begin
-    # build_model checks for :model key and throws an AssertionError
-    @test_throws AssertionError ThesisProject.build_model(Dict())
-    # build_method expects :solver key and throws a KeyError when missing
-    @test_throws KeyError ThesisProject.build_method(Dict())
+    for bad_cfg in (Dict{Symbol,Any}(), NamedTuple())
+        @test_throws Exception ThesisProject.build_model(bad_cfg)
+        @test_throws Exception ThesisProject.build_method(bad_cfg)
+    end
     @test_throws ErrorException ThesisProject.load_config(1)
     @test_throws ErrorException ThesisProject.validate_config(1)
     @test_throws ErrorException ThesisProject.solve(1)
@@ -34,7 +34,7 @@ end
         method = DummyMethod(),
     )
     @test isa(sol, ThesisProject.Solution)
-    @test sol.policy[:a] == 1
+    @test cfg_get(sol.policy, :a) == 1
 end
 
 # Exercise viz API stubs via the package exports

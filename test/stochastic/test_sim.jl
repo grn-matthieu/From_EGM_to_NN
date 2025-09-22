@@ -68,9 +68,11 @@ using Statistics
     @test getkey(out_shared1, :assets) ≈ getkey(out_shared2, :assets)
 
     # different seeds produce different panels
-    cfg2 = deepcopy(cfg)
-    cfg2[:random] = deepcopy(cfg[:random])
-    cfg2[:random][:seed] = cfg2[:random][:seed] + 1
+    cfg2 =
+        let random_cfg =
+                cfg_patch(cfg_get(cfg, :random), :seed => cfg_get(cfg, :random, :seed) + 1)
+            cfg_patch(cfg, :random => random_cfg)
+        end
     rng_diff = ThesisProject.Determinism.make_rng(1234)
     out_diff =
         ThesisProject.simulate_panel(model, method, cfg2; N = N, T = T, rng = rng_diff)
@@ -80,8 +82,8 @@ using Statistics
     @test !(shocks ≈ shocks_diff)
 
     # missing cfg.random.seed should still be reproducible with identical RNGs
-    cfg_noseed = deepcopy(cfg)
-    cfg_noseed[:random] = Dict(:seed => nothing)
+    cfg_noseed =
+        cfg_patch(cfg, :random => cfg_patch(cfg_get(cfg, :random), :seed => nothing))
     rng_a = ThesisProject.Determinism.make_rng(42)
     rng_b = ThesisProject.Determinism.make_rng(42)
     out_a =

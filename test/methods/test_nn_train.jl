@@ -43,13 +43,20 @@ end
 
 @testset "NNTrain _step! + train!" begin
     # Small deterministic config and synthetic data
-    cfg = deepcopy(SMOKE_CFG)
-    cfg[:solver] = get(cfg, :solver, Dict{Symbol,Any}())
-    cfg[:solver][:epochs] = 2
-    cfg[:solver][:clip_norm] = 1e-9   # force clipping path
-    cfg[:solver][:patience] = 1
-    cfg[:solver][:min_delta] = 0.0
-    cfg[:logging] = Dict{Symbol,Any}(:dir => mktempdir())
+    solver_cfg =
+        cfg_has(SMOKE_CFG, :solver) ? cfg_get(SMOKE_CFG, :solver) : Dict{Symbol,Any}()
+    solver_cfg = cfg_patch(
+        solver_cfg,
+        :epochs => 2,
+        :clip_norm => 1e-9,
+        :patience => 1,
+        :min_delta => 0.0,
+    )
+    cfg = cfg_patch(
+        SMOKE_CFG,
+        :solver => solver_cfg,
+        :logging => Dict{Symbol,Any}(:dir => mktempdir()),
+    )
 
     state = NNInit.init_state(cfg)
 
@@ -60,7 +67,7 @@ end
     val = [(x, y)]
 
     new_state, loss, gnorm, lr =
-        NNTrain._step!(state, x, y; clip_norm = cfg[:solver][:clip_norm])
+        NNTrain._step!(state, x, y; clip_norm = cfg_get(cfg, :solver, :clip_norm))
     @test new_state isa NNInit.NNState
     @test isfinite(loss) && isfinite(gnorm)
     @test new_state.ps != state.ps  # parameters updated

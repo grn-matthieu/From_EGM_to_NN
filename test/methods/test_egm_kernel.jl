@@ -3,9 +3,7 @@ using ThesisProject
 using ThesisProject.CommonInterp: LinearInterp, MonotoneCubicInterp
 
 @testset "EGM kernel deterministic (linear/pchip)" begin
-    cfg = deepcopy(SMOKE_CFG)
-    # smaller grid keeps runtime down
-    cfg[:grids][:Na] = 20
+    cfg = cfg_patch(SMOKE_CFG, (:grids, :Na) => 20)
     model = build_model(cfg)
     p = get_params(model)
     g = get_grids(model)
@@ -21,8 +19,9 @@ using ThesisProject.CommonInterp: LinearInterp, MonotoneCubicInterp
         maxit = 300,
         interp_kind = LinearInterp(),
     )
-    @test length(sol_lin.c) == g[:a].N
-    @test length(sol_lin.a_next) == g[:a].N
+    a_grid = cfg_get(g, :a)
+    @test length(sol_lin.c) == a_grid.N
+    @test length(sol_lin.a_next) == a_grid.N
     @test sol_lin.converged === true
     @test sol_lin.max_resid < 1e-4
 
@@ -36,16 +35,14 @@ using ThesisProject.CommonInterp: LinearInterp, MonotoneCubicInterp
         maxit = 300,
         interp_kind = MonotoneCubicInterp(),
     )
-    @test length(sol_pchip.c) == g[:a].N
-    @test length(sol_pchip.a_next) == g[:a].N
+    @test length(sol_pchip.c) == a_grid.N
+    @test length(sol_pchip.a_next) == a_grid.N
     @test sol_pchip.converged === true
     @test sol_pchip.max_resid < 1e-4
 end
 
 @testset "EGM kernel stochastic (linear)" begin
-    cfg = deepcopy(SMOKE_STOCH_CFG)
-    # keep grids modest
-    cfg[:grids][:Na] = 16
+    cfg = cfg_patch(SMOKE_STOCH_CFG, (:grids, :Na) => 16)
     model = build_model(cfg)
     p = get_params(model)
     g = get_grids(model)
@@ -62,7 +59,7 @@ end
         maxit = 400,
         interp_kind = LinearInterp(),
     )
-    Na = g[:a].N
+    Na = cfg_get(g, :a).N
     Nz = length(S.zgrid)
     @test size(sol.c) == (Na, Nz)
     @test size(sol.a_next) == (Na, Nz)
@@ -72,10 +69,13 @@ end
 
 @testset "EGM policy monotonicity" begin
     for seed in (42, 99)
-        cfg = deepcopy(SMOKE_CFG)
-        cfg[:random] = get(cfg, :random, Dict{Symbol,Any}())
-        cfg[:random][:seed] = seed
-        cfg[:grids][:Na] = 40
+        random_cfg =
+            cfg_has(SMOKE_CFG, :random) ? cfg_get(SMOKE_CFG, :random) : Dict{Symbol,Any}()
+        cfg = cfg_patch(
+            SMOKE_CFG,
+            :random => cfg_patch(random_cfg, :seed => seed),
+            (:grids, :Na) => 40,
+        )
         model = build_model(cfg)
         params = get_params(model)
         grids = get_grids(model)
