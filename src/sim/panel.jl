@@ -11,14 +11,43 @@ using ..API:
 using ..CommonInterp: interp_linear!
 
 
-"""
-    simulate_panel(model, method, cfg; N=1000, T=200, rng::AbstractRNG)
+_to_namedtuple(x::NamedTuple) = x
+_to_namedtuple(x::AbstractDict) =
+    (; (Symbol(k) => _to_namedtuple(v) for (k, v) in pairs(x))...)
+_to_namedtuple(x::AbstractVector) = _to_namedtuple.(x)
+_to_namedtuple(x) = x
 
-Simulates a panel of N agents for T periods using a solved policy from `method` on `model`.
-Agents draw from the Markov chain implied by the model's shocks. The master seed is taken from `cfg[:random][:seed]` if available, otherwise it is deterministically derived from the provided `rng` via `derive_seed`.
+_to_dict(x::NamedTuple) = Dict{Symbol,Any}((k => _to_dict(v)) for (k, v) in pairs(x))
+_to_dict(x::AbstractDict) =
+    Dict{Symbol,Any}((Symbol(k) => _to_dict(v)) for (k, v) in pairs(x))
+_to_dict(x::AbstractVector) = [_to_dict(v) for v in x]
+_to_dict(x) = x
 
-Returns a NamedTuple with fields: assets::Matrix, consumption::Matrix, shocks::Matrix, seeds::Vector and diagnostics::Vector.
+
 """
+    simulate_panel(model, method, cfg::NamedTuple; N = 1000, T = 200, rng::AbstractRNG)
+
+Simulates a panel of `N` agents for `T` periods using a solved policy from `method`
+on `model`. The configuration `cfg` should mirror the structure consumed by
+`API.solve` and may include an optional `random` NamedTuple with a `seed` field.
+If `cfg.random.seed` is missing, the master seed is deterministically derived from
+`rng` via `derive_seed`.
+
+Returns a NamedTuple with fields: `assets::Matrix`, `consumption::Matrix`,
+`shocks::Matrix`, `seeds::Vector`, and `diagnostics::Vector`.
+"""
+function simulate_panel(
+    model::AbstractModel,
+    method::AbstractMethod,
+    cfg::NamedTuple;
+    N::Int = 1_000,
+    T::Int = 200,
+    rng::AbstractRNG,
+)
+    cfg_dict = _to_dict(cfg)
+    return _simulate_panel(model, method, cfg_dict, cfg; N = N, T = T, rng = rng)
+end
+
 function simulate_panel(
     model::AbstractModel,
     method::AbstractMethod,
@@ -27,8 +56,21 @@ function simulate_panel(
     T::Int = 200,
     rng::AbstractRNG,
 )
+    cfg_nt = _to_namedtuple(cfg)
+    return _simulate_panel(model, method, cfg, cfg_nt; N = N, T = T, rng = rng)
+end
+
+function _simulate_panel(
+    model::AbstractModel,
+    method::AbstractMethod,
+    cfg_dict::AbstractDict,
+    cfg_nt::NamedTuple;
+    N::Int,
+    T::Int,
+    rng::AbstractRNG,
+)
     # Solve once and for all to get the optimal policy fun and grids
-    sol = solve(model, method, cfg; rng = rng)
+    sol = solve(model, method, cfg_dict; rng = rng)
 
     p = get_params(model)
     g = get_grids(model)
@@ -55,7 +97,9 @@ function simulate_panel(
     # Master RNG/seed: prefer cfg.random.seed; else derive from the provided rng
     # The rule is to derive individual agent seeds from the master seed so that
     # identical rng instances lead to identical panel simulations.
-    master_seed = get(get(cfg, :random, Dict()), :seed, nothing)
+    random_cfg = get(cfg_nt, :random, nothing)
+    random_nt = random_cfg === nothing ? nothing : _to_namedtuple(random_cfg)
+    master_seed = random_nt === nothing ? nothing : get(random_nt, :seed, nothing)
     if master_seed === nothing
         master_seed = derive_seed(rng, :panel)
     else

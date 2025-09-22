@@ -12,6 +12,13 @@ using ..Shocks: ShockOutput, discretize
 import ..API: get_params, get_grids, get_shocks, get_utility
 
 
+_to_namedtuple(x::NamedTuple) = x
+_to_namedtuple(x::AbstractDict) =
+    (; (Symbol(k) => _to_namedtuple(v) for (k, v) in pairs(x))...)
+_to_namedtuple(x::AbstractVector) = _to_namedtuple.(x)
+_to_namedtuple(x) = x
+
+
 struct ConsumerSavingModel <: AbstractModel
     params::NamedTuple
     grids::NamedTuple
@@ -19,27 +26,32 @@ struct ConsumerSavingModel <: AbstractModel
     utility::NamedTuple
 end
 
-function build_cs_model(cfg::AbstractDict)
-    # Reading parameters
-    params = cfg[:params]
-    grids = cfg[:grids]
+function build_cs_model(cfg::NamedTuple)
+    hasproperty(cfg, :params) || error("configuration must contain a `params` section")
+    hasproperty(cfg, :grids) || error("configuration must contain a `grids` section")
+
+    params = _to_namedtuple(cfg.params)
+    grids_cfg = _to_namedtuple(cfg.grids)
 
     # Asset grid (for the cs model)
-    a_min = grids[:a_min]
-    a_max = grids[:a_max]
-    Na = grids[:Na]
+    a_min = grids_cfg.a_min
+    a_max = grids_cfg.a_max
+    Na = grids_cfg.Na
     agrid = collect(range(a_min, a_max; length = Na))
     grids = (a = (; grid = agrid, min = a_min, max = a_max, N = Na),)
 
     # Shocks discretization (if stoch, modalities in the shocks field)
     shocks = nothing
     shocks_cfg = get(cfg, :shocks, nothing)
-    if shocks_cfg isa AbstractDict && get(shocks_cfg, :active, false)
-        shocks = discretize(shocks_cfg)
+    if shocks_cfg !== nothing
+        shocks_nt = _to_namedtuple(shocks_cfg)
+        if get(shocks_nt, :active, false)
+            shocks = discretize(shocks_nt)
+        end
     end
 
     # Utility closure (CRRA)
-    σ = params[:σ]
+    σ = params.σ
     if isapprox(σ, 1.0; atol = 1e-8) # handle the extreme case (log)
         u = (c -> log.(c))
         u_prime = (c -> 1.0 ./ c)
@@ -52,6 +64,10 @@ function build_cs_model(cfg::AbstractDict)
     utility = (; u, u_prime, u_prime_inv, σ)
 
     return ConsumerSavingModel((; params...), grids, shocks, utility)
+end
+
+function build_cs_model(cfg::AbstractDict)
+    return build_cs_model(_to_namedtuple(cfg))
 end
 
 get_params(model::ConsumerSavingModel) = model.params

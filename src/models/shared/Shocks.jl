@@ -11,6 +11,12 @@ using LinearAlgebra: norm, mul!
 
 export discretize, ShockOutput
 
+_to_namedtuple(x::NamedTuple) = x
+_to_namedtuple(x::AbstractDict) =
+    (; (Symbol(k) => _to_namedtuple(v) for (k, v) in pairs(x))...)
+_to_namedtuple(x::AbstractVector) = _to_namedtuple.(x)
+_to_namedtuple(x) = x
+
 struct ShockOutput
     zgrid::Vector{Float64}
     Π::Matrix{Float64}
@@ -102,9 +108,12 @@ function _validate_invariant(
     return nothing
 end
 
-function get_shock_params(shocks::AbstractDict)
-    ρ = get(shocks, :ρ_shock, 0.0)
-    σ_ε = get(shocks, :σ_shock, 0.0)
+function get_shock_params(shocks::NamedTuple)
+    ρ = get(shocks, :ρ_shock, get(shocks, Symbol("ρ_shock"), 0.0))
+    σ_ε = get(shocks, :σ_shock, nothing)
+    σ_ε === nothing && (σ_ε = get(shocks, Symbol("σ_shock"), nothing))
+    σ_ε === nothing && (σ_ε = get(shocks, :s_shock, 0.0))
+    σ_ε === nothing && (σ_ε = 0.0)
     Nz = get(shocks, :Nz, 7)
     method = get(shocks, :method, "tauchen")
     m = get(shocks, :m, 3.0)
@@ -112,8 +121,12 @@ function get_shock_params(shocks::AbstractDict)
     return ρ, σ_ε, Nz, method, m, validate
 end
 
+function get_shock_params(shocks::AbstractDict)
+    return get_shock_params(_to_namedtuple(shocks))
+end
 
-function discretize(shocks::AbstractDict)::ShockOutput
+
+function discretize(shocks::NamedTuple)::ShockOutput
     ρ, σ_ε, Nz, method, m, validate = get_shock_params(shocks)
 
     if σ_ε == 0 || Nz == 1 # degenerate case
@@ -142,6 +155,10 @@ function discretize(shocks::AbstractDict)::ShockOutput
     ρ_stat = markov_autocorr(zgrid, Π, π)
     diagnostics = Float64[μ, σ2, ρ_stat]
     return ShockOutput(zgrid, Π, π, diagnostics)
+end
+
+function discretize(shocks::AbstractDict)::ShockOutput
+    return discretize(_to_namedtuple(shocks))
 end
 
 end # module
