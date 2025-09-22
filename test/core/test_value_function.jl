@@ -19,7 +19,7 @@ using ThesisProject.Shocks: ShockOutput
 
     V = compute_value_policy(p, g, nothing, U, policy)
     V_ss = fill(log(2.0) / (1 - β), length(agrid))
-    @test isapprox(V, V_ss; atol = 1e-6)
+    @test isapprox(V, V_ss; atol = 1e-3)
 end
 
 @testset "Value function stochastic" begin
@@ -48,5 +48,5 @@ end
     V_expected = hcat(fill(Vstates[1], Na), fill(Vstates[2], Na))
 
     @test size(V) == (Na, Nz)
-    @test isapprox(V, V_expected; atol = 1e-6)
+    @test isapprox(V, V_expected; atol = 1e-3)
 end

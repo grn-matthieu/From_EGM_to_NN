@@ -1,37 +1,22 @@
-"""
-ValueFunction
-
-Value-function utilities (Bellman operator evaluations, expectations, etc.)
-used by projection methods and diagnostics.
-"""
 module ValueFunction
 
 using ..CommonInterp: interp_linear!
-
 export compute_value_policy
 
-"""
-    compute_value_policy(p, g, S, U, policy; tol=1e-8, maxit=1_000)
+# small helper
+_get(x, s::Symbol) = hasproperty(x, s) ? getfield(x, s) : x[s]
 
-Stability-robust value evaluation that supports both deterministic (vector) and
-stochastic (matrix over shocks) policies. Prefer this over `compute_value` in solvers.
-"""
 function compute_value_policy(p, g, S, U, policy; tol::Real = 1e-8, maxit::Int = 1_000)
-    agrid = g[:a].grid
-    Na = g[:a].N
+    a = _get(g, :a)
+    agrid = _get(a, :grid)
+    Na = _get(a, :N)
 
-    cpol = policy[:c].value
-    apol = policy[:a].value
+    cpol = _get(_get(policy, :c), :value)
+    apol = _get(_get(policy, :a), :value)
 
-    # Determine discount factor β robustly
-    βv = begin
-        nms = propertynames(p)
-        if :β in nms
-            getfield(p, :β)
-        else
-            error("Parameter β not found in params")
-        end
-    end
+    βv =
+        (:β in propertynames(p)) ? getfield(p, :β) :
+        error("Parameter β not found in params")
 
     # Deterministic
     if cpol isa AbstractVector && apol isa AbstractVector
@@ -63,8 +48,7 @@ function compute_value_policy(p, g, S, U, policy; tol::Real = 1e-8, maxit::Int =
     V = zeros(Na, Nz)
     cont = similar(V)
     tmp = similar(agrid)
-
-    P = S === nothing ? nothing : S.Π  # transition matrix Π from ShockOutput
+    P = S === nothing ? nothing : _get(S, :Π)
     @assert P !== nothing "Missing shocks transition matrix for stochastic value evaluation"
 
     V_new = similar(V)

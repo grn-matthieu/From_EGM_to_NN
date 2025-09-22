@@ -44,10 +44,27 @@ using ThesisProject
     orig_compute_value_policy = getfield(ThesisProject.ValueFunction, :compute_value_policy)
     Core.eval(
         ThesisProject.ValueFunction,
-        :(function compute_value_policy(p, g, S, U, policy)
-            # Return a small value vector matching grid length
-            return fill(0.0, length(policy[:c].grid))
-        end),
+        :(
+            function compute_value_policy(
+                p,
+                g,
+                S,
+                U,
+                policy;
+                tol::Real = 1e-8,
+                maxit::Int = 1_000,
+            )
+                aN = length(g[:a].grid)
+                cval = policy[:c].value
+                if cval isa AbstractVector
+                    return fill(0.0, aN)
+                elseif cval isa AbstractMatrix
+                    return fill(0.0, aN, size(cval, 2))
+                else
+                    throw(ArgumentError("policy[:c].value must be a vector or matrix"))
+                end
+            end
+        ),
     )
 
     try
