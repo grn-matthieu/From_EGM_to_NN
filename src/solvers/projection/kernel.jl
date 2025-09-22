@@ -8,7 +8,8 @@ module ProjectionKernel
 
 using ..Chebyshev: chebyshev_basis, chebyshev_nodes
 using ..ProjectionCoefficients: solve_coefficients
-using ..EulerResiduals: euler_resid_det_2, euler_resid_stoch
+using ..EulerResiduals:
+    euler_resid_det, euler_resid_stoch, euler_resid_det_grid, euler_resid_stoch_grid
 using ..CommonInterp: interp_pchip!
 
 export solve_projection_det, solve_projection_stoch
@@ -116,7 +117,7 @@ function solve_projection_det(
         @. a_next = clamp(R * a_grid + income - c, a_min, a_max)
         B_val = B_val_cache[:, 1:(order+1)]
         c_val = B_val * coeffs
-        resid_val = euler_resid_det_2(model_params, a_val, c_val)
+        resid_val = euler_resid_det_grid(model_params, a_val, c_val)
         max_resid_val = maximum(resid_val[min(2, end):end])
 
         if max_resid_val < best_val_resid
@@ -124,7 +125,7 @@ function solve_projection_det(
             best_coeffs = coeffs
             best_c = copy(c)
             best_a_next = copy(a_next)
-            best_resid = euler_resid_det_2(model_params, a_grid, c)
+            best_resid = euler_resid_det_grid(model_params, a_grid, c)
             best_max_resid = maximum(best_resid[min(2, end):end])
             best_iters = iters
             best_converged = converged
@@ -138,7 +139,7 @@ function solve_projection_det(
         interp_pchip!(c_out, a_grid, best_c, a_out)
     end
     a_next_out = clamp.(R .* a_out .+ income .- c_out, a_min, a_max)
-    resid_out = euler_resid_det_2(model_params, a_out, c_out)
+    resid_out = euler_resid_det_grid(model_params, a_out, c_out)
     max_resid_out = maximum(resid_out[min(2, end):end])
 
     runtime = (time_ns() - start_time) / 1e9
@@ -246,7 +247,7 @@ function solve_projection_stoch(
             coeffs = solve_coefficients(B, c_new; λ = λ)
             delta = maximum(abs.(c_new .- c))
             c .= c_new
-            resid_mat = euler_resid_stoch(model_params, a_grid, z_grid, transition, c)
+            resid_mat = euler_resid_stoch_grid(model_params, a_grid, z_grid, transition, c)
             max_resid = maximum(resid_mat[2:end, :])
             if delta < tol && max_resid < tol
                 converged = true
@@ -261,7 +262,7 @@ function solve_projection_stoch(
 
         B_val = B_val_cache[:, 1:(order+1)]
         c_val = B_val * coeffs
-        resid_val = euler_resid_stoch(model_params, a_val, z_grid, transition, c_val)
+        resid_val = euler_resid_stoch_grid(model_params, a_val, z_grid, transition, c_val)
         max_resid_val = maximum(resid_val[min(2, end):end, :])
 
         if max_resid_val < best_val_resid
@@ -269,7 +270,7 @@ function solve_projection_stoch(
             best_coeffs = coeffs
             best_c = copy(c)
             best_a_next = copy(a_next)
-            best_resid = euler_resid_stoch(model_params, a_grid, z_grid, transition, c)
+            best_resid = euler_resid_stoch_grid(model_params, a_grid, z_grid, transition, c)
             best_max_resid = maximum(best_resid[min(2, end):end, :])
             best_iters = iters
             best_converged = converged
@@ -291,7 +292,7 @@ function solve_projection_stoch(
         @views @. a_next_out[:, j] = clamp(R * a_out + income - c_out[:, j], a_min, a_max)
     end
 
-    resid_out = euler_resid_stoch(model_params, a_out, z_grid, transition, c_out)
+    resid_out = euler_resid_stoch_grid(model_params, a_out, z_grid, transition, c_out)
     max_resid_out = maximum(resid_out[min(2, end):end, :])
 
     runtime = (time_ns() - start_time) / 1e9

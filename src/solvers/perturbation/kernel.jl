@@ -6,7 +6,8 @@ baselines. Not intended as a production-quality solver.
 """
 module PerturbationKernel
 
-using ..EulerResiduals: euler_resid_det_2, euler_resid_stoch
+using ..EulerResiduals:
+    euler_resid_det, euler_resid_stoch, euler_resid_det_grid, euler_resid_stoch_grid
 using ..CommonInterp: InterpKind, LinearInterp
 using ForwardDiff
 using LinearAlgebra
@@ -158,7 +159,7 @@ function solve_perturbation_det(
     a_next = @. R * a_grid + ȳ - c
     @. a_next = clamp(a_next, a_min, a_max)
 
-    resid = euler_resid_det_2(p, a_grid, c)
+    resid = euler_resid_det_grid(p, a_grid, c)
     iters = 1
     converged = true
     # prune boundaries when assessing accuracy
@@ -303,7 +304,7 @@ function solve_perturbation_stoch(
         end
     end
 
-    resid = euler_resid_stoch(p, a_grid, z_grid, Π, c)
+    resid = euler_resid_stoch_grid(p, a_grid, z_grid, Π, c)
     iters = 1
     converged = true
     # prune boundary asset points when computing maximum residual

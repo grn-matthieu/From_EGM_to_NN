@@ -6,8 +6,9 @@ For now this is a stub that calls into `NNKernel` which provides a placeholder i
 """
 module NN
 using ..API
+using Printf
 import ..API: solve
-using ..NNKernel: solve_nn_det, solve_nn_stoch
+using ..NNKernel: solve_nn
 using ..ValueFunction: compute_value_policy
 using ..Determinism: canonicalize_cfg, hash_hex
 
@@ -27,20 +28,15 @@ function build_nn_method(cfg::AbstractDict)
     ))
 end
 
-function solve(
-    model::AbstractModel,
-    method::NNMethod,
-    cfg::AbstractDict;
-    rng = nothing,
-)::Solution
+function solve(model::AbstractModel, method::NNMethod, cfg::AbstractDict;)::Solution
     p = get_params(model)
     g = get_grids(model)
     S = get_shocks(model)
     U = get_utility(model)
 
-    sol =
-        S === nothing ? solve_nn_det(p, g, U; opts = method.opts) :
-        solve_nn_stoch(p, g, S, U; opts = method.opts)
+    # Call the NN kernel to solve the model and return the solution struct
+    sol = solve_nn(model; opts = method.opts)
+    @printf "DEBUG NN: solve_nn returned type = %s\n" string(typeof(sol))
 
     ee = sol.resid
     ee_vec = ee isa AbstractMatrix ? vec(maximum(ee, dims = 2)) : ee

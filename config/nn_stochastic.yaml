@@ -16,7 +16,7 @@ shocks:
   active: true
   method: "rouwenhorst"   # or "tauchen"
   ρ_shock: 0.9            # ASCII alias accepted in validator
-  s_shock: 0.10           # ASCII alias accepted in validator
+  σ_shock: 0.10           # ASCII alias accepted in validator
   Nz: 7
   validate: true
 

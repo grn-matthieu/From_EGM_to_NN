@@ -75,6 +75,12 @@ function interp_linear(x::AbstractVector, y::AbstractVector, xq::Real)
     return _interp_linear_scalar(xq, x, y, length(x))
 end
 
+# Accept any Number (including Dual numbers from AD) for scalar interpolation
+function interp_linear(x::AbstractVector, y::AbstractVector, xq::Number)
+    @assert length(x) == length(y)
+    return _interp_linear_scalar(xq, x, y, length(x))
+end
+
 
 
 """

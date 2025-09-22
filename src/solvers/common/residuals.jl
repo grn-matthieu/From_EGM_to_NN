@@ -1,119 +1,142 @@
-"""
-EulerResiduals
-
-Implements Euler-equation residual calculations (deterministic and stochastic)
-and their in-place variants, used for accuracy metrics and training losses.
-"""
 module EulerResiduals
 
-using ..CommonInterp: interp_linear!, interp_linear
+using ..CommonInterp: interp_linear
 using ..API
+using Zygote
 
-export euler_resid_det,
-    euler_resid_stoch, euler_resid_det_2, euler_resid_det!, euler_resid_stoch!
+export euler_resid_det, euler_resid_stoch
+export euler_resid_det!, euler_resid_stoch!
+export euler_resid_det_grid, euler_resid_stoch_grid
 
-# --- Functions ---
+# helpers
+@inline _T(args...) = promote_type(map(eltype, args)...)
+@inline _eps(::Type{T}) where {T<:AbstractFloat} = T(1e-12)
+
+# -------------------------
+# Deterministic (pure, AD-safe)
+# -------------------------
 
 """
-    euler_resid_det!(resid, model_params, c, c_next)
+    euler_resid_det(params, c, c_next)
 
-Write absolute Euler equation residuals for the deterministic model into `resid`.
-Computations are based on the CRRA utility function.
+Absolute Euler residuals given current and next consumption.
+Pure. Zygote-compatible.
 """
+function euler_resid_det(params, c::AbstractVector, c_next::AbstractVector)
+    @assert length(c) == length(c_next)
+    T = _T(c, c_next)
+    β = T(params.β)
+    σ = T(params.σ)
+    R = T(1) + T(params.r)
+    ϵ = _eps(T)
+    c0 = max.(T.(c), ϵ)
+    c1 = max.(T.(c_next), ϵ)
+    abs.(T(1) .- (β * R) .* (c0 ./ c1) .^ σ)
+end
+
+"""
+    euler_resid_det(params, a_grid, c)
+
+Absolute residuals on asset grid using linear interpolation of c'.
+Pure. Zygote-compatible.
+"""
+function euler_resid_det_grid(params, a_grid::AbstractVector, c::AbstractVector)
+    @assert length(a_grid) == length(c)
+    T = _T(a_grid, c)
+    R = T(1) + T(params.r)
+    # params may omit `:y` or have it set to `nothing` (e.g., some model configs).
+    rawy = (:y in propertynames(params)) ? getfield(params, :y) : zero(T)
+    rawy = rawy === nothing ? zero(T) : rawy
+    y = T(rawy)
+    ϵ = _eps(T)
+    a = T.(a_grid)
+    cT = T.(c)
+    n = length(a)
+    # compute ap elementwise without mutating existing arrays
+    ap_vals = [clamp(R * a[i] + y - cT[i], first(a), last(a)) for i = 1:n]
+    c_next = [interp_linear(a, cT, ap_i) for ap_i in ap_vals]
+    euler_resid_det(params, cT, c_next)
+end
+
+# Mutating variant (not AD-safe)
 function euler_resid_det!(
-    resid::AbstractVector{<:Real},
-    model_params,
-    c::AbstractVector{<:Real},
-    c_next::AbstractVector{<:Real},
+    resid::AbstractVector,
+    params,
+    c::AbstractVector,
+    c_next::AbstractVector,
 )
     @assert length(resid) == length(c) == length(c_next)
-
-    β = model_params.β
-    σ = model_params.σ
-    R = 1 + model_params.r
-
+    β = params.β
+    σ = params.σ
+    R = 1 + params.r
     @inbounds for i in eachindex(resid)
-        c_i = clamp(c[i], 1e-12, Inf)
-        c_next_i = clamp(c_next[i], 1e-12, Inf)
-        resid[i] = abs(1 - β * R * (c_i / c_next_i)^σ)
+        c0 = c[i] <= 1e-12 ? 1e-12 : c[i]
+        c1 = c_next[i] <= 1e-12 ? 1e-12 : c_next[i]
+        resid[i] = abs(1 - β * R * (c0 / c1)^σ)
     end
-    return resid
+    resid
 end
+Zygote.@ignore euler_resid_det!
 
-"""
-    euler_resid_det(model_params, c, c_next)
+# Backward-compatible alias
+@deprecate euler_resid_det_2(params, a_grid, c) euler_resid_det_grid(params, a_grid, c)
 
-Allocate and return absolute Euler equation residuals for the deterministic model.
-"""
-function euler_resid_det(
-    model_params,
-    c::AbstractVector{<:Real},
-    c_next::AbstractVector{<:Real},
+# -------------------------
+# Stochastic (pure, AD-safe)
+# -------------------------
+function euler_resid_stoch(
+    params,
+    a_grid::AbstractVector,
+    z_grid::AbstractVector,
+    Π::AbstractMatrix,
+    c::AbstractMatrix,
 )
-    resid = similar(c, Float64)
-    return euler_resid_det!(resid, model_params, c, c_next)
-end
-
-"""
-    euler_resid_det(model_params, a_grid, c)
-
-Compute absolute Euler equation residuals for the deterministic model on an
-asset grid `a_grid` given a consumption policy `c`. The policy is defined on the
-same grid and residuals are obtained by linearly interpolating the policy when
-evaluating future consumption. Output is a vector of residuals of length
-`length(a_grid)`.
-"""
-function euler_resid_det_2(
-    model_params,
-    a_grid::AbstractVector{<:Real},
-    c::AbstractVector{<:Real},
-)
-    Na = length(a_grid)
-    @assert length(c) == Na
-
-    R = 1 + model_params.r
-    y = getfield(model_params, :y)
-
-    a_min = first(a_grid)
-    a_max = last(a_grid)
-
-    a_next = similar(c)
-    @. a_next = clamp(R * a_grid + y - c, a_min, a_max)
-
-    c_next = similar(c)
-    interp_linear!(c_next, a_grid, c, a_next)
-
-    res = similar(c, Float64)
-    euler_resid_det!(res, model_params, c, c_next)
-    return res
-end
-
-
-"""
-    euler_resid_stoch!(resid, model_params, a_grid, z_grid, Pz, c)
-
-Write absolute Euler equation residuals for the stochastic savings model into `resid`.
-The policy `c` is a Na x Nz matrix of consumption. When residuals are computed,
-linear interpolation is used on the asset grid.
-"""
-function euler_resid_stoch!(
-    resid::AbstractMatrix{<:Real},
-    model_params,
-    a_grid::AbstractVector{<:Real},
-    z_grid::AbstractVector{<:Real},
-    Pz::AbstractMatrix{<:Real},
-    c::AbstractMatrix{<:Real},
-)
+    # grid-based stochastic residuals
     Na, Nz = size(c)
-    @assert size(resid, 1) == Na && size(resid, 2) == Nz
     @assert length(a_grid) == Na
     @assert length(z_grid) == Nz
-    @assert size(Pz, 1) == Nz && size(Pz, 2) == Nz
+    @assert size(Π) == (Nz, Nz)
 
-    β = model_params.β
-    σ = model_params.σ
-    R = (1 + model_params.r)
+    T = _T(a_grid, z_grid, Π, c)
+    β = T(params.β)
+    σ = T(params.σ)
+    R = T(1) + T(params.r)
+    ϵ = _eps(T)
 
+    a = T.(a_grid)
+    z = T.(z_grid)
+    ΠT = T.(Π)
+    C = T.(c)
+
+    res = [
+        begin
+            c_ij = max(C[i, j], ϵ)
+            ap = R * a[i] + exp(z[j]) - c_ij
+            Emu = mapreduce(
+                jp -> begin
+                    cp = interp_linear(a, C[:, jp], ap)
+                    ΠT[j, jp] * (max(cp, ϵ) / c_ij)^(-σ)
+                end,
+                +,
+                1:Nz;
+                init = zero(T),
+            )
+            abs(T(1) - (β * R) * Emu)
+        end for i = 1:Na, j = 1:Nz
+    ]
+    reshape(res, Na, Nz)
+end
+
+# Alias for grid-based stochastic residuals
+const euler_resid_stoch_grid = euler_resid_stoch
+
+# Mutating stochastic (not AD-safe)
+function euler_resid_stoch!(resid::AbstractMatrix, params, a_grid, z_grid, Π, c)
+    Na, Nz = size(c)
+    @assert size(resid) == (Na, Nz)
+    β = params.β
+    σ = params.σ
+    R = 1 + params.r
     @inbounds for j = 1:Nz
         y = exp(z_grid[j])
         for i = 1:Na
@@ -121,30 +144,15 @@ function euler_resid_stoch!(
             ap = R * a_grid[i] + y - c_ij
             Emu = 0.0
             for jp = 1:Nz
-                cp = interp_linear(a_grid, view(c, :, jp), ap)
-                Emu += Pz[j, jp] * (max(cp, 1e-12) / c_ij)^(-σ)
+                cp = interp_linear(a_grid, c[:, jp], ap)
+                Emu += Π[j, jp] * (max(cp, 1e-12) / c_ij)^(-σ)
             end
-            resid[i, j] = abs(1.0 - β * R * Emu)
+            resid[i, j] = abs(1 - β * R * Emu)
         end
     end
-    return resid
+    resid
 end
 
-"""
-    euler_resid_stoch(model_params, a_grid, z_grid, Pz, c)
+Zygote.@ignore euler_resid_stoch!
 
-Allocate and return absolute Euler equation residuals for the stochastic savings model.
-"""
-function euler_resid_stoch(
-    model_params,
-    a_grid::AbstractVector{<:Real},
-    z_grid::AbstractVector{<:Real},
-    Pz::AbstractMatrix{<:Real},
-    c::AbstractMatrix{<:Real},
-)
-    res = similar(c, Float64)
-    return euler_resid_stoch!(res, model_params, a_grid, z_grid, Pz, c)
-end
-
-
-end # module
+end # module EulerResiduals

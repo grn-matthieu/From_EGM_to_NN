@@ -43,6 +43,7 @@ include("solvers/egm/kernel.jl")
 include("solvers/perturbation/kernel.jl")
 
 # NN solver
+include("solvers/nn/data_nn.jl")
 include("solvers/nn/kernel.jl")
 
 # 5) methods (adapters)
