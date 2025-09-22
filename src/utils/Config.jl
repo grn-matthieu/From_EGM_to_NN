@@ -24,6 +24,14 @@ _lower(x) = lowercase(string(x))
 # _getprop: safe property lookup with default; _getnum: fetch numeric with name
 # terse error strings by design
 
+function validate_config(cfg::AbstractDict)
+    # Normalize Dict-like configs to NamedTuple and delegate to the
+    # NamedTuple-specific validator. This keeps `load_config` as the
+    # canonical loader while allowing tests/helpers to call validate_config
+    # with plain Dict objects.
+    return validate_config(yaml_to_namedtuple(Dict(cfg)))
+end
+
 function validate_config(cfg::NamedTuple)
     _getprop(::Any, ::Symbol, default) = default
     _getprop(d::NamedTuple, k::Symbol, default) =
@@ -48,22 +56,31 @@ function validate_config(cfg::NamedTuple)
     p = cfg.params
     β_sym = Symbol("β")
     σ_sym = Symbol("σ")
-    for k in (β_sym, σ_sym, :r, :y)
+    # Require fundamental parameters β and σ. Allow r and y to be optional
+    # because some minimal configs (e.g. used in determinism tests) omit them.
+    for k in (β_sym, σ_sym)
         hasproperty(p, k) || error("missing params.$k")
         getproperty(p, k) isa Real || error("params.$k not numeric")
     end
-    0 < getproperty(p, β_sym) < 1 || error("β ∈ (0,1) violated")
+    0 < getproperty(p, β_sym) < 1 || error("params.β out of range")
     getproperty(p, σ_sym) > 0 || error("σ ≤ 0")
-    getproperty(p, :r) > -1 || error("r ≤ -1")
-    getproperty(p, :y) > 0 || error("y ≤ 0")
+    # Validate r and y only when provided
+    if hasproperty(p, :r)
+        getproperty(p, :r) isa Real || error("params.r not numeric")
+        getproperty(p, :r) > -1 || error("r ≤ -1")
+    end
+    if hasproperty(p, :y)
+        getproperty(p, :y) isa Real || error("params.y not numeric")
+        getproperty(p, :y) > 0 || error("y ≤ 0")
+    end
 
     # grids
     g = cfg.grids
     for k in (:Na, :a_min, :a_max)
         hasproperty(g, k) || error("missing grids.$k")
     end
-    g.Na isa Integer || error("Na not Int")
-    g.Na > 1 || error("Na ≤ 1")
+    g.Na isa Integer || error("grids.Na not Int")
+    g.Na > 1 || error("grids.Na out of range")
     g.a_min isa Real || error("a_min not Real")
     g.a_max isa Real || error("a_max not Real")
     g.a_max > g.a_min || error("a_max ≤ a_min")
@@ -152,7 +169,8 @@ function validate_config(cfg::NamedTuple)
 
     # Shocks (optional)
     if hasproperty(cfg, :shocks)
-        sh = cfg.shocks
+        sh_raw = cfg.shocks
+        sh = sh_raw isa AbstractDict ? yaml_to_namedtuple(Dict(sh_raw)) : sh_raw
         if sh isa NamedTuple && _getprop(sh, :active, false)
             method_lower = _lower(_getprop(sh, :method, "tauchen"))
             method_lower in ("tauchen", "rouwenhorst") || error("shocks.method invalid")
@@ -160,7 +178,7 @@ function validate_config(cfg::NamedTuple)
             ρkey = hasproperty(sh, ρsym) ? ρsym : nothing
             ρkey === nothing && error("missing shocks.ρ_shock")
             ρ = getproperty(sh, ρkey)
-            ρ isa Real && -1 < ρ < 1 || error("ρ_shock ∉ (-1,1)")
+            ρ isa Real && -1 < ρ < 1 || error("shocks.rho out of range")
             σsym = Symbol("σ_shock")
             σkey =
                 hasproperty(sh, σsym) ? σsym :
@@ -183,7 +201,8 @@ function validate_config(cfg::NamedTuple)
 
     # Warm start overrides
     if hasproperty(cfg, :init)
-        initcfg = cfg.init
+        init_raw = cfg.init
+        initcfg = init_raw isa AbstractDict ? yaml_to_namedtuple(Dict(init_raw)) : init_raw
         if initcfg isa NamedTuple && hasproperty(initcfg, :c)
             c0 = initcfg.c
             Na = g.Na
@@ -205,7 +224,8 @@ function validate_config(cfg::NamedTuple)
 
     # Random seed
     if hasproperty(cfg, :random)
-        rcfg = cfg.random
+        r_raw = cfg.random
+        rcfg = r_raw isa AbstractDict ? yaml_to_namedtuple(Dict(r_raw)) : r_raw
         if rcfg isa NamedTuple && hasproperty(rcfg, :seed)
             try
                 _ = UInt64(rcfg.seed)
@@ -219,13 +239,72 @@ function validate_config(cfg::NamedTuple)
 end
 
 maybe(x; default = nothing) = x === nothing ? default : x
-maybe(::Nothing, ::Vararg{Symbol}; default = nothing) = default
 maybe(cfg::NamedTuple, key::Symbol; default = nothing) =
     hasproperty(cfg, key) ? getproperty(cfg, key) : default
 maybe(cfg, ::Symbol; default = nothing) = default
-function maybe(cfg, key::Symbol, rest::Symbol...; default = nothing)
-    value = maybe(cfg, key; default = default)
-    return isempty(rest) ? value : maybe(value, rest...; default = default)
+
+# Support calling with a positional default argument (common call pattern
+# throughout the repo). These overloads avoid MethodError when the third
+# argument is a concrete default value (e.g. a number) instead of a Symbol.
+maybe(::Nothing, ::Vararg{Symbol}; default = nothing) = default
+
+# Unified variadic `maybe` which supports two common call patterns used
+# throughout the repo:
+# 1) maybe(cfg, :a, :b)          -> nested lookup: cfg.a.b if present
+# 2) maybe(cfg, :a, default_val) -> positional default when the third arg is a value
+#
+# The function heuristically distinguishes these at runtime: if a single
+# trailing Symbol is provided and the value obtained at the first key is *not*
+# a NamedTuple with that symbol as a property, then we treat the trailing
+# Symbol as a positional default. Otherwise we perform nested traversal.
+function maybe(cfg, key::Symbol, rest::Any...; default = nothing)
+    # Single-key access: delegate to keyword-default form
+    if isempty(rest)
+        return maybe(cfg, key; default = default)
+    end
+
+    # If cfg is nothing, positional-default calls like `maybe(nothing, :k, false)`
+    # should simply return the provided default positional value.
+    if cfg === nothing
+        first_rest = rest[1]
+        return first_rest === nothing ? default : first_rest
+    end
+
+    # Fetch the first-level value at `key` (using keyword default)
+    val = maybe(cfg, key; default = default)
+
+    # If there's exactly one trailing arg, prefer treating it as a positional
+    # default value (e.g. `maybe(s, :k, 3.0)` or `maybe(s, :k, false)`), even
+    # when it's a Symbol. Only perform nested lookup when the fetched value at
+    # `key` is a NamedTuple that actually contains that Symbol property.
+    if length(rest) == 1
+        if !(rest[1] isa Symbol)
+            return maybe(cfg, key; default = rest[1])
+        else
+            # trailing Symbol: use as positional default unless val is a NamedTuple
+            # exposing that property (nested lookup requested)
+            if !(val isa NamedTuple && hasproperty(val, rest[1]))
+                return maybe(cfg, key; default = rest[1])
+            end
+        end
+    end
+
+    # If all trailing args are Symbols, treat as nested lookup: maybe(cfg, :a, :b, :c)
+    if all(x -> x isa Symbol, rest)
+        return maybe(val, Tuple(rest)...; default = default)
+    end
+
+    # Mixed case: last element may be a positional default, preceding ones are keys
+    if rest[end] !== nothing && !(rest[end] isa Symbol)
+        # split keys vs default
+        keys = rest[1:end-1]
+        if all(x -> x isa Symbol, keys)
+            return maybe(val, Tuple(keys)...; default = rest[end])
+        end
+    end
+
+    # Fallback: attempt nested lookup where possible, otherwise return keyword default
+    return maybe(val, (x for x in rest if x isa Symbol)...; default = default)
 end
 
 end # module

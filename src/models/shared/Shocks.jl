@@ -8,7 +8,7 @@ module Shocks
 
 using SpecialFunctions: erf
 using LinearAlgebra: norm, mul!
-using ..UtilsConfig: maybe
+using ..UtilsConfig: maybe, yaml_to_namedtuple
 
 export discretize, ShockOutput
 
@@ -144,6 +144,15 @@ function discretize(shocks::NamedTuple)::ShockOutput
     ρ_stat = markov_autocorr(zgrid, Π, π)
     diagnostics = Float64[μ, σ2, ρ_stat]
     return ShockOutput(zgrid, Π, π, diagnostics)
+end
+
+# Accept Dict-like inputs in tests and other call sites by converting to
+# NamedTuple. This keeps the public API convenient while preserving the
+# strong-typed internal implementation.
+function discretize(shocks::AbstractDict)
+    # Convert keys to Symbols and values recursively to NamedTuples/arrays
+    named = yaml_to_namedtuple(Dict(shocks))
+    return discretize(named)
 end
 
 end # module

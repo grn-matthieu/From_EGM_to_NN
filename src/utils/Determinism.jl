@@ -32,11 +32,13 @@ function canonicalize_cfg(cfg)
     function canonical(obj)
         if obj isa NamedTuple
             # Convert to pairs, canonicalize values, sort by key
-            ks = sort(Symbol.(keys(obj)))
+            ks = collect(Symbol.(keys(obj)))
+            ks = sort(ks)
             vs = map(k -> canonical(getfield(obj, k)), ks)
             NamedTuple{Tuple(ks)}(vs)
         elseif obj isa AbstractDict
-            ks = sort(Symbol.(keys(obj)))
+            ks = collect(Symbol.(keys(obj)))
+            ks = sort(ks)
             Dict(k => canonical(obj[k]) for k in ks)
         elseif obj isa AbstractArray
             map(canonical, obj)
