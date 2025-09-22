@@ -11,6 +11,7 @@ import ..API: solve
 using ..NNKernel: solve_nn
 using ..ValueFunction: compute_value_policy
 using ..Determinism: canonicalize_cfg, hash_hex
+using ..UtilsConfig: maybe
 
 export NNMethod, build_nn_method
 
@@ -19,14 +20,13 @@ struct NNMethod <: AbstractMethod
 end
 
 function build_nn_method(cfg::NamedTuple)
-    solver_cfg = hasproperty(cfg, :solver) ? cfg.solver : nothing
-    solver_cfg === nothing && error("Missing solver section in configuration")
+    solver_cfg = cfg.solver
     return NNMethod((
-        name = hasproperty(cfg, :method) ? cfg.method : solver_cfg.method,
-        epochs = get(solver_cfg, :epochs, 10),
-        batch = get(solver_cfg, :batch, 64),
-        lr = get(solver_cfg, :lr, 1e-3),
-        verbose = get(solver_cfg, :verbose, false),
+        name = maybe(cfg, :method, solver_cfg.method),
+        epochs = maybe(solver_cfg, :epochs, 10),
+        batch = maybe(solver_cfg, :batch, 64),
+        lr = maybe(solver_cfg, :lr, 1e-3),
+        verbose = maybe(solver_cfg, :verbose, false),
     ))
 end
 

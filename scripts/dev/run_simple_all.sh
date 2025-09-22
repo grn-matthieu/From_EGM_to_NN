@@ -47,17 +47,13 @@ for METHOD in "${METHODS[@]}"; do
         include(joinpath(root, "scripts", "utils", "config_helpers.jl"))
         using .ScriptConfigHelpers
 
-        cfg_loaded = load_config(cfg_path)
-        validate_config(cfg_loaded)
-        cfg_nt = dict_to_namedtuple(cfg_loaded)
+        cfg_nt = load_config(cfg_path)
         cfg_nt = merge_section(cfg_nt, :grids, (; Na = Na))
         cfg_nt = merge_section(cfg_nt, :solver, (; method = method))
         cfg_nt = merge_config(cfg_nt, (; method = method))
-        cfg_dict = namedtuple_to_dict(cfg_nt)
-
-        model = build_model(cfg_dict)
-        meth = build_method(cfg_dict)
-        sol = solve(model, meth, cfg_dict)
+        model = build_model(cfg_nt)
+        meth = build_method(cfg_nt)
+        sol = solve(model, meth, cfg_nt)
         println("$(method) | $(basename(cfg_path)) | Na=$(Na): resid=$(sol.metadata[:max_resid]) iters=$(sol.metadata[:iters]) seed=$(seed) julia=$(VERSION)")
       '
     done

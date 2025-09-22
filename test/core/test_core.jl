@@ -2,7 +2,7 @@
 @testset "Core stability" begin
     # Test loading side
     config = deepcopy(SMOKE_CFG)
-    @test config isa NamedTuple || config isa AbstractDict
+    @test config isa NamedTuple
     @test all(k -> cfg_has(config, k), (:model, :params, :grids)) # Fundamental keys in the config
     @test begin # Test to validate a config we know to be stable
         try
@@ -21,7 +21,7 @@
     params = get_params(model)
     grids = get_grids(model)
     @test params isa NamedTuple
-    @test grids isa NamedTuple || grids isa AbstractDict
+    @test grids isa NamedTuple
 
     # Test solver building
     method = build_method(config)

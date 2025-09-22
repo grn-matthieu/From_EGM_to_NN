@@ -103,7 +103,6 @@ export plot_policy, plot_euler_errors
     if isfile(cfg_path)
         @compile_workload begin
             cfg = load_config(cfg_path)
-            validate_config(cfg)
             build_model(cfg)
             build_method(cfg)
         end

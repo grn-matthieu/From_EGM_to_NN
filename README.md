@@ -34,7 +34,6 @@ ThesisProject
 using ThesisProject
 
 cfg = load_config("config/smoke_config/smoke_config.yaml")
-validate_config(cfg)
 
 # load_config now returns a nested NamedTuple, so fields are dot-accessible
 @show cfg.model.name
@@ -66,7 +65,7 @@ sol = solve(model, method, cfg)
 | `random.seed`  | 🔁       | Optional; guarantees reproducibility without `Random.seed!`.
 | `logging`      | 📈       | (NN) specify directory and CSV logging behaviour.
 
-`load_config` returns a nested `NamedTuple` with symbol keys, so configuration values are accessed via property syntax. Use `validate_config(cfg)` to receive descriptive errors when entries are missing or inconsistent.
+`load_config` returns a nested `NamedTuple` with symbol keys and runs validation, so configuration values are accessed via property syntax and invalid schemas fail early.
 
 ```julia
 cfg = load_config("config/smoke_config/smoke_config.yaml")

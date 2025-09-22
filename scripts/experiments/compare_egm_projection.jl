@@ -37,26 +37,21 @@ function policy_diff_stats(sol_a, sol_b)
     return (c = stats(diff_c), a = stats(diff_a))
 end
 function run()
-    cfg_loaded = ThesisProject.load_config(
+    cfg = ThesisProject.load_config(
         joinpath(@__DIR__, "..", "..", "config", "simple_baseline.yaml"),
     )
-    ThesisProject.validate_config(cfg_loaded)
-    cfg = dict_to_namedtuple(cfg_loaded)
 
     cfg_egm = merge_section(cfg, :solver, (; method = :EGM))
     cfg_egm = merge_config(cfg_egm, (; method = :EGM))
-    cfg_egm_dict = namedtuple_to_dict(cfg_egm)
-    model_egm = ThesisProject.build_model(cfg_egm_dict)
-    method_egm = ThesisProject.build_method(cfg_egm_dict)
-    sol_egm = ThesisProject.solve(model_egm, method_egm, cfg_egm_dict; rng = make_rng(0))
+    model_egm = ThesisProject.build_model(cfg_egm)
+    method_egm = ThesisProject.build_method(cfg_egm)
+    sol_egm = ThesisProject.solve(model_egm, method_egm, cfg_egm; rng = make_rng(0))
 
     cfg_proj = merge_section(cfg, :solver, (; method = :Projection))
     cfg_proj = merge_config(cfg_proj, (; method = :Projection))
-    cfg_proj_dict = namedtuple_to_dict(cfg_proj)
-    model_proj = ThesisProject.build_model(cfg_proj_dict)
-    method_proj = ThesisProject.build_method(cfg_proj_dict)
-    sol_proj =
-        ThesisProject.solve(model_proj, method_proj, cfg_proj_dict; rng = make_rng(0))
+    model_proj = ThesisProject.build_model(cfg_proj)
+    method_proj = ThesisProject.build_method(cfg_proj)
+    sol_proj = ThesisProject.solve(model_proj, method_proj, cfg_proj; rng = make_rng(0))
     ee_egm = ee_stats(sol_egm)
     ee_proj = ee_stats(sol_proj)
     diffs = policy_diff_stats(sol_egm, sol_proj)

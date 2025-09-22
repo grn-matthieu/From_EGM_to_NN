@@ -81,9 +81,7 @@ end
 
 # Small fun to auto run the config
 function run_one(cfg_path::AbstractString, opts)
-    cfg_loaded = ThesisProject.load_config(cfg_path)
-    ThesisProject.validate_config(cfg_loaded)
-    cfg = dict_to_namedtuple(cfg_loaded)
+    cfg = ThesisProject.load_config(cfg_path)
 
     if opts.Na !== nothing
         cfg = merge_section(cfg, :grids, (; Na = opts.Na))
@@ -98,11 +96,10 @@ function run_one(cfg_path::AbstractString, opts)
         cfg = merge_section(cfg, :shocks, (; Nz = opts.Nz))
     end
 
-    cfg_dict = namedtuple_to_dict(cfg)
-    model = ThesisProject.build_model(cfg_dict)
-    method = ThesisProject.build_method(cfg_dict)
-    sol = ThesisProject.solve(model, method, cfg_dict)
-    return sol, cfg_dict
+    model = ThesisProject.build_model(cfg)
+    method = ThesisProject.build_method(cfg)
+    sol = ThesisProject.solve(model, method, cfg)
+    return sol, cfg
 end
 
 function write_det(sol, cfg, outdir)

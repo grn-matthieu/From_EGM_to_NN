@@ -60,10 +60,9 @@ function solve_all(cfg_base::NamedTuple)
     for m in (:EGM, :Projection, :Perturbation)
         cfg_local = merge_section(cfg_base, :solver, (; method = m))
         cfg_local = merge_config(cfg_local, (; method = m))
-        cfg_dict = namedtuple_to_dict(cfg_local)
-        model = ThesisProject.build_model(cfg_dict)
-        method = ThesisProject.build_method(cfg_dict)
-        sols[m] = ThesisProject.solve(model, method, cfg_dict; rng = make_rng(0))
+        model = ThesisProject.build_model(cfg_local)
+        method = ThesisProject.build_method(cfg_local)
+        sols[m] = ThesisProject.solve(model, method, cfg_local; rng = make_rng(0))
     end
     return sols
 end
@@ -154,9 +153,7 @@ function run()
     if cfg_path === nothing
         cfg_path = joinpath(ROOT, "config", "simple_baseline.yaml")
     end
-    cfg_loaded = ThesisProject.load_config(cfg_path)
-    ThesisProject.validate_config(cfg_loaded)
-    cfg = dict_to_namedtuple(cfg_loaded)
+    cfg = ThesisProject.load_config(cfg_path)
 
     sols = solve_all(cfg)
 

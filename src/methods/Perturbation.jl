@@ -13,6 +13,7 @@ using ..PerturbationKernel: solve_perturbation_det, solve_perturbation_stoch
 using ..ValueFunction: compute_value_policy
 using ..Determinism: canonicalize_cfg, hash_hex
 using ..CommonValidators: is_nondec, is_positive, respects_amin
+using ..UtilsConfig: maybe
 
 export PerturbationMethod, build_perturbation_method
 
@@ -28,17 +29,16 @@ Options:
   - `verbose` (Bool): print details
 """
 function build_perturbation_method(cfg::NamedTuple)
-    solver_cfg = hasproperty(cfg, :solver) ? cfg.solver : nothing
-    solver_cfg === nothing && error("Missing solver section in configuration")
+    solver_cfg = cfg.solver
     return PerturbationMethod((
-        name = hasproperty(cfg, :method) ? cfg.method : solver_cfg.method,
-        a_bar = get(solver_cfg, :a_bar, nothing),
-        verbose = get(solver_cfg, :verbose, false),
-        order = get(solver_cfg, :order, 1),
-        h_a = get(solver_cfg, :h_a, nothing),
-        h_z = get(solver_cfg, :h_z, nothing),
-        tol_fit = get(solver_cfg, :tol_fit, 1e-8),
-        maxit_fit = get(solver_cfg, :maxit_fit, 25),
+        name = maybe(cfg, :method, solver_cfg.method),
+        a_bar = maybe(solver_cfg, :a_bar),
+        verbose = maybe(solver_cfg, :verbose, false),
+        order = maybe(solver_cfg, :order, 1),
+        h_a = maybe(solver_cfg, :h_a),
+        h_z = maybe(solver_cfg, :h_z),
+        tol_fit = maybe(solver_cfg, :tol_fit, 1e-8),
+        maxit_fit = maybe(solver_cfg, :maxit_fit, 25),
     ))
 end
 

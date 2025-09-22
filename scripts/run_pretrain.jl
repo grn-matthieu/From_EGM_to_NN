@@ -64,7 +64,6 @@ end
 function main(args::Vector{String} = ARGS)
     opt = parse_args(args)
     cfg_loaded = load_config(opt.config)
-    validate_config(cfg_loaded)
     cfg = dict_to_namedtuple(cfg_loaded)
 
     cfg = merge_section(cfg, :random, (; seed = opt.seed))

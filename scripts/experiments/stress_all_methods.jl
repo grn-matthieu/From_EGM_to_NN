@@ -116,12 +116,10 @@ function safe_solve(cfg::NamedTuple; method::Symbol, stochastic::Bool, opts)
         cfg_local = merge_section(cfg_local, :solver, dict_to_namedtuple(solver_updates))
     end
 
-    cfg_dict = namedtuple_to_dict(cfg_local)
-
     try
-        model = ThesisProject.build_model(cfg_dict)
-        meth = ThesisProject.build_method(cfg_dict)
-        sol = ThesisProject.solve(model, meth, cfg_dict)
+        model = ThesisProject.build_model(cfg_local)
+        meth = ThesisProject.build_method(cfg_local)
+        sol = ThesisProject.solve(model, meth, cfg_local)
         return (:ok, sol)
     catch err
         # Capture error type, message, and stacktrace string
@@ -174,10 +172,7 @@ function main()
     outpath = something(opts.outpath, default_out)
 
     # Base config - deterministic baseline works for both; we toggle shocks.active
-    base_cfg_loaded =
-        ThesisProject.load_config(joinpath(ROOT, "config", "simple_baseline.yaml"))
-    ThesisProject.validate_config(base_cfg_loaded)
-    base_cfg = dict_to_namedtuple(base_cfg_loaded)
+    base_cfg = ThesisProject.load_config(joinpath(ROOT, "config", "simple_baseline.yaml"))
 
     # Strictly require Greek-letter keys in the loaded config
     params0 = maybe_namedtuple(get_nested(base_cfg, (:params,), NamedTuple()))

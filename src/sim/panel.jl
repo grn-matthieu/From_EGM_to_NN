@@ -9,19 +9,7 @@ using ..Determinism: make_rng, derive_seed
 using ..API:
     Solution, AbstractModel, AbstractMethod, get_params, get_grids, get_shocks, solve
 using ..CommonInterp: interp_linear!
-
-
-_to_namedtuple(x::NamedTuple) = x
-_to_namedtuple(x::AbstractDict) =
-    (; (Symbol(k) => _to_namedtuple(v) for (k, v) in pairs(x))...)
-_to_namedtuple(x::AbstractVector) = _to_namedtuple.(x)
-_to_namedtuple(x) = x
-
-_to_dict(x::NamedTuple) = Dict{Symbol,Any}((k => _to_dict(v)) for (k, v) in pairs(x))
-_to_dict(x::AbstractDict) =
-    Dict{Symbol,Any}((Symbol(k) => _to_dict(v)) for (k, v) in pairs(x))
-_to_dict(x::AbstractVector) = [_to_dict(v) for v in x]
-_to_dict(x) = x
+using ..UtilsConfig: maybe
 
 
 """
@@ -41,33 +29,8 @@ function simulate_panel(
     T::Int = 200,
     rng::AbstractRNG,
 )
-    cfg_dict = _to_dict(cfg)
-    return _simulate_panel(model, method, cfg_dict, cfg; N = N, T = T, rng = rng)
-end
-
-function simulate_panel(
-    model::AbstractModel,
-    method::AbstractMethod,
-    cfg::AbstractDict;
-    N::Int = 1_000,
-    T::Int = 200,
-    rng::AbstractRNG,
-)
-    cfg_nt = _to_namedtuple(cfg)
-    return _simulate_panel(model, method, cfg, cfg_nt; N = N, T = T, rng = rng)
-end
-
-function _simulate_panel(
-    model::AbstractModel,
-    method::AbstractMethod,
-    cfg_dict::AbstractDict,
-    cfg_nt::NamedTuple;
-    N::Int,
-    T::Int,
-    rng::AbstractRNG,
-)
     # Solve once and for all to get the optimal policy fun and grids
-    sol = solve(model, method, cfg_dict; rng = rng)
+    sol = solve(model, method, cfg; rng = rng)
 
     p = get_params(model)
     g = get_grids(model)
@@ -94,9 +57,7 @@ function _simulate_panel(
     # Master RNG/seed: prefer cfg.random.seed; else derive from the provided rng
     # The rule is to derive individual agent seeds from the master seed so that
     # identical rng instances lead to identical panel simulations.
-    random_cfg = get(cfg_nt, :random, nothing)
-    random_nt = random_cfg === nothing ? nothing : _to_namedtuple(random_cfg)
-    master_seed = random_nt === nothing ? nothing : get(random_nt, :seed, nothing)
+    master_seed = maybe(maybe(cfg, :random), :seed)
     if master_seed === nothing
         master_seed = derive_seed(rng, :panel)
     else

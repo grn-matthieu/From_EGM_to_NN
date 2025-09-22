@@ -3,6 +3,8 @@ module UtilsConfig
 import ..API: load_config, validate_config
 using YAML
 
+export maybe
+
 # --- helpers ---
 yaml_to_namedtuple(x) = x
 function yaml_to_namedtuple(x::AbstractDict)
@@ -21,10 +23,6 @@ _lower(x) = lowercase(string(x))
 # internal helpers (local to validate_config)
 # _getprop: safe property lookup with default; _getnum: fetch numeric with name
 # terse error strings by design
-
-function validate_config(cfg::AbstractDict)
-    validate_config(yaml_to_namedtuple(cfg))
-end
 
 function validate_config(cfg::NamedTuple)
     _getprop(::Any, ::Symbol, default) = default
@@ -218,6 +216,16 @@ function validate_config(cfg::NamedTuple)
     end
 
     true
+end
+
+maybe(x; default = nothing) = x === nothing ? default : x
+maybe(::Nothing, ::Vararg{Symbol}; default = nothing) = default
+maybe(cfg::NamedTuple, key::Symbol; default = nothing) =
+    hasproperty(cfg, key) ? getproperty(cfg, key) : default
+maybe(cfg, ::Symbol; default = nothing) = default
+function maybe(cfg, key::Symbol, rest::Symbol...; default = nothing)
+    value = maybe(cfg, key; default = default)
+    return isempty(rest) ? value : maybe(value, rest...; default = default)
 end
 
 end # module

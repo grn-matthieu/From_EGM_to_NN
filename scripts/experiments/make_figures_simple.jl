@@ -25,7 +25,6 @@ end
 """Load config, solve model, and save plots with the given stem."""
 function run_one(cfg_path::AbstractString, stem::AbstractString; plot_kwargs...)
     cfg = ThesisProject.load_config(cfg_path)
-    ThesisProject.validate_config(cfg)
     model = ThesisProject.build_model(cfg)
     method = ThesisProject.build_method(cfg)
     sol = ThesisProject.solve(model, method, cfg; rng = make_rng(0))

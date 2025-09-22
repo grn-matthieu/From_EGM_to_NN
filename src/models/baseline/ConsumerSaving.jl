@@ -8,15 +8,9 @@ module ConsumerSaving
 
 using ..API: AbstractModel
 using ..Shocks: ShockOutput, discretize
+using ..UtilsConfig: maybe
 
 import ..API: get_params, get_grids, get_shocks, get_utility
-
-
-_to_namedtuple(x::NamedTuple) = x
-_to_namedtuple(x::AbstractDict) =
-    (; (Symbol(k) => _to_namedtuple(v) for (k, v) in pairs(x))...)
-_to_namedtuple(x::AbstractVector) = _to_namedtuple.(x)
-_to_namedtuple(x) = x
 
 
 struct ConsumerSavingModel <: AbstractModel
@@ -27,9 +21,6 @@ struct ConsumerSavingModel <: AbstractModel
 end
 
 function build_cs_model(cfg::NamedTuple)
-    # Reading parameters
-    hasproperty(cfg, :params) && hasproperty(cfg, :grids) ||
-        error("Config must contain the following keys : (:params, :grids)")
     params = cfg.params
     grids_cfg = cfg.grids
 
@@ -41,10 +32,8 @@ function build_cs_model(cfg::NamedTuple)
     grids = (a = (; grid = agrid, min = a_min, max = a_max, N = Na),)
 
     # Shocks discretization (if stoch, modalities in the shocks field)
-    shocks = nothing
-    if hasproperty(cfg, :shocks) && get(cfg.shocks, :active, false)
-        shocks = discretize(cfg.shocks)
-    end
+    shocks_cfg = maybe(cfg, :shocks)
+    shocks = maybe(shocks_cfg, :active, false) ? discretize(shocks_cfg) : nothing
 
     # Utility closure (CRRA)
     σ = params.σ
@@ -59,11 +48,7 @@ function build_cs_model(cfg::NamedTuple)
     end
     utility = (; u, u_prime, u_prime_inv, σ)
 
-    return ConsumerSavingModel((; params...), grids, shocks, utility)
-end
-
-function build_cs_model(cfg::AbstractDict)
-    return build_cs_model(_to_namedtuple(cfg))
+    return ConsumerSavingModel(params, grids, shocks, utility)
 end
 
 get_params(model::ConsumerSavingModel) = model.params

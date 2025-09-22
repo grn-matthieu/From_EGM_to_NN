@@ -235,12 +235,10 @@ function run_nn(
         cfg_local = merge_section(cfg_local, :random, (; seed = seed))
     end
 
-    cfg_dict = namedtuple_to_dict(cfg_local)
-
     t0 = Dates.now()
-    model = build_model(cfg_dict)
-    method = build_method(cfg_dict)
-    sol = solve(model, method, cfg_dict)
+    model = build_model(cfg_local)
+    method = build_method(cfg_local)
+    sol = solve(model, method, cfg_local)
     elapsed = Dates.now() - t0
     wall_seconds = Dates.value(elapsed) / 1000
 
@@ -263,11 +261,10 @@ end
 function run_egm(cfg::NamedTuple)
     cfg_local = merge_section(cfg, :solver, (; method = :EGM))
     cfg_local = merge_config(cfg_local, (; method = :EGM))
-    cfg_dict = namedtuple_to_dict(cfg_local)
     t0 = Dates.now()
-    model = build_model(cfg_dict)
-    method = build_method(cfg_dict)
-    sol = solve(model, method, cfg_dict)
+    model = build_model(cfg_local)
+    method = build_method(cfg_local)
+    sol = solve(model, method, cfg_local)
     elapsed = Dates.now() - t0
     wall_seconds = Dates.value(elapsed) / 1000
     loss = compute_training_loss(sol)
@@ -279,11 +276,10 @@ end
 function run_vi(cfg::NamedTuple)
     cfg_local = merge_section(cfg, :solver, (; method = :VI))
     cfg_local = merge_config(cfg_local, (; method = :VI))
-    cfg_dict = namedtuple_to_dict(cfg_local)
     t0 = Dates.now()
-    model = build_model(cfg_dict)
-    method = build_method(cfg_dict)
-    sol = solve(model, method, cfg_dict)
+    model = build_model(cfg_local)
+    method = build_method(cfg_local)
+    sol = solve(model, method, cfg_local)
     elapsed = Dates.now() - t0
     wall_seconds = Dates.value(elapsed) / 1000
     loss = compute_training_loss(sol)
@@ -298,9 +294,7 @@ function main(args::Vector{String} = ARGS)
         # parse error/help: already printed usage; rethrow to exit non-zero
         rethrow(err)
     end
-    cfg_loaded = load_config(opt.config)
-    validate_config(cfg_loaded)
-    cfg = dict_to_namedtuple(cfg_loaded)
+    cfg = load_config(opt.config)
 
     cfg = ensure_supported_shocks(cfg)
     cfg = ensure_nn_method(cfg)

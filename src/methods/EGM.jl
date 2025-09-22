@@ -13,6 +13,7 @@ using ..ValueFunction: compute_value_policy
 using ..Determinism: canonicalize_cfg, hash_hex
 using ..CommonInterp: LinearInterp, MonotoneCubicInterp
 using ..CommonValidators: is_nondec, is_positive, respects_amin
+using ..UtilsConfig: maybe
 
 export EGMMethod
 
@@ -26,18 +27,17 @@ end
 Construct an `EGMMethod` using solver options contained in the NamedTuple `cfg`.
 """
 function build_egm_method(cfg::NamedTuple)
-    solver_cfg = hasproperty(cfg, :solver) ? cfg.solver : nothing
-    solver_cfg === nothing && error("Missing solver section in configuration")
-    ik = get(solver_cfg, :interp_kind, :linear)
+    solver_cfg = cfg.solver
+    ik = maybe(solver_cfg, :interp_kind, :linear)
     ik = ik isa Symbol ? ik : Symbol(ik)
     return EGMMethod((
-        name = hasproperty(cfg, :method) ? cfg.method : solver_cfg.method,
-        tol = get(solver_cfg, :tol, 1e-6),
-        tol_pol = get(solver_cfg, :tol_pol, 1e-6),
-        maxit = get(solver_cfg, :maxit, 1000),
+        name = maybe(cfg, :method, solver_cfg.method),
+        tol = maybe(solver_cfg, :tol, 1e-6),
+        tol_pol = maybe(solver_cfg, :tol_pol, 1e-6),
+        maxit = maybe(solver_cfg, :maxit, 1000),
         interp_kind = ik,
-        verbose = get(solver_cfg, :verbose, false),
-        warm_start = get(solver_cfg, :warm_start, :default),
+        verbose = maybe(solver_cfg, :verbose, false),
+        warm_start = maybe(solver_cfg, :warm_start, :default),
     ))
 end
 
@@ -59,10 +59,8 @@ function solve(
     U = get_utility(model)
 
     # --- Warm-start policy initialization ---
-    init_cfg = hasproperty(cfg, :init) ? cfg.init : nothing
-    custom_c_data =
-        init_cfg isa NamedTuple && hasproperty(init_cfg, :c) ? init_cfg.c :
-        init_cfg isa AbstractDict ? get(init_cfg, :c, nothing) : nothing
+    init_cfg = maybe(cfg, :init)
+    custom_c_data = maybe(init_cfg, :c)
     custom_c_vec = custom_c_data isa AbstractVector ? custom_c_data : nothing
     custom_c_mat = custom_c_data isa AbstractMatrix ? custom_c_data : nothing
 

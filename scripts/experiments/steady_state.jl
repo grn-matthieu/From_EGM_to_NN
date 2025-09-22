@@ -36,15 +36,12 @@ function parse_args(args)
 end
 
 function verify_deterministic(cfg_path; seed = 0)
-    cfg_loaded = ThesisProject.load_config(cfg_path)
-    ThesisProject.validate_config(cfg_loaded)
-    cfg = dict_to_namedtuple(cfg_loaded)
+    cfg = ThesisProject.load_config(cfg_path)
     cfg = merge_section(cfg, :shocks, (; active = false))
-    cfg_dict = namedtuple_to_dict(cfg)
 
-    model = ThesisProject.build_model(cfg_dict)
-    method = ThesisProject.build_method(cfg_dict)
-    sol = ThesisProject.solve(model, method, cfg_dict; rng = make_rng(seed))
+    model = ThesisProject.build_model(cfg)
+    method = ThesisProject.build_method(cfg)
+    sol = ThesisProject.solve(model, method, cfg; rng = make_rng(seed))
 
     ana = ThesisProject.steady_state_analytic(model)
     pol = ThesisProject.steady_state_from_policy(sol)
@@ -147,15 +144,12 @@ function stationary_distribution(sol)
 end
 
 function verify_stochastic(cfg_path; seed = 0)
-    cfg_loaded = ThesisProject.load_config(cfg_path)
-    ThesisProject.validate_config(cfg_loaded)
-    cfg = dict_to_namedtuple(cfg_loaded)
+    cfg = ThesisProject.load_config(cfg_path)
     @assert get_nested(cfg, (:shocks, :active), false) "Config must have active shocks"
 
-    cfg_dict = namedtuple_to_dict(cfg)
-    model = ThesisProject.build_model(cfg_dict)
-    method = ThesisProject.build_method(cfg_dict)
-    sol = ThesisProject.solve(model, method, cfg_dict; rng = make_rng(seed))
+    model = ThesisProject.build_model(cfg)
+    method = ThesisProject.build_method(cfg)
+    sol = ThesisProject.solve(model, method, cfg; rng = make_rng(seed))
 
     Πss, mom = stationary_distribution(sol)
     @printf("Stochastic stationary moments: E[a]=%.6f, E[c]=%.6f\n", mom.Ea, mom.Ec)
@@ -164,9 +158,7 @@ end
 
 function main(args)
     opts = parse_args(args)
-    cfg_loaded = ThesisProject.load_config(opts.cfg)
-    ThesisProject.validate_config(cfg_loaded)
-    cfg = dict_to_namedtuple(cfg_loaded)
+    cfg = ThesisProject.load_config(opts.cfg)
     stoch = get_nested(cfg, (:shocks, :active), false)
     if stoch
         println("Running stochastic steady-state verification...")

@@ -80,13 +80,10 @@ function safe_solve(cfg::NamedTuple; stochastic::Bool, opts)
     if !isempty(solver_updates)
         cfg = merge_section(cfg, :solver, dict_to_namedtuple(solver_updates))
     end
-
-    cfg_dict = namedtuple_to_dict(cfg)
-
     try
-        model = ThesisProject.build_model(cfg_dict)
-        method = ThesisProject.build_method(cfg_dict)
-        sol = ThesisProject.solve(model, method, cfg_dict)
+        model = ThesisProject.build_model(cfg)
+        method = ThesisProject.build_method(cfg)
+        sol = ThesisProject.solve(model, method, cfg)
         return (:ok, sol)
     catch err
         return (:error, sprint(showerror, err))
@@ -127,10 +124,7 @@ function main()
     outpath = joinpath(outdir, "egm_robustness_sweep.csv")
 
     # Base config – deterministic baseline schema works for both (we toggle shocks.active)
-    base_cfg_loaded =
-        ThesisProject.load_config(joinpath(ROOT, "config", "simple_baseline.yaml"))
-    ThesisProject.validate_config(base_cfg_loaded)
-    base_cfg = dict_to_namedtuple(base_cfg_loaded)
+    base_cfg = ThesisProject.load_config(joinpath(ROOT, "config", "simple_baseline.yaml"))
 
     βs = parse_list("Β_LIST", [0.92, 0.95, 0.96, 0.98])
     σs = parse_list("Σ_LIST", [1.0, 2.0, 3.0, 4.0])
