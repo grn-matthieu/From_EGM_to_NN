@@ -15,23 +15,30 @@ struct ProjectionMethod <: AbstractMethod
     opts::NamedTuple
 end
 """
-    build_projection_method(cfg::AbstractDict) -> ProjectionMethod
-Construct a `ProjectionMethod` using solver options contained in `cfg`.
+    build_projection_method(cfg::NamedTuple) -> ProjectionMethod
+
+Construct a `ProjectionMethod` using solver options contained in the NamedTuple `cfg`.
 """
-function build_projection_method(cfg::AbstractDict)
+function build_projection_method(cfg::NamedTuple)
+    solver_cfg = hasproperty(cfg, :solver) ? cfg.solver : nothing
+    solver_cfg === nothing && error("Missing solver section in configuration")
+    grids_cfg = hasproperty(cfg, :grids) ? cfg.grids : nothing
+    grids_cfg === nothing && error("Missing grids section in configuration")
+    hasproperty(grids_cfg, :Na) || error("Missing grids.Na for projection method")
+    default_orders = [grids_cfg.Na - 1]
     return ProjectionMethod((
-        name = get(cfg, :method, cfg[:solver][:method]),
-        tol = get(cfg[:solver], :tol, 1e-6),
-        maxit = get(cfg[:solver], :maxit, 1000),
-        verbose = get(cfg[:solver], :verbose, false),
-        orders = get(cfg[:solver], :orders, [cfg[:grids][:Na] - 1]),
-        Nval = get(cfg[:solver], :Nval, cfg[:grids][:Na]),
+        name = hasproperty(cfg, :method) ? cfg.method : solver_cfg.method,
+        tol = get(solver_cfg, :tol, 1e-6),
+        maxit = get(solver_cfg, :maxit, 1000),
+        verbose = get(solver_cfg, :verbose, false),
+        orders = get(solver_cfg, :orders, default_orders),
+        Nval = get(solver_cfg, :Nval, grids_cfg.Na),
     ))
 end
 function solve(
     model::AbstractModel,
     method::ProjectionMethod,
-    cfg::AbstractDict;
+    cfg::NamedTuple;
     rng = nothing,
 )::Solution
     p = get_params(model)

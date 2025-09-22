@@ -21,33 +21,35 @@ struct EGMMethod <: AbstractMethod
 end
 
 """
-    build_egm_method(cfg::AbstractDict) -> EGMMethod
+    build_egm_method(cfg::NamedTuple) -> EGMMethod
 
-Construct an `EGMMethod` using solver options contained in `cfg`.
+Construct an `EGMMethod` using solver options contained in the NamedTuple `cfg`.
 """
-function build_egm_method(cfg::AbstractDict)
-    ik = get(cfg[:solver], :interp_kind, :linear)
+function build_egm_method(cfg::NamedTuple)
+    solver_cfg = hasproperty(cfg, :solver) ? cfg.solver : nothing
+    solver_cfg === nothing && error("Missing solver section in configuration")
+    ik = get(solver_cfg, :interp_kind, :linear)
     ik = ik isa Symbol ? ik : Symbol(ik)
     return EGMMethod((
-        name = get(cfg, :method, cfg[:solver][:method]),
-        tol = get(cfg[:solver], :tol, 1e-6),
-        tol_pol = get(cfg[:solver], :tol_pol, 1e-6),
-        maxit = get(cfg[:solver], :maxit, 1000),
+        name = hasproperty(cfg, :method) ? cfg.method : solver_cfg.method,
+        tol = get(solver_cfg, :tol, 1e-6),
+        tol_pol = get(solver_cfg, :tol_pol, 1e-6),
+        maxit = get(solver_cfg, :maxit, 1000),
         interp_kind = ik,
-        verbose = get(cfg[:solver], :verbose, false),
-        warm_start = get(cfg[:solver], :warm_start, :default),
+        verbose = get(solver_cfg, :verbose, false),
+        warm_start = get(solver_cfg, :warm_start, :default),
     ))
 end
 
 """
-    solve(model::AbstractModel, method::EGMMethod, cfg::AbstractDict; rng=nothing)::Solution
+    solve(model::AbstractModel, method::EGMMethod, cfg::NamedTuple; rng=nothing)::Solution
 
 Entry point for the EGM solver. Extracts contract fields, runs a minimal EGM loop, and returns a Solution.
 """
 function solve(
     model::AbstractModel,
     method::EGMMethod,
-    cfg::AbstractDict;
+    cfg::NamedTuple;
     rng = nothing,
 )::Solution
     # --- Extraction ---
@@ -57,6 +59,13 @@ function solve(
     U = get_utility(model)
 
     # --- Warm-start policy initialization ---
+    init_cfg = hasproperty(cfg, :init) ? cfg.init : nothing
+    custom_c_data =
+        init_cfg isa NamedTuple && hasproperty(init_cfg, :c) ? init_cfg.c :
+        init_cfg isa AbstractDict ? get(init_cfg, :c, nothing) : nothing
+    custom_c_vec = custom_c_data isa AbstractVector ? custom_c_data : nothing
+    custom_c_mat = custom_c_data isa AbstractMatrix ? custom_c_data : nothing
+
     function _build_c_init_det()
         a_grid = g[:a].grid
         a_min = g[:a].min
@@ -72,10 +81,11 @@ function solve(
         elseif ws in (:default, :half_resources, :none)
             return nothing
         else
-            init_cfg = get(cfg, :init, nothing)
-            init_cfg === nothing && return nothing
-            init_c = get(init_cfg, :c, nothing)
-            return init_c === nothing ? nothing : copy(init_c)
+            # Optional custom: cfg.init.c if provided
+            if custom_c_vec !== nothing
+                return copy(custom_c_vec)
+            end
+            return nothing
         end
     end
 
@@ -101,10 +111,10 @@ function solve(
         elseif ws in (:default, :half_resources, :none)
             return nothing
         else
-            init_cfg = get(cfg, :init, nothing)
-            init_cfg === nothing && return nothing
-            init_c = get(init_cfg, :c, nothing)
-            return init_c === nothing ? nothing : copy(init_c)
+            if custom_c_mat !== nothing
+                return copy(custom_c_mat)
+            end
+            return nothing
         end
     end
 

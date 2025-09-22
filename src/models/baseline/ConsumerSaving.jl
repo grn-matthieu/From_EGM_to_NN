@@ -27,11 +27,11 @@ struct ConsumerSavingModel <: AbstractModel
 end
 
 function build_cs_model(cfg::NamedTuple)
-    hasproperty(cfg, :params) || error("configuration must contain a `params` section")
-    hasproperty(cfg, :grids) || error("configuration must contain a `grids` section")
-
-    params = _to_namedtuple(cfg.params)
-    grids_cfg = _to_namedtuple(cfg.grids)
+    # Reading parameters
+    hasproperty(cfg, :params) && hasproperty(cfg, :grids) ||
+        error("Config must contain the following keys : (:params, :grids)")
+    params = cfg.params
+    grids_cfg = cfg.grids
 
     # Asset grid (for the cs model)
     a_min = grids_cfg.a_min
@@ -42,12 +42,8 @@ function build_cs_model(cfg::NamedTuple)
 
     # Shocks discretization (if stoch, modalities in the shocks field)
     shocks = nothing
-    shocks_cfg = get(cfg, :shocks, nothing)
-    if shocks_cfg !== nothing
-        shocks_nt = _to_namedtuple(shocks_cfg)
-        if get(shocks_nt, :active, false)
-            shocks = discretize(shocks_nt)
-        end
+    if hasproperty(cfg, :shocks) && get(cfg.shocks, :active, false)
+        shocks = discretize(cfg.shocks)
     end
 
     # Utility closure (CRRA)

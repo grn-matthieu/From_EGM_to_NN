@@ -27,11 +27,8 @@ _to_dict(x) = x
 """
     simulate_panel(model, method, cfg::NamedTuple; N = 1000, T = 200, rng::AbstractRNG)
 
-Simulates a panel of `N` agents for `T` periods using a solved policy from `method`
-on `model`. The configuration `cfg` should mirror the structure consumed by
-`API.solve` and may include an optional `random` NamedTuple with a `seed` field.
-If `cfg.random.seed` is missing, the master seed is deterministically derived from
-`rng` via `derive_seed`.
+Simulates a panel of N agents for T periods using a solved policy from `method` on `model`.
+Agents draw from the Markov chain implied by the model's shocks. The master seed is taken from `cfg.random.seed` if available, otherwise it is deterministically derived from the provided `rng` via `derive_seed`.
 
 Returns a NamedTuple with fields: `assets::Matrix`, `consumption::Matrix`,
 `shocks::Matrix`, `seeds::Vector`, and `diagnostics::Vector`.

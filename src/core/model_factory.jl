@@ -35,13 +35,13 @@ end
 
 
 # Example dispatch for different model types
-function _build_model(::Val{:cs}, cfg)
+function _build_model(::Val{:cs}, cfg::NamedTuple)
     return build_cs_model(cfg)
 end
 
 
 # Fallback for unknown model types
-function _build_model(model_name::Symbol, cfg)
+function _build_model(model_name::Symbol, cfg::NamedTuple)
     error("Unknown model type: $(model_name)")
 end
 

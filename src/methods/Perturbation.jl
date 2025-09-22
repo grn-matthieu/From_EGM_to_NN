@@ -21,29 +21,31 @@ struct PerturbationMethod <: AbstractMethod
 end
 
 """
-    build_perturbation_method(cfg::AbstractDict) -> PerturbationMethod
+    build_perturbation_method(cfg::NamedTuple) -> PerturbationMethod
 
 Options:
   - `a_bar` (optional): reference asset level for linearization; default grid midpoint
   - `verbose` (Bool): print details
 """
-function build_perturbation_method(cfg::AbstractDict)
+function build_perturbation_method(cfg::NamedTuple)
+    solver_cfg = hasproperty(cfg, :solver) ? cfg.solver : nothing
+    solver_cfg === nothing && error("Missing solver section in configuration")
     return PerturbationMethod((
-        name = get(cfg, :method, cfg[:solver][:method]),
-        a_bar = get(cfg[:solver], :a_bar, nothing),
-        verbose = get(cfg[:solver], :verbose, false),
-        order = get(cfg[:solver], :order, 1),
-        h_a = get(cfg[:solver], :h_a, nothing),
-        h_z = get(cfg[:solver], :h_z, nothing),
-        tol_fit = get(cfg[:solver], :tol_fit, 1e-8),
-        maxit_fit = get(cfg[:solver], :maxit_fit, 25),
+        name = hasproperty(cfg, :method) ? cfg.method : solver_cfg.method,
+        a_bar = get(solver_cfg, :a_bar, nothing),
+        verbose = get(solver_cfg, :verbose, false),
+        order = get(solver_cfg, :order, 1),
+        h_a = get(solver_cfg, :h_a, nothing),
+        h_z = get(solver_cfg, :h_z, nothing),
+        tol_fit = get(solver_cfg, :tol_fit, 1e-8),
+        maxit_fit = get(solver_cfg, :maxit_fit, 25),
     ))
 end
 
 function solve(
     model::AbstractModel,
     method::PerturbationMethod,
-    cfg::AbstractDict;
+    cfg::NamedTuple;
     rng = nothing,
 )::Solution
     p = get_params(model)

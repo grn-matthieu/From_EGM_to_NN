@@ -18,17 +18,19 @@ struct NNMethod <: AbstractMethod
     opts::NamedTuple
 end
 
-function build_nn_method(cfg::AbstractDict)
+function build_nn_method(cfg::NamedTuple)
+    solver_cfg = hasproperty(cfg, :solver) ? cfg.solver : nothing
+    solver_cfg === nothing && error("Missing solver section in configuration")
     return NNMethod((
-        name = get(cfg, :method, cfg[:solver][:method]),
-        epochs = get(cfg[:solver], :epochs, 10),
-        batch = get(cfg[:solver], :batch, 64),
-        lr = get(cfg[:solver], :lr, 1e-3),
-        verbose = get(cfg[:solver], :verbose, false),
+        name = hasproperty(cfg, :method) ? cfg.method : solver_cfg.method,
+        epochs = get(solver_cfg, :epochs, 10),
+        batch = get(solver_cfg, :batch, 64),
+        lr = get(solver_cfg, :lr, 1e-3),
+        verbose = get(solver_cfg, :verbose, false),
     ))
 end
 
-function solve(model::AbstractModel, method::NNMethod, cfg::AbstractDict;)::Solution
+function solve(model::AbstractModel, method::NNMethod, cfg::NamedTuple;)::Solution
     p = get_params(model)
     g = get_grids(model)
     S = get_shocks(model)

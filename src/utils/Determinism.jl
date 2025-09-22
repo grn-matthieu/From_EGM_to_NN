@@ -25,14 +25,13 @@ make_rng(seed::Integer) = StableRNG(seed)
 """
     canonicalize_cfg(cfg)::Vector{UInt8}
 
-Serializes a config NamedTuple to sorted, symbol-keyed, fixed-precision JSON bytes.
+Serializes a configuration object to sorted, symbol-keyed, fixed-precision JSON bytes.
 """
 function canonicalize_cfg(cfg)
     # Recursively convert keys to Symbol and sort
     function canonical(obj)
         if obj isa NamedTuple
-            pairs = sort(collect(pairs(obj)); by = x -> Symbol(x[1]))
-            Dict(Symbol(k) => canonical(v) for (k, v) in pairs)
+            canonical(Dict(pairs(obj)))
         elseif obj isa AbstractDict
             # Sort keys as symbols
             pairs = sort(collect(obj); by = x -> Symbol(x[1]))
