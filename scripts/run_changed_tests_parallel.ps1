@@ -8,7 +8,7 @@ Usage:
   .\scripts\run_changed_tests_parallel.ps1 -NoPrecompile -Throttle 6
 
 Behavior:
-  - Detects changed files (origin/main, main, or last commit), modified and untracked files.
+  - Detects changed files (origin/main, main, last commit), modified, staged, and untracked files.
   - Maps changed files to test files using the same heuristics as `run_changed_tests.ps1`.
   - Runs all discovered test files in parallel Julia processes, throttled by `-Throttle`.
 #>
@@ -42,10 +42,17 @@ try {
     }
 
     $changed += $diffList
+
+    # Include staged (indexed) but not committed changes (A/C/M/R)
+    $staged = git diff --name-only --cached --diff-filter=ACMR 2>$null | Where-Object { $_ -ne '' }
+    $changed += $staged
+
+    # Include modified in working tree and untracked
     $changed += git ls-files -m 2>$null | Where-Object { $_ -ne '' }
     $changed += git ls-files --others --exclude-standard 2>$null | Where-Object { $_ -ne '' }
 
-    $changed = $changed | Select-Object -Unique
+    # Unique and keep only paths that exist (some staged deletions may not)
+    $changed = $changed | Select-Object -Unique | Where-Object { Test-Path $_ }
 
     if (-not $changed -or $changed.Count -eq 0) {
         Write-Host "No changed files detected. Nothing to run."

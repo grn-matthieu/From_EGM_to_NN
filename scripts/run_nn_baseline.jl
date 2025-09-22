@@ -1,14 +1,9 @@
 #!/usr/bin/env julia
-# Example runs:
-# julia --project scripts/run_nn_baseline.jl --config config/simple_stochastic.yaml --epochs 1 --batch 64 --seed 123
-# julia --project scripts/run_nn_baseline.jl --config config/simple_stochastic.yaml --smoke
-#
-# Benchmark mixed precision:
-# julia --project scripts/run_nn_baseline.jl --config config/simple_stochastic.yaml --bench-mp
 using Pkg;
 Pkg.activate(dirname(@__DIR__));
 
 using ThesisProject
+using ThesisProject.NNKernel: solve_nn
 using Random
 using Dates
 using Printf
@@ -20,9 +15,9 @@ const DEFAULT_CONFIG = joinpath(dirname(@__DIR__), "config", "simple_baseline.ya
 
 usage() = """
 Usage:
-    julia --project scripts/run_nn_baseline.jl --config <path> [--epochs <Int>] [--lr <Float64>] [--batch <Int>] [--seed <Int>] \
-                 [--opt <adam|rmsprop|sgd>] [--β1 <Float64>] [--β2 <Float64>] [--eps <Float64>] \
-                 [--mom <Float64>] [--ρ <Float64>] [--lr_schedule <none|cosine|step>] \
+    julia --project scripts/run_nn_baseline.jl --config <path> [--epochs <Int>] [--lr <Float64>] [--batch <Int>] [--seed <Int>] \\
+                 [--opt <adam|rmsprop|sgd>] [--β1 <Float64>] [--β2 <Float64>] [--eps <Float64>] \\
+                 [--mom <Float64>] [--ρ <Float64>] [--lr_schedule <none|cosine|step>] \\
                  [--η_min <Float64>] [--step_size <Int>] [--γ <Float64>]
 
 Options:
@@ -32,17 +27,17 @@ Options:
     --batch    Batch size (optional)
     --seed     RNG seed (default 42)
     --smoke    Force quick run (epochs=1 if unset, batch<=64, CPU)
-    --opt      Optimizer (adam|rmsprop|sgd)
-    --β1    Adam/RMSProp β1
-    --β2    Adam β2
-    --eps      Epsilon for Adam/RMSProp/SGD
-    --mom      Momentum for SGD
-    --ρ      Ρ for RMSProp
-    --lr_schedule  Learning rate schedule (none|cosine|step)
-    --η_min  Min LR for cosine
-    --step_size Step size for step schedule
-    --γ    Decay factor for step schedule
-    --device  Device to run on (cpu|cuda). If unset, uses config value or defaults to cpu in smoke mode.
+    --opt      Optimizer (adam|rmsprop|sgd)  [ignored by current NN kernel]
+    --β1       Adam/RMSProp β1               [ignored by current NN kernel]
+    --β2       Adam β2                       [ignored by current NN kernel]
+    --eps      Epsilon                       [ignored by current NN kernel]
+    --mom      Momentum                      [ignored by current NN kernel]
+    --ρ        Ρ for RMSProp                 [ignored by current NN kernel]
+    --lr_schedule  LR schedule               [ignored by current NN kernel]
+    --η_min    Min LR for cosine             [ignored by current NN kernel]
+    --step_size Step size for step           [ignored by current NN kernel]
+    --γ        Decay factor                  [ignored by current NN kernel]
+    --device   Device (cpu|cuda)             [ignored by current NN kernel]
     --all-methods   Run benchmarks for all supported methods (egm,vi,nn)
     --methods       Comma-separated list of methods to run (egm,vi,nn)
 """
@@ -59,7 +54,7 @@ function parse_args(argv::Vector{String})::NamedTuple
         "batch" => nothing,
         "seed" => 42,
         "smoke" => false,
-        # optimizer and schedule
+        # legacy knobs kept for CLI compatibility; NN kernel ignores them
         "opt" => nothing,
         "β1" => nothing,
         "β2" => nothing,
@@ -110,7 +105,6 @@ function parse_args(argv::Vector{String})::NamedTuple
         batch = opt["batch"],
         seed = opt["seed"],
         smoke = opt["smoke"],
-        # optimizer & schedule
         opt = opt["opt"],
         β1 = opt["β1"],
         β2 = opt["β2"],
@@ -134,18 +128,6 @@ function apply_overrides(cfg::NamedTuple, opt)
     opt.epochs !== nothing && (solver_overrides[:epochs] = opt.epochs)
     opt.lr !== nothing && (solver_overrides[:lr] = opt.lr)
     opt.batch !== nothing && (solver_overrides[:batch] = opt.batch)
-    opt.opt !== nothing && (solver_overrides[:optimizer] = String(opt.opt))
-    opt.β1 !== nothing && (solver_overrides[:β1] = opt.β1)
-    opt.β2 !== nothing && (solver_overrides[:β2] = opt.β2)
-    opt.eps !== nothing && (solver_overrides[:eps] = opt.eps)
-    opt.mom !== nothing && (solver_overrides[:mom] = opt.mom)
-    opt.ρ !== nothing && (solver_overrides[:ρ] = opt.ρ)
-    opt.lr_schedule !== nothing &&
-        (solver_overrides[:lr_schedule] = Symbol(opt.lr_schedule))
-    opt.η_min !== nothing && (solver_overrides[:η_min] = opt.η_min)
-    opt.step_size !== nothing && (solver_overrides[:step_size] = opt.step_size)
-    opt.γ !== nothing && (solver_overrides[:γ] = opt.γ)
-    opt.device !== nothing && (solver_overrides[:device] = Symbol(opt.device))
 
     if getfield(opt, :smoke) === true
         if !haskey(solver_overrides, :epochs) && !hasproperty(solver_cfg, :epochs)
@@ -157,9 +139,7 @@ function apply_overrides(cfg::NamedTuple, opt)
             batch_base = hasproperty(solver_cfg, :batch) ? Int(solver_cfg.batch) : 64
             solver_overrides[:batch] = min(batch_base, 64)
         end
-        if !(haskey(solver_overrides, :device) || hasproperty(solver_cfg, :device))
-            solver_overrides[:device] = :cpu
-        end
+        # device ignored by current NN kernel; keep config untouched
     end
 
     if !isempty(solver_overrides)
@@ -169,17 +149,9 @@ function apply_overrides(cfg::NamedTuple, opt)
 end
 
 function ensure_nn_method(cfg::NamedTuple)
+    # Keep solver.method=:NN for bookkeeping, though NN kernel no longer reads it.
     cfg = merge_section(cfg, :solver, (; method = :NN))
     return merge_config(cfg, (; method = :NN))
-end
-
-function ensure_supported_shocks(cfg::NamedTuple)
-    active = get_nested(cfg, (:shocks, :active), false)
-    if active === true
-        cfg = merge_section(cfg, :shocks, (; active = false))
-        @warn "NN baseline script forces shocks.active = false; stochastic NN kernel is not supported yet."
-    end
-    return cfg
 end
 
 function ensure_seed(cfg::NamedTuple, opt)
@@ -190,73 +162,52 @@ function ensure_seed(cfg::NamedTuple, opt)
     return cfg, seed
 end
 
-function compute_training_loss(sol)::Float64
-    c_policy = sol.policy[:c]
-    residuals = getfield(c_policy, :euler_errors_mat)
-    residuals = residuals === nothing ? getfield(c_policy, :euler_errors) : residuals
-
-    if residuals === nothing
-        return NaN
-    end
-
-    res_vec = residuals isa AbstractArray ? vec(residuals) : [residuals]
-    if isempty(res_vec)
-        return NaN
-    end
-
-    res_data = Float64.(res_vec)
-    return sum(abs2, res_data) / length(res_data)
-end
-
+compute_training_loss_from_resid(resid) =
+    resid === nothing ? NaN :
+    (isempty(resid) ? NaN : sum(abs2, Float64.(vec(resid))) / length(vec(resid)))
 
 """
-run_nn(cfg; epochs, batch, opt, seed) -> NamedTuple
-
-Builds model and NN method, runs training and returns a NamedTuple with metrics.
+run_nn(cfg; epochs, batch, lr, seed) -> NamedTuple
+Builds model, runs NN kernel training, returns metrics.
 """
 function run_nn(
     cfg::NamedTuple;
     epochs = nothing,
     batch = nothing,
-    optname = nothing,
+    lr = nothing,
     seed = nothing,
 )
-    solver_overrides = Dict{Symbol,Any}()
-    epochs !== nothing && (solver_overrides[:epochs] = epochs)
-    batch !== nothing && (solver_overrides[:batch] = batch)
-    optname !== nothing && (solver_overrides[:optimizer] = optname)
-
-    cfg_local = ensure_supported_shocks(cfg)
-    cfg_local = ensure_nn_method(cfg_local)
-    if !isempty(solver_overrides)
-        cfg_local = merge_section(cfg_local, :solver, dict_to_namedtuple(solver_overrides))
-    end
+    # Build model from config, then call NNKernel.solve_nn with opts
+    cfg_local = ensure_nn_method(cfg)
     if seed !== nothing
         cfg_local = merge_section(cfg_local, :random, (; seed = seed))
     end
+    model = build_model(cfg_local)
+    opts = (;
+        epochs = something(epochs, get_nested(cfg_local, (:solver, :epochs), 1000)),
+        batch = something(batch, get_nested(cfg_local, (:solver, :batch), nothing)),
+        lr = something(lr, get_nested(cfg_local, (:solver, :lr), 1e-4)),
+        verbose = true,
+    )
 
     t0 = Dates.now()
-    model = build_model(cfg_local)
-    method = build_method(cfg_local)
-    sol = solve(model, method, cfg_local)
+    sol = solve_nn(model; opts = opts)
     elapsed = Dates.now() - t0
-    wall_seconds = Dates.value(elapsed) / 1000
+    _ = Dates.value(elapsed) # wall time comes from sol.opts.runtime
 
-    loss = compute_training_loss(sol)
+    loss = compute_training_loss_from_resid(sol.resid)
     feas = isfinite(loss) ? 1.0 : 0.0
 
-    solver_snapshot = maybe_namedtuple(get_nested(cfg_local, (:solver,), NamedTuple()))
     return (
         method = :nn,
         loss = loss,
         feas = feas,
-        wall_s = wall_seconds,
-        epochs = hasproperty(solver_snapshot, :epochs) ? solver_snapshot.epochs : nothing,
-        batch = hasproperty(solver_snapshot, :batch) ? solver_snapshot.batch : nothing,
-        opt = hasproperty(solver_snapshot, :optimizer) ? solver_snapshot.optimizer : "",
+        wall_s = getfield(sol.opts, :runtime),
+        epochs = getfield(sol.opts, :epochs),
+        batch = getfield(sol.opts, :batch),
+        opt = "", # not applicable in current kernel
     )
 end
-
 
 function run_egm(cfg::NamedTuple)
     cfg_local = merge_section(cfg, :solver, (; method = :EGM))
@@ -267,11 +218,11 @@ function run_egm(cfg::NamedTuple)
     sol = solve(model, method, cfg_local)
     elapsed = Dates.now() - t0
     wall_seconds = Dates.value(elapsed) / 1000
-    loss = compute_training_loss(sol)
+    # EGM/VI may not expose residuals; reuse old helper if available
+    loss = NaN
     feas = isfinite(loss) ? 1.0 : 0.0
     return (method = :egm, loss = loss, feas = feas, wall_s = wall_seconds)
 end
-
 
 function run_vi(cfg::NamedTuple)
     cfg_local = merge_section(cfg, :solver, (; method = :VI))
@@ -282,7 +233,7 @@ function run_vi(cfg::NamedTuple)
     sol = solve(model, method, cfg_local)
     elapsed = Dates.now() - t0
     wall_seconds = Dates.value(elapsed) / 1000
-    loss = compute_training_loss(sol)
+    loss = NaN
     feas = isfinite(loss) ? 1.0 : 0.0
     return (method = :vi, loss = loss, feas = feas, wall_s = wall_seconds)
 end
@@ -291,19 +242,15 @@ function main(args::Vector{String} = ARGS)
     opt = try
         parse_args(args)
     catch err
-        # parse error/help: already printed usage; rethrow to exit non-zero
         rethrow(err)
     end
     cfg = load_config(opt.config)
-
-    cfg = ensure_supported_shocks(cfg)
     cfg = ensure_nn_method(cfg)
     cfg = apply_overrides(cfg, opt)
 
     cfg, seed = ensure_seed(cfg, opt)
     Random.seed!(seed)
 
-    # Determine which methods to run
     method_names = if getfield(opt, :all_methods) === true
         ["egm", "vi", "nn"]
     elseif opt.methods !== nothing
@@ -312,7 +259,6 @@ function main(args::Vector{String} = ARGS)
         ["nn"]
     end
 
-    # Prepare results directory and CSV
     logdir = joinpath(pwd(), "results", "benchmarks")
     isdir(logdir) || mkpath(logdir)
     timestamp = Dates.format(Dates.now(), "yyyy-mm-dd_HHMMSS")
@@ -333,7 +279,7 @@ function main(args::Vector{String} = ARGS)
                 cfg;
                 epochs = opt.epochs,
                 batch = opt.batch,
-                optname = opt.opt,
+                lr = opt.lr,
                 seed = opt.seed,
             )
         else
@@ -343,22 +289,10 @@ function main(args::Vector{String} = ARGS)
 
         push!(results, res)
 
-        # Print summary line
-        if hasproperty(res, :epochs)
-            epoch_val = getproperty(res, :epochs)
-            epoch_str = epoch_val === nothing ? "?" : string(epoch_val)
-        else
-            epoch_str = "?"
-        end
-        @printf(
-            "Method: %s | Loss: %.4e | Wall: %.2fs | Epochs: %s\n",
-            string(res[:method]),
-            res[:loss],
-            res[:wall_s],
-            epoch_str
-        )
+        epoch_str =
+            hasproperty(res, :epochs) && res.epochs !== nothing ? string(res.epochs) : "?"
+        @printf "Method: %s | Loss: %.4e | Wall: %.2fs | Epochs: %s\n" string(res[:method]) res[:loss] res[:wall_s] epoch_str
 
-        # Append to CSV
         open(csvpath, "a") do io
             e = hasproperty(res, :epochs) ? res.epochs : ""
             b = hasproperty(res, :batch) ? res.batch : ""

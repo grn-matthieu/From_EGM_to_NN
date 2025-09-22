@@ -52,47 +52,38 @@ end
 function solve_nn(model; opts = nothing)
     P, G, S, U = get_params(model), get_grids(model), get_shocks(model), get_utility(model)
     input_dim = isnothing(S) ? 1 : 2
-    epochs = 1000
+
+    get_opt(key::Symbol, default) =
+        opts === nothing ? default :
+        (hasproperty(opts, key) ? getfield(opts, key) : default)
+
+    epochs = Int(get_opt(:epochs, 1000))
+    epochs = max(epochs, 0)
+    batch_opt = get_opt(:batch, nothing)
+    verbose = get_opt(:verbose, false)
     start_time = time_ns()
 
     # Build Lux chain and optimizer
-    chain = _make_chain(input_dim; hid1 = get(opts, :hid1, 64), hid2 = get(opts, :hid2, 32))
+    chain = _make_chain(input_dim; hid1 = get_opt(:hid1, 256), hid2 = get_opt(:hid2, 256))
     # Reduce default learning rate for stability (can be overridden via opts)
-    local_lr = opts === nothing ? 1e-4 : get(opts, :lr, 1e-4)
-    opt = Optimisers.Adam(local_lr)
+    local_lr = get_opt(:lr, 1e-4)
+    opt =
+        opt = Optimisers.OptimiserChain(Optimisers.ClipGrad(1.0), Optimisers.Adam(local_lr))
 
     ps, st = Lux.setup(Random.GLOBAL_RNG, chain)
+    rng = Random.default_rng()
 
     tstate = Lux.Training.TrainState(chain, ps, st, opt)
 
     vjp_rule = Lux.AutoZygote()
 
     # Generate dataset and preprocess inputs once
-    X0, y0 = generate_dataset(G, S)
+    X0, _ = generate_dataset(G, S)
     X_proc = prepare_training_batch(X0)
-    data = (X_proc, y0)
-
-    # Debug: run a single forward pass to inspect model outputs and types
-    try
-        mo = chain(X_proc, ps, st)
-        @printf "DEBUG: model forward pass returned type = %s\n" string(typeof(mo))
-        if mo isa Tuple
-            @printf "DEBUG: model tuple element types: (%s, %s)\n" string(typeof(mo[1])) string(
-                typeof(mo[2]),
-            )
-        end
-        # Attempt to extract predicted c for inspection
-        if mo isa Tuple
-            c_test = mo[1]
-        else
-            c_test = mo
-        end
-        @printf "DEBUG: c_test eltype = %s, size = %s\n" string(eltype(c_test)) string(
-            size(c_test),
-        )
-    catch e
-        @printf "DEBUG: forward pass error: %s\n" string(e)
-    end
+    total_samples = size(X_proc, 2)
+    batch_size =
+        batch_opt === nothing ? total_samples : clamp(Int(batch_opt), 1, total_samples)
+    batch_size = max(batch_size, 1)
 
     # Ensure params used by residuals have a numeric `y` to avoid `nothing` during AD
     # Construct a small plain struct with scalar numeric fields to avoid broadcasting
@@ -113,26 +104,10 @@ function solve_nn(model; opts = nothing)
         ScalarParams(σv, βv, rv, 1.0)
     end
 
-    # Debug: inspect params and grids before training (non-AD context)
-    @printf "DEBUG PRETRAIN: typeof(P)=%s, propertynames(P)=%s\n" string(typeof(P)) string(
-        propertynames(P),
-    )
-    @printf "DEBUG PRETRAIN: P has y field? %s, P_resid.y=%s\n" string(
-        :y in propertynames(P),
-    ) string(getfield(P_resid, :y))
-    @printf "DEBUG PRETRAIN: a grid eltype=%s len=%d\n" string(eltype(G[:a].grid)) length(
-        G[:a].grid,
-    )
-    if !isnothing(S)
-        @printf "DEBUG PRETRAIN: z grid eltype=%s len=%d, Π eltype=%s size=%s\n" string(
-            eltype(S.zgrid),
-        ) length(S.zgrid) string(eltype(S.Π)) string(size(S.Π))
-    end
-
     # Custom loss function using Euler residuals, capturing P_resid, G, S
     loss_function =
         (model, ps, st, data) -> begin
-            # data[1] is preprocessed X shaped (features, batch)
+            # data[1] is preprocessed X shaped (features, batch); no targets
             X = data[1]
             # Call model; it may return either the predictions or a (predictions, newstate) tuple
             model_out = model(X, ps, st)
@@ -195,32 +170,37 @@ function solve_nn(model; opts = nothing)
         end
     end
 
+    batches_per_epoch = cld(total_samples, batch_size)
     for epoch = 1:epochs
-        # Grad-norm diagnostics: attempt to extract gradient container from Lux
+        epoch_loss = 0.0
+        seen = 0
         gnorm = NaN
-        ginfo, loss, _, tstate =
-            Lux.Training.single_train_step!(vjp_rule, loss_function, data, tstate)
-        # try to compute a robust global gradient norm (RMS-style)
-        try
-            ssum = flatten_sum_squares(ginfo)
-            if ssum > 0.0
-                gnorm = sqrt(ssum)
-            else
-                gnorm = 0.0
+        X_shuf = X_proc[:, randperm(rng, total_samples)]
+        for batch_start = 1:batch_size:total_samples
+            batch_end = min(batch_start + batch_size - 1, total_samples)
+            X_batch = view(X_shuf, :, batch_start:batch_end)
+            batch_data = (X_batch,)
+            ginfo, loss, _, tstate =
+                Lux.Training.single_train_step!(vjp_rule, loss_function, batch_data, tstate)
+            nb = size(X_batch, 2)
+            epoch_loss += Float64(loss) * nb
+            seen += nb
+            # try to compute a robust global gradient norm (RMS-style)
+            try
+                ssum = flatten_sum_squares(ginfo)
+                gnorm = ssum > 0.0 ? sqrt(ssum) : 0.0
+            catch
+                gnorm = NaN
             end
-        catch
-            gnorm = NaN
         end
-        if epoch % 1 == 0 || epoch == epochs
-            @printf "Epoch: %3d \t Loss: %.5g \t GradNorm: %.5g\n" epoch loss gnorm
+        if verbose && (epoch % 10 == 0 || epoch == epochs)
+            @printf "Epoch: %3d \t Loss: %.5g \t GradNorm: %.5g\n" epoch (
+                epoch_loss / max(seen, 1)
+            ) gnorm
         end
     end
 
     # After training, build a solution-like NamedTuple so callers (methods) get a consistent result
-    # Inspect TrainState fields at runtime to determine where parameters are stored
-    @printf "DEBUG NN: TrainState type = %s\n" string(typeof(tstate))
-    @printf "DEBUG NN: TrainState fieldnames = %s\n" string(fieldnames(typeof(tstate)))
-    @printf "DEBUG NN: tstate summary = %s\n" string(tstate)
     # Try to locate chain, params, and state inside tstate using the TrainState fields
     if hasfield(typeof(tstate), :model)
         chain_final = getfield(tstate, :model)
@@ -264,7 +244,6 @@ function solve_nn(model; opts = nothing)
         try
             resid = euler_resid_det_grid(P_resid, a_grid_f32, c_vec_f32)
         catch e
-            @printf("DEBUG RESID ERROR (det): %s\n", e)
             rethrow(e)
         end
         max_resid = maximum(resid)
@@ -283,8 +262,8 @@ function solve_nn(model; opts = nothing)
         c_return = c_final
     else
         # stochastic: evaluate on full (a,z) grid ordering assumed to match data generation
-        # Evaluate on training input ordering (data[1]) to get predicted c for all (a,z)
-        model_out = call_chain(chain_final, data[1], ps_final, st_final)
+        # Evaluate on training input ordering (X_proc) to get predicted c for all (a,z)
+        model_out = call_chain(chain_final, X_proc, ps_final, st_final)
         c_pred = model_out isa Tuple ? model_out[1] : model_out
         a_grid_f32, z_grid_f32, Pz_f32, c_mat, c_mat_f32 =
             stoch_residual_inputs(c_pred, G, S)
@@ -293,7 +272,6 @@ function solve_nn(model; opts = nothing)
             resid =
                 euler_resid_stoch_grid(P_resid, a_grid_f32, z_grid_f32, Pz_f32, c_mat_f32)
         catch e
-            @printf("DEBUG RESID ERROR (stoch): %s\n", e)
             rethrow(e)
         end
         max_resid = maximum(abs.(resid))
@@ -310,7 +288,15 @@ function solve_nn(model; opts = nothing)
     end
 
     runtime = (time_ns() - start_time) / 1e9
-    opts = (; epochs = epochs, lr = local_lr, seed = nothing, runtime = runtime)
+    opts = (;
+        epochs = epochs,
+        batch = batch_size,
+        lr = local_lr,
+        seed = nothing,
+        runtime = runtime,
+        verbose = verbose,
+        batches_per_epoch = batches_per_epoch,
+    )
 
     iters = epochs
     converged = false

@@ -38,7 +38,6 @@ function solve(model::AbstractModel, method::NNMethod, cfg::NamedTuple;)::Soluti
 
     # Call the NN kernel to solve the model and return the solution struct
     sol = solve_nn(model; opts = method.opts)
-    @printf "DEBUG NN: solve_nn returned type = %s\n" string(typeof(sol))
 
     ee = sol.resid
     ee_vec = ee isa AbstractMatrix ? vec(maximum(ee, dims = 2)) : ee

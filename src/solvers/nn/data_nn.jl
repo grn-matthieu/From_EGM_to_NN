@@ -1,49 +1,42 @@
-"""
-DataNN
-
-Stub data provider for NN training. Exports a small `generate_dataset` function
-that returns input features and targets. For now inputs are (a, z) concatenated
-and targets are a simple rule (half resources) so the training loop has data.
-"""
 module DataNN
 
 export generate_dataset
-
 using Random
 
-function generate_dataset(G, S)
-    # Generate sample points on the grid
-    a_grid = G[:a].grid
+"""
+    generate_dataset(G, S; mode=:full, nsamples::Int=0, rng=Random.default_rng())
 
+Returns inputs X with rows = samples and columns = features.
+Deterministic: features = (a,)
+Stochastic:   features = (a, z)
+The second return is `nothing` for compatibility.
+"""
+function generate_dataset(G, S; mode = :full, nsamples::Int = 0, rng = Random.default_rng())
+    a = Float32.(G[:a].grid)
     if isnothing(S)
-        # Deterministic case: input is just assets
-        X = reshape(a_grid, :, 1)  # Na × 1 matrix
-        # Simple target: half of resources (R*a + y)
-        R = 1.0 + 0.02  # rough interest rate
-        y = 0.5f0 .* (R .* a_grid .+ 1.0f0)  # half resources policy
-        return (X, y)
-    else
-        # Stochastic case: input is (assets, shocks)
-        z_grid = S.zgrid
-        Na, Nz = length(a_grid), length(z_grid)
-
-        # Create input matrix: each column is [a, z] for one sample
-        X = zeros(Float32, Na * Nz, 2)
-        y = zeros(Float32, Na * Nz)
-
-        idx = 1
-        for j = 1:Nz
-            for i = 1:Na
-                X[idx, 1] = a_grid[i]
-                X[idx, 2] = z_grid[j]
-                # Simple target: half of resources with income shock
-                R = 1.0 + 0.02
-                resources = R * a_grid[i] + exp(z_grid[j])
-                y[idx] = 0.5f0 * resources
-                idx += 1
-            end
+        if mode == :full
+            X = reshape(a, :, 1)                    # Na×1
+        else
+            amin, amax = extrema(a)
+            n = nsamples > 0 ? nsamples : length(a)
+            X = rand(rng, Float32, n, 1) .* (amax - amin) .+ amin
         end
-        return (X, y)
+        return (X, nothing)
+    else
+        z = Float32.(S.zgrid)
+        Na, Nz = length(a), length(z)
+        if mode == :full
+            A = repeat(a, inner = Nz)                 # length Na*Nz
+            Z = repeat(z, outer = Na)
+        else
+            amin, amax = extrema(a)
+            zmin, zmax = minimum(z), maximum(z)
+            n = nsamples > 0 ? nsamples : Na * Nz
+            A = rand(rng, Float32, n) .* (amax - amin) .+ amin
+            Z = rand(rng, Float32, n) .* (zmax - zmin) .+ zmin
+        end
+        X = hcat(A, Z)                               # (Na*Nz)×2 or n×2
+        return (X, nothing)
     end
 end
 
