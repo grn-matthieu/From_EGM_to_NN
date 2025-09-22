@@ -18,6 +18,9 @@ try
 catch
 end
 
+# Fast test mode: set environment variable `FAST_TEST=1` to skip heavier/coverage testsets
+const FAST_TEST = get(ENV, "FAST_TEST", "0") == "1"
+
 # --- Deterministic breakdown ---
 @testset "Deterministic - Core" begin
     include("core/test_core.jl")
@@ -45,7 +48,11 @@ end
 
 # --- Projection grouping ---
 @testset "Projection - Stochastic Smoke" begin
-    include("methods/test_projection_stoch.jl")
+    if !FAST_TEST
+        include("methods/test_projection_stoch.jl")
+    else
+        @info "Skipping Projection - Stochastic Smoke in FAST_TEST mode"
+    end
 end
 @testset "Projection - Method Adapter" begin
     include("methods/test_projection_method.jl")
@@ -100,11 +107,19 @@ end
 # NN tests removed - neural-network solver being rebuilt
 
 @testset "Coverage - More" begin
-    include("coverage/coverage_more.jl")
+    if !FAST_TEST
+        include("coverage/coverage_more.jl")
+    else
+        @info "Skipping Coverage - More in FAST_TEST mode"
+    end
 end
 
 @testset "Coverage - SimPlots" begin
-    include("coverage/coverage_simplots.jl")
+    if !FAST_TEST
+        include("coverage/coverage_simplots.jl")
+    else
+        @info "Skipping Coverage - SimPlots in FAST_TEST mode"
+    end
 end
 
 @testset "Coverage - NNLoss" begin
@@ -112,7 +127,11 @@ end
 end
 
 @testset "Coverage - Core API" begin
-    include("coverage/coverage_core_api.jl")
+    if !FAST_TEST
+        include("coverage/coverage_core_api.jl")
+    else
+        @info "Skipping Coverage - Core API in FAST_TEST mode"
+    end
 end
 
 @testset "Analysis - SteadyState" begin
