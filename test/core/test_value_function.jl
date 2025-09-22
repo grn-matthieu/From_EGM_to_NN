@@ -6,29 +6,29 @@ using ThesisProject.Shocks: ShockOutput
 
 @testset "Value function deterministic" begin
     β = 0.9
-    p = (; β = β)
+    p = (; β)
 
     agrid = [0.0, 1.0]
-    g = Dict(:a => (; grid = agrid, N = length(agrid)))
+    g = (; a = (; grid = agrid, N = length(agrid)))
 
     U = (; u = c -> log.(c))
 
     cpol = fill(2.0, length(agrid))
     apol = fill(0.0, length(agrid))
-    policy = Dict(:c => (; value = cpol), :a => (; value = apol))
+    policy = (; c = (; value = cpol), a = (; value = apol))
 
     V = compute_value_policy(p, g, nothing, U, policy)
     V_ss = fill(log(2.0) / (1 - β), length(agrid))
-    @test all(isapprox(V, V_ss; atol = 1e-6))
+    @test isapprox(V, V_ss; atol = 1e-6)
 end
 
 @testset "Value function stochastic" begin
     β = 0.9
-    p = (; β = β)
+    p = (; β)
 
     Na = 3
     agrid = collect(range(0.0, 1.0; length = Na))
-    g = Dict(:a => (; grid = agrid, N = Na))
+    g = (; a = (; grid = agrid, N = Na))
 
     U = (; u = c -> log.(c))
 
@@ -39,7 +39,7 @@ end
     cvals = [1.0, 2.0]
     cpol = hcat(fill(cvals[1], Na), fill(cvals[2], Na))
     apol = zeros(Na, Nz)
-    policy = Dict(:c => (; value = cpol), :a => (; value = apol))
+    policy = (; c = (; value = cpol), a = (; value = apol))
 
     V = compute_value_policy(p, g, S, U, policy)
 
@@ -48,5 +48,5 @@ end
     V_expected = hcat(fill(Vstates[1], Na), fill(Vstates[2], Na))
 
     @test size(V) == (Na, Nz)
-    @test maximum(abs.(V .- V_expected)) < 1e-6
+    @test isapprox(V, V_expected; atol = 1e-6)
 end
