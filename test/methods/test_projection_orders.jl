@@ -2,7 +2,7 @@ using Test
 using ThesisProject
 using ThesisProject.ProjectionKernel: solve_projection_det, solve_projection_stoch
 using ThesisProject.Chebyshev: chebyshev_basis, chebyshev_nodes
-using ThesisProject.EulerResiduals: euler_resid_det_2, euler_resid_stoch
+using ThesisProject.EulerResiduals: euler_resid_det_grid, euler_resid_stoch
 
 @testset "projection order selection deterministic" begin
     cfg = cfg_patch(
@@ -37,7 +37,7 @@ using ThesisProject.EulerResiduals: euler_resid_det_2, euler_resid_stoch
         a_val = chebyshev_nodes(Nval, a_grid.min, a_grid.max)
         B_val = chebyshev_basis(a_val, k, a_grid.min, a_grid.max)
         c_val = B_val * sol_k.coeffs
-        resid_val = euler_resid_det_2(p, a_val, c_val)
+        resid_val = euler_resid_det_grid(p, a_val, c_val)
         push!(maxres, maximum(resid_val[min(2, end):end]))
     end
     @test maxres[2] < maxres[1]

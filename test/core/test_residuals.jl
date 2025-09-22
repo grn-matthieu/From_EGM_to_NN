@@ -2,7 +2,7 @@ using Test
 using ThesisProject.EulerResiduals:
     euler_resid_det,
     euler_resid_stoch,
-    euler_resid_det_2,
+    euler_resid_det_grid,
     euler_resid_det!,
     euler_resid_stoch!
 
@@ -35,7 +35,7 @@ end
     params = (; β = 0.96, σ = 2.0, r = 0.04, y = 1.0)
     a_grid = [0.0, 1.0]
     c = [0.5, 0.6]
-    res = euler_resid_det_2(params, a_grid, c)
+    res = euler_resid_det_grid(params, a_grid, c)
 
     R = 1 + params.r
     β = params.β
@@ -114,7 +114,7 @@ end
     params_interp = (; β = 0.96, σ = 2.0, r = 0.04, y = 1.0)
     a_grid = [0.0, 1.0]
     c_bad = [0.5]
-    @test_throws AssertionError euler_resid_det_2(params_interp, a_grid, c_bad)
+    @test_throws AssertionError euler_resid_det_grid(params_interp, a_grid, c_bad)
 
     z_grid = [0.0, 0.0]
     Pz = [0.7 0.3; 0.4 0.6]

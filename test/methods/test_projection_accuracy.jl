@@ -2,7 +2,7 @@ using Test
 using ThesisProject
 using ThesisProject.Chebyshev: chebyshev_basis, chebyshev_nodes
 using ThesisProject.CommonInterp: interp_pchip!
-using ThesisProject.EulerResiduals: euler_resid_det_2, euler_resid_stoch
+using ThesisProject.EulerResiduals: euler_resid_det_grid, euler_resid_stoch
 
 @testset "Projection solution accuracy and metadata" begin
     # Deterministic projection: residuals and metadata consistency
@@ -21,7 +21,7 @@ using ThesisProject.EulerResiduals: euler_resid_det_2, euler_resid_stoch
     g_det = get_grids(model_det)
     a_out = cfg_get(g_det, :a).grid
     c_det_policy = cfg_get(sol_det.policy, :c)
-    resid_det = euler_resid_det_2(p_det, a_out, c_det_policy.value)
+    resid_det = euler_resid_det_grid(p_det, a_out, c_det_policy.value)
     @test maximum(abs.(resid_det .- c_det_policy.euler_errors)) < 1e-10
 
     # max_resid should reflect pruned boundary points
@@ -39,7 +39,7 @@ using ThesisProject.EulerResiduals: euler_resid_det_2, euler_resid_stoch
         collect(range(grid[1] + step / 2, grid[end] - step / 2; length = length(grid) - 1))
     c_off = similar(a_off)
     interp_pchip!(c_off, grid, values, a_off)
-    resid_off = euler_resid_det_2(p_det, a_off, c_off)
+    resid_off = euler_resid_det_grid(p_det, a_off, c_off)
     @test maximum(abs.(resid_off)) < 3e-2
 
     # Stochastic projection: matrix residuals present and shaped

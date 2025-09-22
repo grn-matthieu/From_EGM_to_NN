@@ -18,6 +18,8 @@ using Random
 using Printf
 using Zygote
 
+include("mixed_precision.jl")
+
 export solve_nn
 
 # Small scalar-only params container used for residual evaluation to avoid
@@ -65,10 +67,9 @@ function solve_nn(model; opts = nothing)
 
     vjp_rule = Lux.AutoZygote()
 
-    # Generate dataset and preprocess inputs once: convert X to Float32 and transpose
+    # Generate dataset and preprocess inputs once
     X0, y0 = generate_dataset(G, S)
-    # make a concrete Float32 array shaped (features, batch)
-    X_proc = Array{Float32}(permutedims(X0))  # (features, batch)
+    X_proc = prepare_training_batch(X0)
     data = (X_proc, y0)
 
     # Debug: run a single forward pass to inspect model outputs and types
@@ -142,34 +143,20 @@ function solve_nn(model; opts = nothing)
                 st_out = st
             end
             if isnothing(S)
-                # Deterministic case - convert grids to Float32
-                # ensure concrete Float32 vectors for residual evaluation
-                a_grid_f32 = Vector{Float32}(collect(G[:a].grid))
-                # c_predicted has shape (output_dim, batch) -> (1, Na)
-                c_pred_vec = vec(permutedims(c_predicted))
-                c_pred_vec_f32 = Vector{Float32}(collect(c_pred_vec))
+                a_grid_f32, _, c_pred_vec_f32 = det_residual_inputs(c_predicted, G)
                 resid = euler_resid_det_grid(P_resid, a_grid_f32, c_pred_vec_f32)
-                loss = Float32(sum(resid))  # Convert loss to Float32
+                loss = det_loss(resid)
             else
-                # Stochastic case - convert grids to Float32
-                # ensure arrays are plain vectors/matrices before broadcasting
-                # ensure concrete Float32 arrays/matrices for residual evaluation
-                a_grid_f32 = Vector{Float32}(collect(G[:a].grid))
-                z_grid_f32 = Vector{Float32}(collect(S.zgrid))
-                Pz_f32 = Array{Float32}(collect(S.Π))
-                Na = length(a_grid_f32)
-                Nz = length(z_grid_f32)
-                # c_predicted has shape (output_dim, Na*Nz) -> reshape to (Na, Nz)
-                c_pred = reshape(vec(permutedims(c_predicted)), Na, Nz)
-                c_pred_f32 = Array{Float32}(collect(c_pred))
+                a_grid_f32, z_grid_f32, Pz_f32, _, c_pred_f32 =
+                    stoch_residual_inputs(c_predicted, G, S)
                 resid = euler_resid_stoch_grid(
                     P_resid,
                     a_grid_f32,
                     z_grid_f32,
                     Pz_f32,
-                    c_pred,
+                    c_pred_f32,
                 )
-                loss = Float32(sum(abs2, resid))  # Convert loss to Float32
+                loss = stoch_loss(resid)
             end
             return loss, st_out, NamedTuple()
         end
@@ -269,20 +256,13 @@ function solve_nn(model; opts = nothing)
     a_next = nothing
     if isnothing(S)
         # Deterministic: evaluate model on asset grid
-        a_grid_f32 = Vector{Float32}(collect(a_grid))
-        X_forward = reshape(a_grid_f32, 1, :)  # (features, batch)
+        X_forward, a_grid_f32 = det_forward_inputs(G)
         model_out = call_chain(chain_final, X_forward, ps_final, st_final)
         c_pred = model_out isa Tuple ? model_out[1] : model_out
-        c_vec = vec(permutedims(c_pred))
-        # convert predicted c back to grid element type (e.g., Float64)
-        c_final = convert.(eltype(a_grid), c_vec)
-        # compute residuals and diagnostics (use Float32 inputs for residuals)
+        _, c_vec, c_vec_f32 = det_residual_inputs(c_pred, G)
+        c_final = convert_to_grid_eltype(a_grid, c_vec)
         try
-            resid = euler_resid_det_grid(
-                P_resid,
-                Vector{Float32}(collect(a_grid)),
-                Vector{Float32}(collect(c_vec)),
-            )
+            resid = euler_resid_det_grid(P_resid, a_grid_f32, c_vec_f32)
         catch e
             @printf("DEBUG RESID ERROR (det): %s\n", e)
             rethrow(e)
@@ -303,26 +283,15 @@ function solve_nn(model; opts = nothing)
         c_return = c_final
     else
         # stochastic: evaluate on full (a,z) grid ordering assumed to match data generation
-        a_grid_f32 = Vector{Float32}(collect(G[:a].grid))
-        z_grid_f32 = Vector{Float32}(collect(S.zgrid))
-        # transition matrix for z (probabilities) used by residuals
-        Pz_f32 = Array{Float32}(collect(S.Π))
-        Na = length(a_grid_f32)
-        Nz = length(z_grid_f32)
         # Evaluate on training input ordering (data[1]) to get predicted c for all (a,z)
         model_out = call_chain(chain_final, data[1], ps_final, st_final)
         c_pred = model_out isa Tuple ? model_out[1] : model_out
-        c_mat = reshape(vec(permutedims(c_pred)), Na, Nz)
-        # keep c as matrix (Na x Nz) using the native grid element type
-        c_return = convert.(eltype(a_grid), c_mat)
+        a_grid_f32, z_grid_f32, Pz_f32, c_mat, c_mat_f32 =
+            stoch_residual_inputs(c_pred, G, S)
+        c_return = convert_to_grid_eltype(a_grid, c_mat)
         try
-            resid = euler_resid_stoch_grid(
-                P_resid,
-                a_grid_f32,
-                z_grid_f32,
-                Pz_f32,
-                Array{Float32}(collect(c_mat)),
-            )
+            resid =
+                euler_resid_stoch_grid(P_resid, a_grid_f32, z_grid_f32, Pz_f32, c_mat_f32)
         catch e
             @printf("DEBUG RESID ERROR (stoch): %s\n", e)
             rethrow(e)

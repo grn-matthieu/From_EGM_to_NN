@@ -1,6 +1,6 @@
 using Test
 using ThesisProject
-using ThesisProject.EulerResiduals: euler_resid_det_2
+using ThesisProject.EulerResiduals: euler_resid_det_grid
 using ThesisProject.Determinism: make_rng
 
 @testset "Euler error grids" begin
@@ -14,7 +14,7 @@ using ThesisProject.Determinism: make_rng
     p_egm = get_params(model_egm)
     g_egm = get_grids(model_egm)
     sol_egm_c = cfg_get(sol_egm.policy, :c)
-    resid_egm = euler_resid_det_2(p_egm, cfg_get(g_egm, :a).grid, sol_egm_c.value)
+    resid_egm = euler_resid_det_grid(p_egm, cfg_get(g_egm, :a).grid, sol_egm_c.value)
     @test maximum(abs.(resid_egm .- sol_egm_c.euler_errors)) < 1e-9
     @test maximum(resid_egm[min(2, end):end]) < 1e-3
 
@@ -32,7 +32,7 @@ using ThesisProject.Determinism: make_rng
     p_proj = get_params(model_proj)
     g_proj = get_grids(model_proj)
     sol_proj_c = cfg_get(sol_proj.policy, :c)
-    resid_proj = euler_resid_det_2(p_proj, cfg_get(g_proj, :a).grid, sol_proj_c.value)
+    resid_proj = euler_resid_det_grid(p_proj, cfg_get(g_proj, :a).grid, sol_proj_c.value)
     @test maximum(abs.(resid_proj .- sol_proj_c.euler_errors)) < 1e-9
     @test maximum(resid_proj[min(2, end):end]) < 5e-3
 
@@ -45,7 +45,7 @@ using ThesisProject.Determinism: make_rng
     p_pert = get_params(model_pert)
     g_pert = get_grids(model_pert)
     sol_pert_c = cfg_get(sol_pert.policy, :c)
-    resid_pert = euler_resid_det_2(p_pert, cfg_get(g_pert, :a).grid, sol_pert_c.value)
+    resid_pert = euler_resid_det_grid(p_pert, cfg_get(g_pert, :a).grid, sol_pert_c.value)
     @test maximum(abs.(resid_pert .- sol_pert_c.euler_errors)) < 1e-9
     # Perturbation is local; prune boundaries and use a looser tolerance
     @test maximum(resid_pert[2:end-1]) < 5e-2
