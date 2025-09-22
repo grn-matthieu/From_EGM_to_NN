@@ -8,8 +8,8 @@ This inventory lists files under `src/`, `scripts/`, `config/`, `test/`, and `ex
 - `src/analysis/SteadyState.jl`: Steady‑state analytics and helpers.
 - `src/core/api.jl`: API types and stubs for models, methods, solutions.
 - `src/core/model_contract.jl`: Contract functions `get_params/grids/shocks/utility` for models.
-- `src/core/model_factory.jl`: Builds concrete model from config (dispatch on `:model.name`).
-- `src/core/method_factory.jl`: Builds solver method object from config (`:method`).
+- `src/core/model_factory.jl`: Builds concrete model from config (dispatch on `cfg.model.name`).
+- `src/core/method_factory.jl`: Builds solver method object from config (`cfg.solver.method`).
 - `src/methods/EGM.jl`: EGM method adapter; runs EGM kernels and returns `Solution`.
 - `src/methods/Projection.jl`: Projection method adapter; wraps projection kernels.
 - `src/methods/Perturbation.jl`: Perturbation method adapter; wraps perturbation kernel.
@@ -25,8 +25,8 @@ This inventory lists files under `src/`, `scripts/`, `config/`, `test/`, and `ex
 - `src/solvers/perturbation/kernel.jl`: Core perturbation method kernel.
 - `src/solvers/projection/coefficients.jl`: Basis/coefficients helpers for projection.
 - `src/solvers/projection/kernel.jl`: Projection solver kernel.
-- `src/utils/Config.jl`: YAML config load/validate; symbol‑key normalization.
-- `src/utils/Determinism.jl`: Reproducible RNG helpers; cfg hashing/canonicalization.
+- `src/utils/Config.jl`: YAML config load/validate; converts tables to nested NamedTuples.
+- `src/utils/Determinism.jl`: Reproducible RNG helpers; configuration hashing/canonicalization.
 - `src/viz/api.jl`: Visualization API stubs that error without plotting backend.
 - `src/viz/PolicyPlots.jl`: Plot routines for policies and euler errors (loaded via extension).
 

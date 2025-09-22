@@ -32,8 +32,15 @@ ThesisProject
 
 ```julia
 using ThesisProject
+
 cfg = load_config("config/smoke_config/smoke_config.yaml")
 validate_config(cfg)
+
+# load_config now returns a nested NamedTuple, so fields are dot-accessible
+@show cfg.model.name
+@show cfg.params.β
+@show cfg.solver.method
+
 model = build_model(cfg)
 method = build_method(cfg)
 sol = solve(model, method, cfg)
@@ -59,7 +66,17 @@ sol = solve(model, method, cfg)
 | `random.seed`  | 🔁       | Optional; guarantees reproducibility without `Random.seed!`.
 | `logging`      | 📈       | (NN) specify directory and CSV logging behaviour.
 
-All keys are symbolised inside Julia. Use `validate_config(cfg)` to receive descriptive errors when entries are missing or inconsistent.
+`load_config` returns a nested `NamedTuple` with symbol keys, so configuration values are accessed via property syntax. Use `validate_config(cfg)` to receive descriptive errors when entries are missing or inconsistent.
+
+```julia
+cfg = load_config("config/smoke_config/smoke_config.yaml")
+cfg.params.β        # → 0.96
+cfg.grids.Na        # → 40
+cfg.solver.method   # → :EGM
+cfg.logging.dir     # → "/tmp/nn_logs" (if present)
+```
+
+Because `NamedTuple`s are immutable, create experiment-specific overrides with `merge`, e.g. `cfg = merge(cfg, (; solver = merge(cfg.solver, (; method = :Projection, tol = 1e-7, )),))`.
 
 ## Method Matrix
 

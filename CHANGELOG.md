@@ -1,4 +1,12 @@
-\n## [0.4.0] - 2025-09-18\n- Cleanup: organized tests into folders and updated runtests includes.\n- Repo hygiene: ignored local temp artifacts.\n- Version bump to 0.4.0.\n\n
+## [Unreleased]
+### Breaking
+- `load_config` now returns nested NamedTuples; downstream code must switch from `cfg[:key]` indexing to dot access (`cfg.key`).
+
+## [0.4.0] - 2025-09-18
+- Cleanup: organized tests into folders and updated runtests includes.
+- Repo hygiene: ignored local temp artifacts.
+- Version bump to 0.4.0.
+
 All notable changes to this project are documented in this file.
 
 ## [0.3.0] - 2025-09-15

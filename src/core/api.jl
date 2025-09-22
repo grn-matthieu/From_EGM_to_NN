@@ -52,11 +52,11 @@ function get_utility(x)
 end
 
 function build_model(x)
-    error("build_model factory not implemented for this config dict")
+    error("build_model factory not implemented for this configuration object")
 end
 
 function build_method(x)
-    error("build_method factory not implemented for this config dict")
+    error("build_method factory not implemented for this configuration object")
 end
 
 function load_config(x)

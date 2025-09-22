@@ -49,7 +49,7 @@ function ensure_dirs()
 end
 
 """
-Build solutions for all three methods from a base config dict.
+Build solutions for all three methods from a base configuration NamedTuple (or other symbol-keyed config object).
 Returns a Dict{Symbol,ThesisProject.API.Solution} keyed by :EGM, :Projection, :Perturbation.
 """
 function solve_all(cfg_base::AbstractDict)

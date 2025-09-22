@@ -204,7 +204,7 @@ Diagnostics and friendliness:
 
 
 
-Without changing public API, enhance `validate_config(cfg::AbstractDict)` to:
+Without changing public API, enhance `validate_config(cfg::NamedTuple)` to:
 
 - Normalize a few inputs (e.g., lowercasing method/interp_kind, mapping `β` → `β` if present).
 
