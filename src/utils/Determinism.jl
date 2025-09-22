@@ -31,22 +31,23 @@ function canonicalize_cfg(cfg)
     # Recursively convert keys to Symbol and sort
     function canonical(obj)
         if obj isa NamedTuple
-            canonical(Dict(pairs(obj)))
+            # Convert to pairs, canonicalize values, sort by key
+            ks = sort(Symbol.(keys(obj)))
+            vs = map(k -> canonical(getfield(obj, k)), ks)
+            NamedTuple{Tuple(ks)}(vs)
         elseif obj isa AbstractDict
-            # Sort keys as symbols
-            pairs = sort(collect(obj); by = x -> Symbol(x[1]))
-            Dict(Symbol(k) => canonical(v) for (k, v) in pairs)
+            ks = sort(Symbol.(keys(obj)))
+            Dict(k => canonical(obj[k]) for k in ks)
         elseif obj isa AbstractArray
             map(canonical, obj)
         elseif obj isa AbstractFloat
-            # Fixed precision (8 decimals)
             round(obj, digits = 8)
         else
             obj
         end
     end
     can_cfg = canonical(cfg)
-    # Use JSON3 with sorted keys and no whitespace
+    # JSON3 already canonicalizes NamedTuple key order
     json_str = JSON3.write(can_cfg; canonical = true)
     Vector{UInt8}(codeunits(json_str))
 end

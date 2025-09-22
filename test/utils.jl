@@ -14,7 +14,10 @@ function cfg_get(cfg::_ConfigLike, key::Symbol, rest::Symbol...)
     return cfg_get(cfg_get(cfg, key), rest...)
 end
 
-function cfg_getdefault(cfg::_ConfigLike, key::Symbol, default)
+# --- fixed getdefault ---
+
+# base case: single key
+function cfg_getdefault(cfg::_ConfigLike, default, key::Symbol)
     if cfg isa NamedTuple
         return hasproperty(cfg, key) ? getfield(cfg, key) : default
     else
@@ -22,13 +25,16 @@ function cfg_getdefault(cfg::_ConfigLike, key::Symbol, default)
     end
 end
 
-function cfg_getdefault(cfg::_ConfigLike, key::Symbol, rest::Symbol..., default)
+# recursive case: multiple keys
+function cfg_getdefault(cfg::_ConfigLike, default, key::Symbol, rest::Symbol...)
     if cfg_has(cfg, key)
-        return cfg_getdefault(cfg_get(cfg, key), rest..., default)
+        return cfg_getdefault(cfg_get(cfg, key), default, rest...)
     else
         return default
     end
 end
+
+# ---------------------------------------
 
 function _cfg_set(cfg::_ConfigLike, key::Symbol, value)
     if cfg isa NamedTuple
@@ -90,9 +96,7 @@ function _cfg_without(cfg::_ConfigLike, path::Tuple{Vararg{Symbol}})
 end
 
 cfg_without(cfg::_ConfigLike, key::Symbol) = _cfg_without(cfg, key)
-
 cfg_without(cfg::_ConfigLike, path::Tuple{Vararg{Symbol}}) = _cfg_without(cfg, path)
-
 cfg_without(cfg::_ConfigLike, keys::Symbol...) = _cfg_without(cfg, keys)
 
 function is_nondec(x::AbstractVector; tol = 1e-8)
