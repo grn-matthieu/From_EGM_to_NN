@@ -117,12 +117,12 @@ using Test
     @test begin
         cfg = cfg_patch(
             base,
-            :shocks => Dict{Symbol,Any}(
-                :active => true,
-                :method => "unknown",
-                :ρ_shock => 0.5,
-                :s_shock => 0.1,
-                :Nz => 5,
+            :shocks => (;
+                active = true,
+                method = "unknown",
+                ρ_shock = 0.5,
+                s_shock = 0.1,
+                Nz = 5,
             ),
         )
         try
@@ -138,12 +138,12 @@ using Test
     @test begin
         cfg = cfg_patch(
             base,
-            :shocks => Dict{Symbol,Any}(
-                :active => true,
-                :method => "tauchen",
-                :ρ_shock => 1.2,
-                :s_shock => 0.1,
-                :Nz => 5,
+            :shocks => (;
+                active = true,
+                method = "tauchen",
+                ρ_shock = 1.2,
+                s_shock = 0.1,
+                Nz = 5,
             ),
         )
         try
@@ -158,7 +158,7 @@ using Test
     # init.c shape mismatch (deterministic)
     @test begin
         Na = cfg_get(base, :grids, :Na)
-        cfg = cfg_patch(base, :init => Dict{Symbol,Any}(:c => ones(Na - 1)))
+        cfg = cfg_patch(base, :init => (; c = ones(Na - 1)))
         try
             validate_config(cfg)
             false
@@ -170,7 +170,7 @@ using Test
 
     # random.seed invalid type
     @test begin
-        cfg = cfg_patch(base, :random => Dict{Symbol,Any}(:seed => "abc"))
+        cfg = cfg_patch(base, :random => (; seed = "abc"))
         try
             validate_config(cfg)
             false

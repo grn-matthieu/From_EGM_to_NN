@@ -70,7 +70,7 @@ end
 @testset "EGM policy monotonicity" begin
     for seed in (42, 99)
         random_cfg =
-            cfg_has(SMOKE_CFG, :random) ? cfg_get(SMOKE_CFG, :random) : Dict{Symbol,Any}()
+            cfg_has(SMOKE_CFG, :random) ? cfg_get(SMOKE_CFG, :random) : NamedTuple()
         cfg = cfg_patch(
             SMOKE_CFG,
             :random => cfg_patch(random_cfg, :seed => seed),

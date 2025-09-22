@@ -3,20 +3,14 @@ module ValueFunction
 using ..CommonInterp: interp_linear!
 export compute_value_policy
 
-# small helper
-_get(x, s::Symbol) = hasproperty(x, s) ? getfield(x, s) : x[s]
-
 function compute_value_policy(p, g, S, U, policy; tol::Real = 1e-8, maxit::Int = 1_000)
-    a = _get(g, :a)
-    agrid = _get(a, :grid)
-    Na = _get(a, :N)
+    a = g.a
+    agrid = a.grid
+    Na = a.N
 
-    cpol = _get(_get(policy, :c), :value)
-    apol = _get(_get(policy, :a), :value)
-
-    βv =
-        (:β in propertynames(p)) ? getfield(p, :β) :
-        error("Parameter β not found in params")
+    cpol = policy[:c].value
+    apol = policy[:a].value
+    β = p.β
 
     # Deterministic
     if cpol isa AbstractVector && apol isa AbstractVector
@@ -26,7 +20,7 @@ function compute_value_policy(p, g, S, U, policy; tol::Real = 1e-8, maxit::Int =
         u_c = U.u(cpol)
         for _ = 1:maxit
             cont = interp_linear!(tmp, agrid, V, apol)
-            @. V_new = u_c + βv * cont
+            @. V_new = u_c + β * cont
             δ = 0.0
             @inbounds @simd for i in eachindex(V)
                 d = abs(V_new[i] - V[i])
@@ -48,7 +42,7 @@ function compute_value_policy(p, g, S, U, policy; tol::Real = 1e-8, maxit::Int =
     V = zeros(Na, Nz)
     cont = similar(V)
     tmp = similar(agrid)
-    P = S === nothing ? nothing : _get(S, :Π)
+    P = S === nothing ? nothing : S.Π
     @assert P !== nothing "Missing shocks transition matrix for stochastic value evaluation"
 
     V_new = similar(V)
@@ -63,7 +57,7 @@ function compute_value_policy(p, g, S, U, policy; tol::Real = 1e-8, maxit::Int =
                 @. cont[:, j] += P[j, jp] * tmp
             end
         end
-        @. V_new = u_c + βv * cont
+        @. V_new = u_c + β * cont
         δ = 0.0
         @inbounds @simd for i in eachindex(V)
             d = abs(V_new[i] - V[i])

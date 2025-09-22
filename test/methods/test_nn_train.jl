@@ -43,8 +43,7 @@ end
 
 @testset "NNTrain _step! + train!" begin
     # Small deterministic config and synthetic data
-    solver_cfg =
-        cfg_has(SMOKE_CFG, :solver) ? cfg_get(SMOKE_CFG, :solver) : Dict{Symbol,Any}()
+    solver_cfg = cfg_has(SMOKE_CFG, :solver) ? cfg_get(SMOKE_CFG, :solver) : NamedTuple()
     solver_cfg = cfg_patch(
         solver_cfg,
         :epochs => 2,
@@ -52,11 +51,7 @@ end
         :patience => 1,
         :min_delta => 0.0,
     )
-    cfg = cfg_patch(
-        SMOKE_CFG,
-        :solver => solver_cfg,
-        :logging => Dict{Symbol,Any}(:dir => mktempdir()),
-    )
+    cfg = cfg_patch(SMOKE_CFG, :solver => solver_cfg, :logging => (; dir = mktempdir()))
 
     state = NNInit.init_state(cfg)
 

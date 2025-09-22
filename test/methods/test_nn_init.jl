@@ -24,7 +24,7 @@ using Random
         @test state1.ps == state2.ps
 
         # Changing cfg seed changes parameters
-        random_cfg = cfg_has(cfg, :random) ? cfg_get(cfg, :random) : Dict{Symbol,Any}()
+        random_cfg = cfg_has(cfg, :random) ? cfg_get(cfg, :random) : NamedTuple()
         base_seed = cfg_has(random_cfg, :seed) ? cfg_get(random_cfg, :seed) : 1234
         cfg2 = cfg_patch(cfg, :random => cfg_patch(random_cfg, :seed => base_seed + 1))
         state3 = ThesisProject.NNInit.init_state(cfg2)
