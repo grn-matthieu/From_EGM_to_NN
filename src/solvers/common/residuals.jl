@@ -3,6 +3,7 @@ module EulerResiduals
 using ..CommonInterp: interp_linear
 using ..API
 using Zygote
+using ChainRulesCore: ignore_derivatives
 
 export euler_resid_det, euler_resid_stoch
 export euler_resid_det!, euler_resid_stoch!
@@ -76,10 +77,7 @@ function euler_resid_det!(
     end
     resid
 end
-Zygote.@ignore euler_resid_det!
-
-# Backward-compatible alias
-@deprecate euler_resid_det_2(params, a_grid, c) euler_resid_det_grid(params, a_grid, c)
+ignore_derivatives(() -> euler_resid_det!)
 
 # -------------------------
 # Stochastic (pure, AD-safe)
@@ -151,8 +149,10 @@ function euler_resid_stoch!(resid::AbstractMatrix, params, a_grid, z_grid, Π, c
         end
     end
     resid
+
 end
 
-Zygote.@ignore euler_resid_stoch!
+ignore_derivatives(() -> euler_resid_stoch!)
+
 
 end # module EulerResiduals

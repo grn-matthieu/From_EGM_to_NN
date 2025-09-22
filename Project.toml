@@ -5,6 +5,7 @@ version = "0.4.0"
 
 [deps]
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
+ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
 JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
@@ -29,6 +30,7 @@ ThesisProjectPlotsExt = ["Plots"]
 
 [compat]
 CUDA = "5.8.3"
+ChainRulesCore = "1.26.0"
 Coverage = "1"
 ForwardDiff = "0.10"
 JSON3 = "1"
