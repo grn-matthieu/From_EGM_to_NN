@@ -21,7 +21,7 @@
     params = get_params(model)
     grids = get_grids(model)
     @test params isa NamedTuple
-    @test (grids isa AbstractDict)
+    @test grids isa NamedTuple
 
     # Test solver building
     method = build_method(config)

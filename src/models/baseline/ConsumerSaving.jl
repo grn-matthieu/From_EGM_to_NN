@@ -14,7 +14,7 @@ import ..API: get_params, get_grids, get_shocks, get_utility
 
 struct ConsumerSavingModel <: AbstractModel
     params::NamedTuple
-    grids::Dict{Symbol,Any}
+    grids::NamedTuple
     shocks::Union{Nothing,ShockOutput}
     utility::NamedTuple
 end
@@ -29,7 +29,7 @@ function build_cs_model(cfg::AbstractDict)
     a_max = grids[:a_max]
     Na = grids[:Na]
     agrid = collect(range(a_min, a_max; length = Na))
-    grids = Dict{Symbol,Any}(:a => (; grid = agrid, min = a_min, max = a_max, N = Na))
+    grids = (a = (; grid = agrid, min = a_min, max = a_max, N = Na),)
 
     # Shocks discretization (if stoch, modalities in the shocks field)
     shocks = nothing
