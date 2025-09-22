@@ -6,6 +6,9 @@ using ThesisProject
 using Random
 using Printf
 
+include(joinpath(@__DIR__, "utils", "config_helpers.jl"))
+using .ScriptConfigHelpers
+
 usage() = """
 Usage:
   julia --project scripts/run_pretrain.jl --config <path> --pretrain [--epochs <Int>] [--batch <Int>] [--seed <Int>] [--nwarm <Int>]
@@ -58,25 +61,15 @@ function parse_args(argv::Vector{String})
     )
 end
 
-function to_symbol_dict(d::AbstractDict)
-    out = Dict{Symbol,Any}()
-    for (k, v) in d
-        out[k] = v isa AbstractDict ? to_symbol_dict(v) : v
-    end
-    return out
-end
-
 function main(args::Vector{String} = ARGS)
     opt = parse_args(args)
     cfg_loaded = load_config(opt.config)
-    cfg = to_symbol_dict(cfg_loaded)
-    validate_config(cfg)
+    validate_config(cfg_loaded)
+    cfg = dict_to_namedtuple(cfg_loaded)
 
-    # Seed
+    cfg = merge_section(cfg, :random, (; seed = opt.seed))
     Random.seed!(opt.seed)
-    random_cfg = get!(cfg, :random, Dict{Symbol,Any}())
-    random_cfg[:seed] = opt.seed
-    cfg[:random] = random_cfg
+    cfg_dict = namedtuple_to_dict(cfg)
 
     if !opt.pretrain
         println("--pretrain flag not set; nothing to do.")
@@ -92,7 +85,7 @@ function main(args::Vector{String} = ARGS)
     end
 
     # Build NN state (weights live in-place in state)
-    state = ThesisProject.NNInit.init_state(cfg)
+    state = ThesisProject.NNInit.init_state(cfg_dict)
 
     # Require a globally available policy function `aegm`
     if !isdefined(Main, :aegm)
@@ -106,7 +99,7 @@ function main(args::Vector{String} = ARGS)
         ThesisProject.NNPretrain.pretrain_then_euler!(
             state,
             policy,
-            cfg;
+            cfg_dict;
             Nwarm = opt.nwarm,
             epochs = opt.epochs,
             batch = opt.batch,
@@ -117,7 +110,7 @@ function main(args::Vector{String} = ARGS)
         metrics = fit_to_EGM!(
             state,
             policy,
-            cfg;
+            cfg_dict;
             epochs = opt.epochs,
             batch = opt.batch,
             seed = opt.seed,

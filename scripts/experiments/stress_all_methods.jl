@@ -34,6 +34,9 @@ using LinearAlgebra
 using Statistics: mean
 using ThesisProject
 
+include(joinpath(@__DIR__, "..", "utils", "config_helpers.jl"))
+using .ScriptConfigHelpers
+
 const ROOT = normpath(joinpath(@__DIR__, "..", ".."))
 
 ensure_outputs_dir() = (out = joinpath(ROOT, "outputs"); isdir(out) || mkpath(out); out)
@@ -91,39 +94,34 @@ function parse_cli(args)
 end
 
 """Return (:ok, sol) or (:error, (etype, emsg, estack)) for a given cfg/method/case."""
-function safe_solve(cfg; method::Symbol, stochastic::Bool, opts)
-    # Set method
-    cfg[:solver][:method] = method
+function safe_solve(cfg::NamedTuple; method::Symbol, stochastic::Bool, opts)
+    cfg_local = merge_section(cfg, :solver, (; method = method))
+    cfg_local = merge_config(cfg_local, (; method = method))
 
-    # Toggle shocks.active
-    if haskey(cfg, :shocks)
-        # Ensure we can add fields like :Nz (upgrade Dict value type to Any if needed)
-        if !(cfg[:shocks] isa Dict{Symbol,Any})
-            cfg[:shocks] = Dict{Symbol,Any}(cfg[:shocks])
-        end
-        cfg[:shocks][:active] = stochastic
-    else
-        cfg[:shocks] = Dict{Symbol,Any}(:active => stochastic)
+    shocks_updates = Dict{Symbol,Any}(:active => stochastic)
+    opts.Nz !== nothing && (shocks_updates[:Nz] = opts.Nz)
+    if get_nested(cfg_local, (:shocks,), nothing) !== nothing ||
+       stochastic ||
+       opts.Nz !== nothing
+        cfg_local = merge_section(cfg_local, :shocks, dict_to_namedtuple(shocks_updates))
     end
 
-    # Optional overrides
-    if opts.Nz !== nothing && haskey(cfg, :shocks)
-        cfg[:shocks][:Nz] = opts.Nz
-    end
     if opts.Na !== nothing
-        cfg[:grids][:Na] = opts.Na
+        cfg_local = merge_section(cfg_local, :grids, (; Na = opts.Na))
     end
-    if opts.tol !== nothing
-        cfg[:solver][:tol] = opts.tol
+    solver_updates = Dict{Symbol,Any}()
+    opts.tol !== nothing && (solver_updates[:tol] = opts.tol)
+    opts.tol_pol !== nothing && (solver_updates[:tol_pol] = opts.tol_pol)
+    if !isempty(solver_updates)
+        cfg_local = merge_section(cfg_local, :solver, dict_to_namedtuple(solver_updates))
     end
-    if opts.tol_pol !== nothing
-        cfg[:solver][:tol_pol] = opts.tol_pol
-    end
+
+    cfg_dict = namedtuple_to_dict(cfg_local)
 
     try
-        model = ThesisProject.build_model(cfg)
-        meth = ThesisProject.build_method(cfg)
-        sol = ThesisProject.solve(model, meth, cfg)
+        model = ThesisProject.build_model(cfg_dict)
+        meth = ThesisProject.build_method(cfg_dict)
+        sol = ThesisProject.solve(model, meth, cfg_dict)
         return (:ok, sol)
     catch err
         # Capture error type, message, and stacktrace string
@@ -176,14 +174,16 @@ function main()
     outpath = something(opts.outpath, default_out)
 
     # Base config - deterministic baseline works for both; we toggle shocks.active
-    base_cfg = ThesisProject.load_config(joinpath(ROOT, "config", "simple_baseline.yaml"))
-    ThesisProject.validate_config(base_cfg)
+    base_cfg_loaded =
+        ThesisProject.load_config(joinpath(ROOT, "config", "simple_baseline.yaml"))
+    ThesisProject.validate_config(base_cfg_loaded)
+    base_cfg = dict_to_namedtuple(base_cfg_loaded)
 
     # Strictly require Greek-letter keys in the loaded config
-    @assert haskey(base_cfg, :params) "Config missing :params section"
-    params0 = base_cfg[:params]
-    @assert haskey(params0, Symbol("\u03b2")) "Config :params must include :\\u03b2"
-    @assert haskey(params0, Symbol("\u03c3")) "Config :params must include :\\u03c3"
+    params0 = maybe_namedtuple(get_nested(base_cfg, (:params,), NamedTuple()))
+    @assert params0 !== NamedTuple() "Config missing :params section"
+    @assert hasproperty(params0, Symbol("\u03b2")) "Config :params must include :\\u03b2"
+    @assert hasproperty(params0, Symbol("\u03c3")) "Config :params must include :\\u03c3"
     β_key = Symbol("\u03b2")
     σ_key = Symbol("\u03c3")
 
@@ -222,10 +222,7 @@ function main()
 
     for m in methods, b in βs, s in σs
         for stochastic in (false, true)
-            cfg = deepcopy(base_cfg)
-            # Parameters: write only to keys detected from config
-            cfg[:params][β_key] = b
-            cfg[:params][σ_key] = s
+            cfg = merge_section(base_cfg, :params, Dict{Symbol,Any}(β_key => b, σ_key => s))
 
             case = stochastic ? "stochastic" : "deterministic"
             status, payload = safe_solve(cfg; method = m, stochastic, opts)

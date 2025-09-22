@@ -44,15 +44,20 @@ for METHOD in "${METHODS[@]}"; do
         method = Symbol(ENV["METHOD"])
         cfg_path = ENV["CFG_PATH"]
 
-        cfg = load_config(cfg_path)
-        # Override grid size and method
-        cfg[:grids][:Na] = Na
-        cfg[:solver][:method] = method
+        include(joinpath(root, "scripts", "utils", "config_helpers.jl"))
+        using .ScriptConfigHelpers
 
-        validate_config(cfg)
-        model = build_model(cfg)
-        meth = build_method(cfg)
-        sol = solve(model, meth, cfg)
+        cfg_loaded = load_config(cfg_path)
+        validate_config(cfg_loaded)
+        cfg_nt = dict_to_namedtuple(cfg_loaded)
+        cfg_nt = merge_section(cfg_nt, :grids, (; Na = Na))
+        cfg_nt = merge_section(cfg_nt, :solver, (; method = method))
+        cfg_nt = merge_config(cfg_nt, (; method = method))
+        cfg_dict = namedtuple_to_dict(cfg_nt)
+
+        model = build_model(cfg_dict)
+        meth = build_method(cfg_dict)
+        sol = solve(model, meth, cfg_dict)
         println("$(method) | $(basename(cfg_path)) | Na=$(Na): resid=$(sol.metadata[:max_resid]) iters=$(sol.metadata[:iters]) seed=$(seed) julia=$(VERSION)")
       '
     done

@@ -13,6 +13,9 @@ using ThesisProject.Determinism: make_rng
 using Statistics: mean, maximum, minimum
 using Plots
 const ROOT = normpath(joinpath(@__DIR__, "..", "..", "outputs"))
+
+include(joinpath(@__DIR__, "..", "utils", "config_helpers.jl"))
+using .ScriptConfigHelpers
 """Euler error summary statistics for a Solution."""
 function ee_stats(sol)
     pol_c = sol.policy[:c]
@@ -34,20 +37,26 @@ function policy_diff_stats(sol_a, sol_b)
     return (c = stats(diff_c), a = stats(diff_a))
 end
 function run()
-    cfg = ThesisProject.load_config(
+    cfg_loaded = ThesisProject.load_config(
         joinpath(@__DIR__, "..", "..", "config", "simple_baseline.yaml"),
     )
-    ThesisProject.validate_config(cfg)
-    cfg_egm = deepcopy(cfg)
-    cfg_egm[:solver][:method] = :EGM
-    model_egm = ThesisProject.build_model(cfg_egm)
-    method_egm = ThesisProject.build_method(cfg_egm)
-    sol_egm = ThesisProject.solve(model_egm, method_egm, cfg_egm; rng = make_rng(0))
-    cfg_proj = deepcopy(cfg)
-    cfg_proj[:solver][:method] = :Projection
-    model_proj = ThesisProject.build_model(cfg_proj)
-    method_proj = ThesisProject.build_method(cfg_proj)
-    sol_proj = ThesisProject.solve(model_proj, method_proj, cfg_proj; rng = make_rng(0))
+    ThesisProject.validate_config(cfg_loaded)
+    cfg = dict_to_namedtuple(cfg_loaded)
+
+    cfg_egm = merge_section(cfg, :solver, (; method = :EGM))
+    cfg_egm = merge_config(cfg_egm, (; method = :EGM))
+    cfg_egm_dict = namedtuple_to_dict(cfg_egm)
+    model_egm = ThesisProject.build_model(cfg_egm_dict)
+    method_egm = ThesisProject.build_method(cfg_egm_dict)
+    sol_egm = ThesisProject.solve(model_egm, method_egm, cfg_egm_dict; rng = make_rng(0))
+
+    cfg_proj = merge_section(cfg, :solver, (; method = :Projection))
+    cfg_proj = merge_config(cfg_proj, (; method = :Projection))
+    cfg_proj_dict = namedtuple_to_dict(cfg_proj)
+    model_proj = ThesisProject.build_model(cfg_proj_dict)
+    method_proj = ThesisProject.build_method(cfg_proj_dict)
+    sol_proj =
+        ThesisProject.solve(model_proj, method_proj, cfg_proj_dict; rng = make_rng(0))
     ee_egm = ee_stats(sol_egm)
     ee_proj = ee_stats(sol_proj)
     diffs = policy_diff_stats(sol_egm, sol_proj)

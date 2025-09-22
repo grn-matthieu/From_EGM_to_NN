@@ -33,6 +33,9 @@ catch err
     @warn "Plots not available; plot generation will be skipped" err
 end
 
+include(joinpath(@__DIR__, "..", "utils", "config_helpers.jl"))
+using .ScriptConfigHelpers
+
 function ensure_outputs_dir()
     outdir = joinpath(ROOT, "outputs")
     isdir(outdir) || mkpath(outdir)
@@ -78,26 +81,28 @@ end
 
 # Small fun to auto run the config
 function run_one(cfg_path::AbstractString, opts)
-    cfg = ThesisProject.load_config(cfg_path)
-    ThesisProject.validate_config(cfg)
+    cfg_loaded = ThesisProject.load_config(cfg_path)
+    ThesisProject.validate_config(cfg_loaded)
+    cfg = dict_to_namedtuple(cfg_loaded)
 
     if opts.Na !== nothing
-        cfg[:grids][:Na] = opts.Na
+        cfg = merge_section(cfg, :grids, (; Na = opts.Na))
     end
-    if opts.tol !== nothing
-        cfg[:solver][:tol] = opts.tol
+    solver_updates = Dict{Symbol,Any}()
+    opts.tol !== nothing && (solver_updates[:tol] = opts.tol)
+    opts.tol_pol !== nothing && (solver_updates[:tol_pol] = opts.tol_pol)
+    if !isempty(solver_updates)
+        cfg = merge_section(cfg, :solver, dict_to_namedtuple(solver_updates))
     end
-    if opts.tol_pol !== nothing
-        cfg[:solver][:tol_pol] = opts.tol_pol
-    end
-    if opts.Nz !== nothing && haskey(cfg, :shocks)
-        cfg[:shocks][:Nz] = opts.Nz
+    if opts.Nz !== nothing && get_nested(cfg, (:shocks,), nothing) !== nothing
+        cfg = merge_section(cfg, :shocks, (; Nz = opts.Nz))
     end
 
-    model = ThesisProject.build_model(cfg)
-    method = ThesisProject.build_method(cfg)
-    sol = ThesisProject.solve(model, method, cfg)
-    return sol, cfg
+    cfg_dict = namedtuple_to_dict(cfg)
+    model = ThesisProject.build_model(cfg_dict)
+    method = ThesisProject.build_method(cfg_dict)
+    sol = ThesisProject.solve(model, method, cfg_dict)
+    return sol, cfg_dict
 end
 
 function write_det(sol, cfg, outdir)

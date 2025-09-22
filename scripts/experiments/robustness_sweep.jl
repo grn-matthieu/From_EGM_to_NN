@@ -23,6 +23,9 @@ using Random
 using ThesisProject
 using Statistics: mean
 
+include(joinpath(@__DIR__, "..", "utils", "config_helpers.jl"))
+using .ScriptConfigHelpers
+
 const ROOT = normpath(joinpath(@__DIR__, "..", ".."))
 
 ensure_outputs_dir() = (out = joinpath(ROOT, "outputs"); isdir(out) || mkpath(out); out)
@@ -61,31 +64,29 @@ function parse_cli(args)
     return (; Na, Nz, tol, tol_pol)
 end
 
-function safe_solve(cfg; stochastic::Bool, opts)
-    # Toggle shocks.active
-    if haskey(cfg, :shocks)
-        cfg[:shocks][:active] = stochastic
-    elseif stochastic || opts.Nz !== nothing
-        cfg[:shocks] = Dict{Symbol,Any}(:active => stochastic)
+function safe_solve(cfg::NamedTuple; stochastic::Bool, opts)
+    shocks_updates = Dict{Symbol,Any}(:active => stochastic)
+    opts.Nz !== nothing && (shocks_updates[:Nz] = opts.Nz)
+    if get_nested(cfg, (:shocks,), nothing) !== nothing || stochastic || opts.Nz !== nothing
+        cfg = merge_section(cfg, :shocks, dict_to_namedtuple(shocks_updates))
     end
 
-    if opts.Nz !== nothing && haskey(cfg, :shocks)
-        cfg[:shocks][:Nz] = opts.Nz
-    end
     if opts.Na !== nothing
-        cfg[:grids][:Na] = opts.Na
+        cfg = merge_section(cfg, :grids, (; Na = opts.Na))
     end
-    if opts.tol !== nothing
-        cfg[:solver][:tol] = opts.tol
+    solver_updates = Dict{Symbol,Any}()
+    opts.tol !== nothing && (solver_updates[:tol] = opts.tol)
+    opts.tol_pol !== nothing && (solver_updates[:tol_pol] = opts.tol_pol)
+    if !isempty(solver_updates)
+        cfg = merge_section(cfg, :solver, dict_to_namedtuple(solver_updates))
     end
-    if opts.tol_pol !== nothing
-        cfg[:solver][:tol_pol] = opts.tol_pol
-    end
+
+    cfg_dict = namedtuple_to_dict(cfg)
 
     try
-        model = ThesisProject.build_model(cfg)
-        method = ThesisProject.build_method(cfg)
-        sol = ThesisProject.solve(model, method, cfg)
+        model = ThesisProject.build_model(cfg_dict)
+        method = ThesisProject.build_method(cfg_dict)
+        sol = ThesisProject.solve(model, method, cfg_dict)
         return (:ok, sol)
     catch err
         return (:error, sprint(showerror, err))
@@ -126,8 +127,10 @@ function main()
     outpath = joinpath(outdir, "egm_robustness_sweep.csv")
 
     # Base config – deterministic baseline schema works for both (we toggle shocks.active)
-    base_cfg = ThesisProject.load_config(joinpath(ROOT, "config", "simple_baseline.yaml"))
-    ThesisProject.validate_config(base_cfg)
+    base_cfg_loaded =
+        ThesisProject.load_config(joinpath(ROOT, "config", "simple_baseline.yaml"))
+    ThesisProject.validate_config(base_cfg_loaded)
+    base_cfg = dict_to_namedtuple(base_cfg_loaded)
 
     βs = parse_list("Β_LIST", [0.92, 0.95, 0.96, 0.98])
     σs = parse_list("Σ_LIST", [1.0, 2.0, 3.0, 4.0])
@@ -157,9 +160,11 @@ function main()
 
     for b in βs, s in σs
         for stochastic in (false, true)
-            cfg = deepcopy(base_cfg)
-            cfg[:params][:β] = b
-            cfg[:params][:σ] = s
+            cfg = merge_section(
+                base_cfg,
+                :params,
+                Dict{Symbol,Any}(Symbol("β") => b, Symbol("σ") => s),
+            )
 
             case = stochastic ? "stochastic" : "deterministic"
             status, payload = safe_solve(cfg; stochastic, opts)

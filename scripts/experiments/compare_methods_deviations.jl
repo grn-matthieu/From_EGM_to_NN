@@ -21,6 +21,9 @@ using ThesisProject
 using ThesisProject.Determinism: make_rng
 using Statistics: mean
 
+include(joinpath(@__DIR__, "..", "utils", "config_helpers.jl"))
+using .ScriptConfigHelpers
+
 # Load plotting backend via the package extension (Plots is weak dep)
 try
     @eval using Plots
@@ -49,17 +52,18 @@ function ensure_dirs()
 end
 
 """
-Build solutions for all three methods from a base configuration NamedTuple (or other symbol-keyed config object).
+Build solutions for all three methods from a base config.
 Returns a Dict{Symbol,ThesisProject.API.Solution} keyed by :EGM, :Projection, :Perturbation.
 """
-function solve_all(cfg_base::AbstractDict)
+function solve_all(cfg_base::NamedTuple)
     sols = Dict{Symbol,Any}()
     for m in (:EGM, :Projection, :Perturbation)
-        cfg = deepcopy(cfg_base)
-        cfg[:solver][:method] = m
-        model = ThesisProject.build_model(cfg)
-        method = ThesisProject.build_method(cfg)
-        sols[m] = ThesisProject.solve(model, method, cfg; rng = make_rng(0))
+        cfg_local = merge_section(cfg_base, :solver, (; method = m))
+        cfg_local = merge_config(cfg_local, (; method = m))
+        cfg_dict = namedtuple_to_dict(cfg_local)
+        model = ThesisProject.build_model(cfg_dict)
+        method = ThesisProject.build_method(cfg_dict)
+        sols[m] = ThesisProject.solve(model, method, cfg_dict; rng = make_rng(0))
     end
     return sols
 end
@@ -150,8 +154,9 @@ function run()
     if cfg_path === nothing
         cfg_path = joinpath(ROOT, "config", "simple_baseline.yaml")
     end
-    cfg = ThesisProject.load_config(cfg_path)
-    ThesisProject.validate_config(cfg)
+    cfg_loaded = ThesisProject.load_config(cfg_path)
+    ThesisProject.validate_config(cfg_loaded)
+    cfg = dict_to_namedtuple(cfg_loaded)
 
     sols = solve_all(cfg)
 

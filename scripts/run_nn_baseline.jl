@@ -13,6 +13,9 @@ using Random
 using Dates
 using Printf
 
+include(joinpath(@__DIR__, "utils", "config_helpers.jl"))
+using .ScriptConfigHelpers
+
 const DEFAULT_CONFIG = joinpath(dirname(@__DIR__), "config", "simple_baseline.yaml")
 
 usage() = """
@@ -124,99 +127,67 @@ function parse_args(argv::Vector{String})::NamedTuple
     )
 end
 
-function to_symbol_dict(d::AbstractDict)
-    out = Dict{Symbol,Any}()
-    for (k, v) in d
-        out[k] = v isa AbstractDict ? to_symbol_dict(v) : v
+function apply_overrides(cfg::NamedTuple, opt)
+    solver_cfg = maybe_namedtuple(get_nested(cfg, (:solver,), NamedTuple()))
+    solver_overrides = Dict{Symbol,Any}()
+
+    opt.epochs !== nothing && (solver_overrides[:epochs] = opt.epochs)
+    opt.lr !== nothing && (solver_overrides[:lr] = opt.lr)
+    opt.batch !== nothing && (solver_overrides[:batch] = opt.batch)
+    opt.opt !== nothing && (solver_overrides[:optimizer] = String(opt.opt))
+    opt.β1 !== nothing && (solver_overrides[:β1] = opt.β1)
+    opt.β2 !== nothing && (solver_overrides[:β2] = opt.β2)
+    opt.eps !== nothing && (solver_overrides[:eps] = opt.eps)
+    opt.mom !== nothing && (solver_overrides[:mom] = opt.mom)
+    opt.ρ !== nothing && (solver_overrides[:ρ] = opt.ρ)
+    opt.lr_schedule !== nothing &&
+        (solver_overrides[:lr_schedule] = Symbol(opt.lr_schedule))
+    opt.η_min !== nothing && (solver_overrides[:η_min] = opt.η_min)
+    opt.step_size !== nothing && (solver_overrides[:step_size] = opt.step_size)
+    opt.γ !== nothing && (solver_overrides[:γ] = opt.γ)
+    opt.device !== nothing && (solver_overrides[:device] = Symbol(opt.device))
+
+    if getfield(opt, :smoke) === true
+        if !haskey(solver_overrides, :epochs) && !hasproperty(solver_cfg, :epochs)
+            solver_overrides[:epochs] = 1
+        end
+        if haskey(solver_overrides, :batch)
+            solver_overrides[:batch] = min(Int(solver_overrides[:batch]), 64)
+        else
+            batch_base = hasproperty(solver_cfg, :batch) ? Int(solver_cfg.batch) : 64
+            solver_overrides[:batch] = min(batch_base, 64)
+        end
+        if !(haskey(solver_overrides, :device) || hasproperty(solver_cfg, :device))
+            solver_overrides[:device] = :cpu
+        end
     end
-    return out
+
+    if !isempty(solver_overrides)
+        cfg = merge_section(cfg, :solver, dict_to_namedtuple(solver_overrides))
+    end
+    return cfg
 end
 
-function apply_overrides!(cfg::AbstractDict, opt)::Nothing
-    solver_cfg = get!(cfg, :solver, Dict{Symbol,Any}())
-    if opt.epochs !== nothing
-        solver_cfg[:epochs] = opt.epochs
-    end
-    if opt.lr !== nothing
-        solver_cfg[:lr] = opt.lr
-    end
-    if opt.batch !== nothing
-        solver_cfg[:batch] = opt.batch
-    end
-
-    if opt.seed !== nothing
-        random_cfg = get!(cfg, :random, Dict{Symbol,Any}())
-        random_cfg[:seed] = opt.seed
-        cfg[:random] = random_cfg
-    end
-
-    # Optimizer + schedule overrides
-    if opt.opt !== nothing
-        solver_cfg[:optimizer] = String(opt.opt)
-    end
-    if opt.β1 !== nothing
-        solver_cfg[:β1] = opt.β1
-    end
-    if opt.β2 !== nothing
-        solver_cfg[:β2] = opt.β2
-    end
-    if opt.eps !== nothing
-        solver_cfg[:eps] = opt.eps
-    end
-    if opt.mom !== nothing
-        solver_cfg[:mom] = opt.mom
-    end
-    if opt.ρ !== nothing
-        solver_cfg[:ρ] = opt.ρ
-    end
-    if opt.lr_schedule !== nothing
-        solver_cfg[:lr_schedule] = Symbol(opt.lr_schedule)
-    end
-    if opt.η_min !== nothing
-        solver_cfg[:η_min] = opt.η_min
-    end
-    if opt.step_size !== nothing
-        solver_cfg[:step_size] = opt.step_size
-    end
-    if opt.γ !== nothing
-        solver_cfg[:γ] = opt.γ
-    end
-    if opt.device !== nothing
-        # allow string like "cpu" or "cuda"
-        solver_cfg[:device] = Symbol(opt.device)
-    end
-
-    cfg[:solver] = solver_cfg
-    return nothing
+function ensure_nn_method(cfg::NamedTuple)
+    cfg = merge_section(cfg, :solver, (; method = :NN))
+    return merge_config(cfg, (; method = :NN))
 end
 
-function ensure_nn_method!(cfg::AbstractDict)::Nothing
-    solver_cfg = get!(cfg, :solver, Dict{Symbol,Any}())
-    solver_cfg[:method] = :NN
-    cfg[:solver] = solver_cfg
-    cfg[:method] = :NN
-    return nothing
-end
-
-function ensure_supported_shocks!(cfg::AbstractDict)::Nothing
-    shocks_cfg = get(cfg, :shocks, nothing)
-    if shocks_cfg isa AbstractDict && get(shocks_cfg, :active, false)
-        shocks_dict = Dict{Symbol,Any}(shocks_cfg)
-        shocks_dict[:active] = false
-        cfg[:shocks] = shocks_dict
+function ensure_supported_shocks(cfg::NamedTuple)
+    active = get_nested(cfg, (:shocks, :active), false)
+    if active === true
+        cfg = merge_section(cfg, :shocks, (; active = false))
         @warn "NN baseline script forces shocks.active = false; stochastic NN kernel is not supported yet."
     end
-    return nothing
+    return cfg
 end
 
-function inject_seed!(cfg::AbstractDict, opt)::Int
-    random_cfg = get!(cfg, :random, Dict{Symbol,Any}())
+function ensure_seed(cfg::NamedTuple, opt)
+    existing = get_nested(cfg, (:random, :seed), nothing)
     seed =
-        opt.seed !== nothing ? Int(opt.seed) :
-        (haskey(random_cfg, :seed) ? Int(random_cfg[:seed]) : 1234)
-    random_cfg[:seed] = seed
-    cfg[:random] = random_cfg
-    return seed
+        opt.seed !== nothing ? Int(opt.seed) : (existing === nothing ? 1234 : Int(existing))
+    cfg = merge_section(cfg, :random, (; seed = seed))
+    return cfg, seed
 end
 
 function compute_training_loss(sol)::Float64
@@ -244,61 +215,59 @@ run_nn(cfg; epochs, batch, opt, seed) -> NamedTuple
 Builds model and NN method, runs training and returns a NamedTuple with metrics.
 """
 function run_nn(
-    cfg::AbstractDict;
+    cfg::NamedTuple;
     epochs = nothing,
     batch = nothing,
     optname = nothing,
     seed = nothing,
 )
-    cfg_local = deepcopy(cfg)
-    ensure_supported_shocks!(cfg_local)
-    ensure_nn_method!(cfg_local)
+    solver_overrides = Dict{Symbol,Any}()
+    epochs !== nothing && (solver_overrides[:epochs] = epochs)
+    batch !== nothing && (solver_overrides[:batch] = batch)
+    optname !== nothing && (solver_overrides[:optimizer] = optname)
 
-    solver_cfg = get!(cfg_local, :solver, Dict{Symbol,Any}())
-    if epochs !== nothing
-        solver_cfg[:epochs] = epochs
-    end
-    if batch !== nothing
-        solver_cfg[:batch] = batch
-    end
-    if optname !== nothing
-        solver_cfg[:optimizer] = optname
+    cfg_local = ensure_supported_shocks(cfg)
+    cfg_local = ensure_nn_method(cfg_local)
+    if !isempty(solver_overrides)
+        cfg_local = merge_section(cfg_local, :solver, dict_to_namedtuple(solver_overrides))
     end
     if seed !== nothing
-        cfg_local[:random] = get!(cfg_local, :random, Dict{Symbol,Any}())
-        cfg_local[:random][:seed] = seed
+        cfg_local = merge_section(cfg_local, :random, (; seed = seed))
     end
-    cfg_local[:solver] = solver_cfg
+
+    cfg_dict = namedtuple_to_dict(cfg_local)
 
     t0 = Dates.now()
-    model = build_model(cfg_local)
-    method = build_method(cfg_local)
-    sol = solve(model, method, cfg_local)
+    model = build_model(cfg_dict)
+    method = build_method(cfg_dict)
+    sol = solve(model, method, cfg_dict)
     elapsed = Dates.now() - t0
     wall_seconds = Dates.value(elapsed) / 1000
 
     loss = compute_training_loss(sol)
     feas = isfinite(loss) ? 1.0 : 0.0
 
+    solver_snapshot = maybe_namedtuple(get_nested(cfg_local, (:solver,), NamedTuple()))
     return (
         method = :nn,
         loss = loss,
         feas = feas,
         wall_s = wall_seconds,
-        epochs = get(solver_cfg, :epochs, nothing),
-        batch = get(solver_cfg, :batch, nothing),
-        opt = get(solver_cfg, :optimizer, ""),
+        epochs = hasproperty(solver_snapshot, :epochs) ? solver_snapshot.epochs : nothing,
+        batch = hasproperty(solver_snapshot, :batch) ? solver_snapshot.batch : nothing,
+        opt = hasproperty(solver_snapshot, :optimizer) ? solver_snapshot.optimizer : "",
     )
 end
 
 
-function run_egm(cfg::AbstractDict)
-    cfg_local = deepcopy(cfg)
-    cfg_local[:method] = :EGM
+function run_egm(cfg::NamedTuple)
+    cfg_local = merge_section(cfg, :solver, (; method = :EGM))
+    cfg_local = merge_config(cfg_local, (; method = :EGM))
+    cfg_dict = namedtuple_to_dict(cfg_local)
     t0 = Dates.now()
-    model = build_model(cfg_local)
-    method = build_method(cfg_local)
-    sol = solve(model, method, cfg_local)
+    model = build_model(cfg_dict)
+    method = build_method(cfg_dict)
+    sol = solve(model, method, cfg_dict)
     elapsed = Dates.now() - t0
     wall_seconds = Dates.value(elapsed) / 1000
     loss = compute_training_loss(sol)
@@ -307,13 +276,14 @@ function run_egm(cfg::AbstractDict)
 end
 
 
-function run_vi(cfg::AbstractDict)
-    cfg_local = deepcopy(cfg)
-    cfg_local[:method] = :VI
+function run_vi(cfg::NamedTuple)
+    cfg_local = merge_section(cfg, :solver, (; method = :VI))
+    cfg_local = merge_config(cfg_local, (; method = :VI))
+    cfg_dict = namedtuple_to_dict(cfg_local)
     t0 = Dates.now()
-    model = build_model(cfg_local)
-    method = build_method(cfg_local)
-    sol = solve(model, method, cfg_local)
+    model = build_model(cfg_dict)
+    method = build_method(cfg_dict)
+    sol = solve(model, method, cfg_dict)
     elapsed = Dates.now() - t0
     wall_seconds = Dates.value(elapsed) / 1000
     loss = compute_training_loss(sol)
@@ -329,46 +299,14 @@ function main(args::Vector{String} = ARGS)
         rethrow(err)
     end
     cfg_loaded = load_config(opt.config)
-    cfg = to_symbol_dict(cfg_loaded)
-    validate_config(cfg)
+    validate_config(cfg_loaded)
+    cfg = dict_to_namedtuple(cfg_loaded)
 
-    # Enforce deterministic (current NN kernel limitation)
-    ensure_supported_shocks!(cfg)
+    cfg = ensure_supported_shocks(cfg)
+    cfg = ensure_nn_method(cfg)
+    cfg = apply_overrides(cfg, opt)
 
-    # Force NN method
-    ensure_nn_method!(cfg)
-
-    # Apply CLI overrides directly to keys used by NN code
-    solver_cfg = get!(cfg, :solver, Dict{Symbol,Any}())
-    if opt.epochs !== nothing
-        solver_cfg[:epochs] = opt.epochs
-    end
-    if opt.lr !== nothing
-        solver_cfg[:lr] = opt.lr
-    end
-    if opt.batch !== nothing
-        solver_cfg[:batch] = opt.batch
-    end
-
-    # Smoke mode: epochs=1 if unset; batch=min(batch,64) or 64 if unset; force CPU device
-    if getfield(opt, :smoke) === true
-        if !haskey(solver_cfg, :epochs)
-            solver_cfg[:epochs] = 1
-        end
-        if haskey(solver_cfg, :batch)
-            solver_cfg[:batch] = min(Int(solver_cfg[:batch]), 64)
-        else
-            solver_cfg[:batch] = 64
-        end
-        # If no device specified by CLI or config, default to CPU in smoke mode
-        if !haskey(solver_cfg, :device)
-            solver_cfg[:device] = :cpu
-        end
-    end
-    cfg[:solver] = solver_cfg
-
-    # Seed handling
-    seed = inject_seed!(cfg, opt)
+    cfg, seed = ensure_seed(cfg, opt)
     Random.seed!(seed)
 
     # Determine which methods to run
@@ -412,8 +350,9 @@ function main(args::Vector{String} = ARGS)
         push!(results, res)
 
         # Print summary line
-        if haskey(res, :epochs)
-            epoch_str = res[:epochs] === nothing ? "?" : string(res[:epochs])
+        if hasproperty(res, :epochs)
+            epoch_val = getproperty(res, :epochs)
+            epoch_str = epoch_val === nothing ? "?" : string(epoch_val)
         else
             epoch_str = "?"
         end
@@ -427,10 +366,10 @@ function main(args::Vector{String} = ARGS)
 
         # Append to CSV
         open(csvpath, "a") do io
-            e = get(res, :epochs, "")
-            b = get(res, :batch, "")
-            o = get(res, :opt, "")
-            s = get(cfg, :random, Dict{Symbol,Any}())[:seed]
+            e = hasproperty(res, :epochs) ? res.epochs : ""
+            b = hasproperty(res, :batch) ? res.batch : ""
+            o = hasproperty(res, :opt) ? res.opt : ""
+            s = get_nested(cfg, (:random, :seed), "")
             println(
                 io,
                 join(

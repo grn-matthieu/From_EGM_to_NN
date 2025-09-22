@@ -7,6 +7,9 @@ pushfirst!(LOAD_PATH, joinpath(@__DIR__, "..", ".."))
 using ThesisProject
 using Printf
 
+include(joinpath(@__DIR__, "..", "utils", "config_helpers.jl"))
+using .ScriptConfigHelpers
+
 struct SmokeResult
     cfg::String
     ok::Bool
@@ -18,11 +21,13 @@ struct SmokeResult
 end
 
 function run_one(cfg_path::AbstractString; tol_resid = 1e-5, tol_iters = 10_000)
-    cfg = ThesisProject.load_config(cfg_path)
-    ThesisProject.validate_config(cfg)
-    model = ThesisProject.build_model(cfg)
-    method = ThesisProject.build_method(cfg)
-    sol = ThesisProject.solve(model, method, cfg)
+    cfg_loaded = ThesisProject.load_config(cfg_path)
+    ThesisProject.validate_config(cfg_loaded)
+    cfg = dict_to_namedtuple(cfg_loaded)
+    cfg_dict = namedtuple_to_dict(cfg)
+    model = ThesisProject.build_model(cfg_dict)
+    method = ThesisProject.build_method(cfg_dict)
+    sol = ThesisProject.solve(model, method, cfg_dict)
 
     converged = sol.metadata[:converged] === true
     max_resid = sol.metadata[:max_resid]
