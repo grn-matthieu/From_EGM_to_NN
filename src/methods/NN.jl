@@ -20,7 +20,7 @@ end
 
 function build_nn_method(cfg::AbstractDict)
     return NNMethod((
-        name = haskey(cfg, :method) ? cfg[:method] : cfg[:solver][:method],
+        name = get(cfg, :method, cfg[:solver][:method]),
         epochs = get(cfg[:solver], :epochs, 10),
         batch = get(cfg[:solver], :batch, 64),
         lr = get(cfg[:solver], :lr, 1e-3),

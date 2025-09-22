@@ -12,7 +12,7 @@ Construct a method object based on the `:method` entry in `cfg` or
 `cfg[:solver][:method]`.
 """
 function build_method(cfg::AbstractDict)
-    method_name = haskey(cfg, :method) ? cfg[:method] : cfg[:solver][:method]
+    method_name = get(cfg, :method, cfg[:solver][:method])
     method_sym = method_name isa Symbol ? method_name : Symbol(method_name)
     if method_sym == :EGM
         return build_egm_method(cfg)

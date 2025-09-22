@@ -29,7 +29,7 @@ function build_egm_method(cfg::AbstractDict)
     ik = get(cfg[:solver], :interp_kind, :linear)
     ik = ik isa Symbol ? ik : Symbol(ik)
     return EGMMethod((
-        name = haskey(cfg, :method) ? cfg[:method] : cfg[:solver][:method],
+        name = get(cfg, :method, cfg[:solver][:method]),
         tol = get(cfg[:solver], :tol, 1e-6),
         tol_pol = get(cfg[:solver], :tol_pol, 1e-6),
         maxit = get(cfg[:solver], :maxit, 1000),
@@ -72,11 +72,10 @@ function solve(
         elseif ws in (:default, :half_resources, :none)
             return nothing
         else
-            # Optional custom: cfg.init.c if provided
-            if haskey(cfg, :init) && haskey(cfg[:init], :c)
-                return copy(cfg[:init][:c])
-            end
-            return nothing
+            init_cfg = get(cfg, :init, nothing)
+            init_cfg === nothing && return nothing
+            init_c = get(init_cfg, :c, nothing)
+            return init_c === nothing ? nothing : copy(init_c)
         end
     end
 
@@ -102,10 +101,10 @@ function solve(
         elseif ws in (:default, :half_resources, :none)
             return nothing
         else
-            if haskey(cfg, :init) && haskey(cfg[:init], :c)
-                return copy(cfg[:init][:c])
-            end
-            return nothing
+            init_cfg = get(cfg, :init, nothing)
+            init_cfg === nothing && return nothing
+            init_c = get(init_cfg, :c, nothing)
+            return init_c === nothing ? nothing : copy(init_c)
         end
     end
 

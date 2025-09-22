@@ -16,8 +16,6 @@ using ..ConsumerSaving: build_cs_model
 Dispatches to the appropriate model-building function based on the `name` key in the config dictionary.
 """
 function build_model(cfg::AbstractDict)
-    @assert haskey(cfg, :model) ":model key not found"
-    @assert haskey(cfg[:model], :name) ":name key not found in :model"
     model_name = Symbol(cfg[:model][:name])
     return _build_model(Val(model_name), cfg)
 end

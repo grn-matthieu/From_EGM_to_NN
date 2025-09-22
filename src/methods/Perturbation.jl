@@ -29,7 +29,7 @@ Options:
 """
 function build_perturbation_method(cfg::AbstractDict)
     return PerturbationMethod((
-        name = haskey(cfg, :method) ? cfg[:method] : cfg[:solver][:method],
+        name = get(cfg, :method, cfg[:solver][:method]),
         a_bar = get(cfg[:solver], :a_bar, nothing),
         verbose = get(cfg[:solver], :verbose, false),
         order = get(cfg[:solver], :order, 1),

@@ -21,12 +21,8 @@ end
 
 function build_cs_model(cfg::AbstractDict)
     # Reading parameters
-    if haskey(cfg, :params) && haskey(cfg, :grids)
-        params = cfg[:params]
-        grids = cfg[:grids]
-    else
-        error("Config must contain the following keys : (:params, :grids)")
-    end
+    params = cfg[:params]
+    grids = cfg[:grids]
 
     # Asset grid (for the cs model)
     a_min = grids[:a_min]
@@ -37,8 +33,9 @@ function build_cs_model(cfg::AbstractDict)
 
     # Shocks discretization (if stoch, modalities in the shocks field)
     shocks = nothing
-    if haskey(cfg, :shocks) && get(cfg[:shocks], :active, false)
-        shocks = discretize(cfg[:shocks])
+    shocks_cfg = get(cfg, :shocks, nothing)
+    if shocks_cfg isa AbstractDict && get(shocks_cfg, :active, false)
+        shocks = discretize(shocks_cfg)
     end
 
     # Utility closure (CRRA)
