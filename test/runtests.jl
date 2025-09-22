@@ -57,6 +57,11 @@ end
 @testset "Projection - Method Adapter" begin
     include("methods/test_projection_method.jl")
 end
+
+# --- Methods - NN adapter coverage helper ---
+@testset "Methods - NN Adapter (coverage)" begin
+    include("methods/test_nn_adapter_coverage.jl")
+end
 @testset "Projection - Accuracy" begin
     include("methods/test_projection_accuracy.jl")
 end
