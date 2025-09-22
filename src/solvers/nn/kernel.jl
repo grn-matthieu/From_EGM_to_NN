@@ -17,6 +17,7 @@ using Optimisers
 using Random
 using Printf
 using Zygote
+using Statistics: mean
 
 include("mixed_precision.jl")
 
@@ -64,11 +65,10 @@ function solve_nn(model; opts = nothing)
     start_time = time_ns()
 
     # Build Lux chain and optimizer
-    chain = _make_chain(input_dim; hid1 = get_opt(:hid1, 256), hid2 = get_opt(:hid2, 256))
+    chain = _make_chain(input_dim; hid1 = get_opt(:hid1, 128), hid2 = get_opt(:hid2, 128))
     # Reduce default learning rate for stability (can be overridden via opts)
     local_lr = get_opt(:lr, 1e-4)
-    opt =
-        opt = Optimisers.OptimiserChain(Optimisers.ClipGrad(1.0), Optimisers.Adam(local_lr))
+    opt = Optimisers.OptimiserChain(Optimisers.ClipGrad(0.1), Optimisers.Adam(local_lr))
 
     ps, st = Lux.setup(Random.GLOBAL_RNG, chain)
     rng = Random.default_rng()
@@ -76,10 +76,53 @@ function solve_nn(model; opts = nothing)
     tstate = Lux.Training.TrainState(chain, ps, st, opt)
 
     vjp_rule = Lux.AutoZygote()
+    resample_every = Int(get_opt(:resample_every, 25))
+    target_loss = Float32(get_opt(:target_loss, 2e-4))
+    patience = Int(get_opt(:patience, 200))
+    best_loss = Inf
+    best_state = tstate
 
     # Generate dataset and preprocess inputs once
     X0, _ = generate_dataset(G, S)
+
+    # Normalize features to [-1,1] for stability
+    function _normalize_inputs!(X, G, S)
+        a = Float32.(G[:a].grid)
+        amin, amax = extrema(a)
+        ar = max(amax - amin, eps(Float32))
+        norm_a(x) = 2.0f0 * (x - amin) / ar - 1.0f0
+        if isnothing(S)
+            @. X[:, 1] = norm_a(X[:, 1])
+        else
+            z = Float32.(S.zgrid)
+            zmin, zmax = extrema(z)
+            zr = max(zmax - zmin, eps(Float32))
+            norm_z(x) = 2.0f0 * (x - zmin) / zr - 1.0f0
+            @. X[:, 1] = norm_a(X[:, 1])
+            @. X[:, 2] = norm_z(X[:, 2])
+        end
+        return X
+    end
+
+    function _normalize_features!(X, G, S)  # features × batch
+        a = Float32.(G[:a].grid)
+        amin, amax = extrema(a)
+        ar = max(amax - amin, eps(Float32))
+        if isnothing(S)
+            @. X[1, :] = 2.0f0 * (X[1, :] - amin) / ar - 1.0f0
+        else
+            z = Float32.(S.zgrid)
+            zmin, zmax = extrema(z)
+            zr = max(zmax - zmin, eps(Float32))
+            @. X[1, :] = 2.0f0 * (X[1, :] - amin) / ar - 1.0f0
+            @. X[2, :] = 2.0f0 * (X[2, :] - zmin) / zr - 1.0f0
+        end
+        return X
+    end
+
+    _normalize_inputs!(X0, G, S)
     X_proc = prepare_training_batch(X0)
+
     total_samples = size(X_proc, 2)
     batch_size =
         batch_opt === nothing ? total_samples : clamp(Int(batch_opt), 1, total_samples)
@@ -104,6 +147,8 @@ function solve_nn(model; opts = nothing)
         ScalarParams(σv, βv, rv, 1.0)
     end
 
+    _huber(x, δ) = (abs(x) ≤ δ) ? 0.5f0 * x * x : δ * (abs(x) - 0.5f0 * δ)
+
     # Custom loss function using Euler residuals, capturing P_resid, G, S
     loss_function =
         (model, ps, st, data) -> begin
@@ -120,7 +165,7 @@ function solve_nn(model; opts = nothing)
             if isnothing(S)
                 a_grid_f32, _, c_pred_vec_f32 = det_residual_inputs(c_predicted, G)
                 resid = euler_resid_det_grid(P_resid, a_grid_f32, c_pred_vec_f32)
-                loss = det_loss(resid)
+                @inbounds loss = mean(_huber.(resid, 1.0f0))
             else
                 a_grid_f32, z_grid_f32, Pz_f32, _, c_pred_f32 =
                     stoch_residual_inputs(c_predicted, G, S)
@@ -131,7 +176,7 @@ function solve_nn(model; opts = nothing)
                     Pz_f32,
                     c_pred_f32,
                 )
-                loss = stoch_loss(resid)
+                @inbounds loss = mean(_huber.(resid, 1.0f0))
             end
             return loss, st_out, NamedTuple()
         end
@@ -172,6 +217,18 @@ function solve_nn(model; opts = nothing)
 
     batches_per_epoch = cld(total_samples, batch_size)
     for epoch = 1:epochs
+        if resample_every > 0 && epoch % resample_every == 0
+            Xr, _ = generate_dataset(
+                G,
+                S;
+                mode = :rand,
+                nsamples = size(X0, 1),
+                rng = Random.GLOBAL_RNG,
+            )
+            _normalize_inputs!(Xr, G, S)
+            X_proc = prepare_training_batch(Xr)
+            total_samples = size(X_proc, 2)
+        end
         epoch_loss = 0.0
         seen = 0
         gnorm = NaN
@@ -193,10 +250,20 @@ function solve_nn(model; opts = nothing)
                 gnorm = NaN
             end
         end
+        avg_loss = epoch_loss / max(seen, 1)
+        if avg_loss < best_loss
+            best_loss = avg_loss
+            best_state = tstate
+            stall = 0
+        else
+            stall = (isdefined(@__MODULE__, :stall) ? stall : 0) + 1
+        end
         if verbose && (epoch % 10 == 0 || epoch == epochs)
-            @printf "Epoch: %3d \t Loss: %.5g \t GradNorm: %.5g\n" epoch (
-                epoch_loss / max(seen, 1)
-            ) gnorm
+            @printf "Epoch: %3d \t Loss: %.5g \t GradNorm: %.5g\n" epoch avg_loss gnorm
+        end
+        # early stop when good enough and not improving
+        if best_loss ≤ target_loss && stall ≥ patience
+            break
         end
     end
 
@@ -237,6 +304,7 @@ function solve_nn(model; opts = nothing)
     if isnothing(S)
         # Deterministic: evaluate model on asset grid
         X_forward, a_grid_f32 = det_forward_inputs(G)
+        _normalize_features!(X_forward, G, S)
         model_out = call_chain(chain_final, X_forward, ps_final, st_final)
         c_pred = model_out isa Tuple ? model_out[1] : model_out
         _, c_vec, c_vec_f32 = det_residual_inputs(c_pred, G)
@@ -261,9 +329,11 @@ function solve_nn(model; opts = nothing)
         end
         c_return = c_final
     else
-        # stochastic: evaluate on full (a,z) grid ordering assumed to match data generation
-        # Evaluate on training input ordering (X_proc) to get predicted c for all (a,z)
-        model_out = call_chain(chain_final, X_proc, ps_final, st_final)
+        # Stochastic: evaluate on full grid in canonical (a,z) order
+        X_eval, _ = generate_dataset(G, S; mode = :full)
+        _normalize_inputs!(X_eval, G, S)
+        X_eval_proc = prepare_training_batch(X_eval)
+        model_out = call_chain(chain_final, X_eval_proc, ps_final, st_final)
         c_pred = model_out isa Tuple ? model_out[1] : model_out
         a_grid_f32, z_grid_f32, Pz_f32, c_mat, c_mat_f32 =
             stoch_residual_inputs(c_pred, G, S)
