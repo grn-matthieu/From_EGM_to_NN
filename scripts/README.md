@@ -1,3 +1,24 @@
+Fast developer helpers
+======================
+
+This directory contains small helper scripts to speed up local development and testing.
+
+fast_test.ps1 (Windows PowerShell)
+  - Runs `scripts/precompile.jl` (unless called with `-NoPrecompile`) to warm the precompilation cache, then runs the test suite with `FAST_TEST=1` which skips heavy/coverage testsets.
+  - Usage (from repo root):
+      .\scripts\fast_test.ps1
+  - Skip precompile if already done:
+      .\scripts\fast_test.ps1 -NoPrecompile
+
+fast_test.sh (POSIX)
+  - Same behavior for Linux/macOS. Usage:
+      ./scripts/fast_test.sh
+  - Skip precompile:
+      ./scripts/fast_test.sh --no-precompile
+
+Other helpers
+  - `precompile.jl`: precompiles the project to speed up repeated Julia process startups.
+  - `run_single_test.jl`: run a single test file from the command line.
 # Scripts Index
 
 | Script | Purpose | Notes |
