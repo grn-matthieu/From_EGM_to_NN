@@ -211,3 +211,99 @@ end
         @test haskey(v, :a_monotone_nondec) # violations[:a_monotone_nondec] = false
     end
 end
+
+@testset "EGM warm-start branches + validation flags" begin
+    # --- 1) Deterministic steady_state warm-start hits clamp.(...) path ---
+    cfg1 = cfg_patch(
+        SMOKE_CFG,
+        (:solver, :method) => "EGM",
+        (:solver, :interp_kind) => "linear",
+        (:solver, :warm_start) => :steady_state,
+        (:grids, :Na) => 12,
+        (:solver, :maxit) => 50,
+    )
+    model1 = build_model(cfg1)
+    method1 = ThesisProject.EGM.build_egm_method(cfg1)
+    _ = ThesisProject.EGM.solve(model1, method1, cfg1)  # executes steady_state det init
+
+    # --- 2) Stochastic steady_state warm-start hits Nz loop/matrix return ---
+    cfg2 = cfg_patch(
+        SMOKE_STOCH_CFG,
+        (:solver, :method) => "EGM",
+        (:solver, :interp_kind) => "pchip",
+        (:solver, :warm_start) => :steady_state,
+        (:grids, :Na) => 10,
+        (:solver, :maxit) => 40,
+    )
+    model2 = build_model(cfg2)
+    method2 = ThesisProject.EGM.build_egm_method(cfg2)
+    _ = ThesisProject.EGM.solve(model2, method2, cfg2)  # executes matrix build loop
+
+    # --- 3) Deterministic custom init vector triggers copy(custom_c_vec) ---
+    Na = 9
+    custom_vec = fill(0.4, Na)
+    cfg3 = cfg_patch(
+        SMOKE_CFG,
+        (:solver, :method) => "EGM",
+        (:solver, :interp_kind) => "linear",
+        (:solver, :warm_start) => :custom_any, # not in default set
+        (:grids, :Na) => Na,
+        (:init, :c) => custom_vec,
+        (:solver, :maxit) => 30,
+    )
+    model3 = build_model(cfg3)
+    method3 = ThesisProject.EGM.build_egm_method(cfg3)
+    _ = ThesisProject.EGM.solve(model3, method3, cfg3)
+
+    # --- 4) Stochastic custom init matrix triggers copy(custom_c_mat) ---
+    cfg4_0 = cfg_patch(SMOKE_STOCH_CFG, (:grids, :Na) => 8)
+    Nz = length(get_shocks(build_model(cfg4_0)).zgrid)
+    custom_mat = fill(0.3, 8, Nz)
+    cfg4 = cfg_patch(
+        cfg4_0,
+        (:solver, :method) => "EGM",
+        (:solver, :interp_kind) => "linear",
+        (:solver, :warm_start) => :custom_any, # not in default set
+        (:init, :c) => custom_mat,
+        (:solver, :maxit) => 25,
+    )
+    model4 = build_model(cfg4)
+    method4 = ThesisProject.EGM.build_egm_method(cfg4)
+    _ = ThesisProject.EGM.solve(model4, method4, cfg4)
+
+    # --- 5) Force non-monotone branches with precise overrides and check warning ---
+    # First run once to learn the concrete array type used by policies
+    cfg5 = cfg_patch(
+        SMOKE_CFG,
+        (:solver, :method) => "EGM",
+        (:solver, :interp_kind) => "linear",
+        (:grids, :Na) => 6,
+        (:solver, :maxit) => 15,
+    )
+    model5 = build_model(cfg5)
+    method5 = ThesisProject.EGM.build_egm_method(cfg5)
+    sol_tmp = ThesisProject.EGM.solve(model5, method5, cfg5)
+    T = typeof(sol_tmp.policy[:c].value)  # e.g. Vector{Float64} or SVector{N,Float64}
+
+    # Override with methods MORE SPECIFIC than AbstractArray so dispatch picks ours
+    @eval ThesisProject.CommonValidators begin
+        is_nondec(x::$T; tol = 1e-8) = false      # force both c and a monotonicity to fail
+        is_positive(x::$T) = true               # keep positivity passing
+        respects_amin(x::$T, amin) = true       # keep a' ≥ amin passing
+    end
+
+    @test_logs (
+        :warn,
+        r"EGM solution failed monotonicity/positivity checks; marking as invalid",
+    ) begin
+        sol5 = ThesisProject.EGM.solve(model5, method5, cfg5)
+        @test sol5.metadata[:valid] == false
+        @test haskey(sol5.metadata, :validation)
+        v = sol5.metadata[:validation]
+        @test v[:c_monotone_nondec] == false
+        @test v[:a_monotone_nondec] == false
+        @test v[:c_positive] == true
+        @test v[:a_above_min] == true
+    end
+
+end
