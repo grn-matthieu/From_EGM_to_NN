@@ -17,6 +17,9 @@
     model = build_model(config)
     @test isa(model, ThesisProject.API.AbstractModel)
 
+    # Throws if name of model is unknown
+    @test_throws ErrorException build_model(_cfg_set(config, (:model, :name), "unknown"))
+
     # Test model getters
     params = get_params(model)
     grids = get_grids(model)

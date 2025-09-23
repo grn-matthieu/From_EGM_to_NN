@@ -28,7 +28,7 @@ end
 
 
 # Fallback for unknown model types
-function _build_model(model_name::Symbol, cfg::NamedTuple)
+function _build_model(model_name::Val, cfg::NamedTuple)
     error("Unknown model type: $(model_name)")
 end
 
