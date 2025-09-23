@@ -21,6 +21,11 @@ using ThesisProject
     m3 = build_model(cfg3)
     ss3 = ThesisProject.steady_state_analytic(m3)
     @test ss3.kind == :upper_bound
+
+    # 4) Throws if with degenerate shocks (Nz=1 and only shock = 0.0)
+    cfg4 = cfg_patch(cfg, (:shocks, Symbol("Nz")) => 1, (:shocks, Symbol("σ_shock")) => 0.0)
+    m4 = build_model(cfg4)
+    @test_throws ErrorException ThesisProject.steady_state_analytic(m4)
 end
 
 @testset "Steady state from policy" begin
@@ -31,4 +36,9 @@ end
     ss = ThesisProject.steady_state_from_policy(sol)
     @test 1 <= ss.idx <= cfg_get(cfg, :grids, :Na)
     @test isfinite(ss.gap)
+
+    # Throws if with stochastic shocks (active = true and Nz > 1)
+    cfg5 = cfg_patch(cfg, (:shocks, Symbol("Nz")) => 2, (:shocks, Symbol("active")) => true)
+    m5 = build_model(cfg5)
+    @test_throws ErrorException ThesisProject.steady_state_analytic(m5)
 end
