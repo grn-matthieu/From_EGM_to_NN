@@ -178,7 +178,15 @@ function solve(
     a_val = policy[:a].value
     amin = g[:a].min
 
-    violations = Dict{Symbol,Any}()
+    # Initialize all expected validation flags to true so that test-suite
+    # code which monkeypatches validators still finds the keys in
+    # `metadata[:validation]` even when validators are overwritten.
+    violations = Dict{Symbol,Any}(
+        :c_positive => true,
+        :a_above_min => true,
+        :c_monotone_nondec => true,
+        :a_monotone_nondec => true,
+    )
     valid = true
     if !is_positive(c_val)
         violations[:c_positive] = false

@@ -1,15 +1,7 @@
 using Test
 ENV["GKSwstype"] = "100"        # headless GR on CI
-using ThesisProject       # Plots triggers ThesisProjectPlotsExt
 
-include("utils.jl")
-
-const SMOKE_CFG_PATH =
-    joinpath(@__DIR__, "..", "config", "smoke_config", "smoke_config.yaml")
-const SMOKE_CFG = load_config(SMOKE_CFG_PATH)
-const SMOKE_STOCH_CFG_PATH =
-    joinpath(@__DIR__, "..", "config", "smoke_config", "smoke_config_stochastic.yaml")
-const SMOKE_STOCH_CFG = load_config(SMOKE_STOCH_CFG_PATH)
+include("bootstrap.jl")
 
 # Reduce noise from warnings in CI output
 # Suppress method overwrite warnings if supported (Julia >= 1.9)

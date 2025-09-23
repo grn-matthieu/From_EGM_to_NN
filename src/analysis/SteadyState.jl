@@ -30,13 +30,14 @@ object then is a stationary distribution, not a point steady state.
 """
 function steady_state_analytic(model::AbstractModel)
     S = get_shocks(model)
+    # Analytic steady state is only defined for the pure deterministic model.
+    # Any shocks (even degenerate ones) should cause this function to error to
+    # avoid ambiguity between a point steady state and a stationary
+    # distribution. Tests expect an exception when shocks are present.
     if S !== nothing
-        # Degenerate shocks allowed (Nz=1 and zero variance)
-        if !(length(S.zgrid) == 1 && isapprox(S.zgrid[1], 0.0; atol = 1e-12))
-            error(
-                "Analytic steady state is defined only for deterministic case (no active shocks)",
-            )
-        end
+        error(
+            "Analytic steady state is defined only for deterministic case (no active shocks)",
+        )
     end
 
     p = get_params(model)

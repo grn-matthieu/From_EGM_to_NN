@@ -74,10 +74,12 @@ try {
 
         $basename = [System.IO.Path]::GetFileNameWithoutExtension($f)
 
-        # Search test files for the basename (word boundary)
-        $pattern = "\b$basename\b"
+        # Search test files for the basename as a word. Escape the basename to
+        # avoid regex metacharacters interfering with the pattern.
+        $escaped = [Regex]::Escape($basename)
+        $pattern = "\b$escaped\b"
         try {
-            $matches = Select-String -Path (Join-Path $PWD 'test' -ChildPath '**\*.jl') -Pattern $pattern -SimpleMatch -ErrorAction SilentlyContinue | ForEach-Object { $_.Path }
+            $matches = Select-String -Path (Join-Path $PWD 'test' -ChildPath '**\*.jl') -Pattern $pattern -ErrorAction SilentlyContinue | ForEach-Object { $_.Path }
         } catch {
             $matches = @()
         }
@@ -103,39 +105,65 @@ try {
 
     Write-Host "Tests to run in parallel:`n$($testsToRun -join "`n")"
 
-    if (-not $NoPrecompile) {
+if (-not $NoPrecompile) {
         Write-Host "Precompiling project to speed test runs..."
-        julia --project=. scripts/precompile.jl
+        & julia --project=. scripts/precompile.jl
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Precompile failed with exit code $LASTEXITCODE" -ForegroundColor Red
+            exit $LASTEXITCODE
+        }
     }
 
-    # Start jobs
+    # Start jobs and capture per-test exit codes
     $jobs = @()
-    $scriptPath = (Resolve-Path (Join-Path $PWD 'scripts\run_single_test.jl')).Path
-    $proj = Resolve-Path ".." | Select-Object -ExpandProperty Path
+    $entryScript = (Resolve-Path (Join-Path $PWD 'scripts\julia_test_entry.jl')).Path
+    # Use the current directory (repository root after Push-Location) as the
+    # Julia project path. Using ".." could point to the parent folder and
+    # cause Julia to run with the wrong project environment.
+    $proj = (Resolve-Path ".").Path
+
     foreach ($t in $testsToRun) {
-        $full = Resolve-Path $t | ForEach-Object { $_.Path }
-        $job = Start-Job -ScriptBlock { param($proj,$scriptPath,$test) & julia --project=$proj $scriptPath $test } -ArgumentList $proj, $scriptPath, $full
-        $jobs += $job
-        while (($jobs | Where-Object { $_.State -eq 'Running' }).Count -ge $Throttle) { Start-Sleep -Seconds 1 }
-    }
+        $full = (Resolve-Path $t).Path
+        $job = Start-Job -ScriptBlock {
+            param($proj,$entry,$testPath)
+            $output = & julia --project=$proj $entry $testPath 2>&1
+            $code = $LASTEXITCODE
+            [pscustomobject]@{ TestPath = $testPath; ExitCode = $code; Output = $output -join "`n" }
+        } -ArgumentList $proj, $entryScript, $full
+            $jobs += $job
+            while (($jobs | Where-Object { $_.State -eq 'Running' }).Count -ge $Throttle) { Start-Sleep -Seconds 1 }
+        }
 
     Write-Host "Waiting for jobs to finish..."
     $jobs | Wait-Job
 
-    # Collect results
+    # Collect results and fail on any non-zero exit code
     $failed = 0
     foreach ($j in $jobs) {
-        $state = $j.State
-        if ($state -ne 'Completed') {
-            Write-Host "Job $($j.Id) failed with state $state" -ForegroundColor Red
+        $res = Receive-Job -Job $j
+        if ($null -eq $res) {
+            Write-Host "Job $($j.Id) produced no result" -ForegroundColor Red
+            $failed++
+            continue
+        }
+
+        if ($res.ExitCode -ne 0) {
+            Write-Host "[FAIL] $($res.TestPath) (exit $($res.ExitCode))" -ForegroundColor Red
+            Write-Host $res.Output
             $failed++
         } else {
-            Write-Host "Job $($j.Id) completed" -ForegroundColor Green
+            Write-Host "[PASS] $($res.TestPath)" -ForegroundColor Green
+            # Optionally show summarized output:
+            # Write-Host $res.Output
         }
     }
 
-    if ($failed -gt 0) { Write-Host "$failed jobs failed" -ForegroundColor Red; exit 1 } else { Write-Host "All jobs completed successfully" -ForegroundColor Green }
-
+    if ($failed -gt 0) {
+        Write-Host "$failed test job(s) failed" -ForegroundColor Red
+        exit 1
+    } else {
+        Write-Host "All jobs completed successfully" -ForegroundColor Green
+    }
 } finally {
     Pop-Location | Out-Null
 }

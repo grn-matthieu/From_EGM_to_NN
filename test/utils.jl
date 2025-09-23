@@ -52,7 +52,15 @@ function _cfg_set(cfg::_ConfigLike, path::Tuple{Vararg{Symbol}}, value)
     else
         head = path[1]
         tail = Base.tail(path)
-        child = cfg_get(cfg, head)
+        # If the intermediate key is missing, create an empty container of the
+        # same kind (NamedTuple => NamedTuple(), Dict => Dict()) so we can
+        # recursively set deep values. This allows tests to patch nested
+        # configuration paths that don't exist yet (e.g. (:init, :c)).
+        if cfg isa NamedTuple
+            child = hasproperty(cfg, head) ? cfg_get(cfg, head) : NamedTuple()
+        else
+            child = haskey(cfg, head) ? cfg_get(cfg, head) : Dict()
+        end
         updated = _cfg_set(child, tail, value)
         return _cfg_set(cfg, head, updated)
     end

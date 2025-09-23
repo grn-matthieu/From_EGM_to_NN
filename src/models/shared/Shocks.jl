@@ -104,7 +104,9 @@ function _validate_invariant(
 end
 
 function get_shock_params(shocks::NamedTuple)
-    ρ = shocks.ρ_shock
+    # Use sensible defaults when keys are missing so tests can patch only a
+    # subset of shock parameters. Default autocorrelation to 0.0 (iid shocks).
+    ρ = maybe(shocks, :ρ_shock, 0.0)
     σ_sym = Symbol("σ_shock")
     σ_ε = maybe(shocks, σ_sym, maybe(shocks, :s_shock, 0.0))
     Nz = maybe(shocks, :Nz, 7)

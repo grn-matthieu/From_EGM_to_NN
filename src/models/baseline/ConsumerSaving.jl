@@ -31,9 +31,30 @@ function build_cs_model(cfg::NamedTuple)
     agrid = collect(range(a_min, a_max; length = Na))
     grids = (a = (; grid = agrid, min = a_min, max = a_max, N = Na),)
 
-    # Shocks discretization (if stoch, modalities in the shocks field)
+    # Shocks discretization. If a `:shocks` entry exists in the config we
+    # consider it active if any shock-related keys are present or if
+    # `:active` is explicitly true. This makes tests that patch only
+    # `:Nz`/`σ_shock` (without `:active`) behave as authors intended.
     shocks_cfg = maybe(cfg, :shocks)
-    shocks = maybe(shocks_cfg, :active, false) ? discretize(shocks_cfg) : nothing
+    function shocks_specified(sc)
+        if sc === nothing
+            return false
+        end
+        # If active explicitly true, use shocks. Otherwise check for
+        # common shock keys that indicate the user supplied shock specs.
+        keys_present = (:Nz, :σ_shock, :s_shock, :ρ_shock, :method, :m)
+        if maybe(sc, :active, false)
+            return true
+        end
+        for k in keys_present
+            if isa(sc, NamedTuple) ? hasproperty(sc, k) : haskey(sc, k)
+                return true
+            end
+        end
+        return false
+    end
+
+    shocks = shocks_specified(shocks_cfg) ? discretize(shocks_cfg) : nothing
 
     # Utility closure (CRRA)
     σ = params.σ
