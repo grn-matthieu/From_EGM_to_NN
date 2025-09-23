@@ -1,6 +1,3 @@
-using Test
-ENV["GKSwstype"] = "100"        # headless GR on CI
-
 include("bootstrap.jl")
 
 # Reduce noise from warnings in CI output

@@ -1,3 +1,6 @@
+using Test
+ENV["GKSwstype"] = "100"        # headless GR on CI
+
 using ThesisProject            # loads the package; Plots triggers ThesisProjectPlotsExt
 include(joinpath(@__DIR__, "utils.jl"))
 
