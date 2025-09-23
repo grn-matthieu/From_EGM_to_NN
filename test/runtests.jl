@@ -131,3 +131,23 @@ end
 @testset "Analysis - SteadyState" begin
     include("analysis/test_steady_state.jl")
 end
+
+@testset "NN Data Generation" begin
+    include("solvers/nn/test_datanndata.jl")
+end
+
+@testset "NN Training Loop" begin
+    include("solvers/nn/test_training_loop.jl")
+end
+
+@testset "NN - MixedPrecision" begin
+    include("solvers/nn/test_mixedprecision.jl")
+end
+
+@testset "NN - Preprocessing" begin
+    include("solvers/nn/test_preprocessing.jl")
+end
+
+@testset "NN - Kernel" begin
+    include("solvers/nn/test_kernel.jl")
+end

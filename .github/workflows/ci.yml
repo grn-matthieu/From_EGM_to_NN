@@ -62,8 +62,8 @@ jobs:
             covered, total = get_summary(cov)
             pct = covered / total * 100
             println("Coverage: ", pct)
-            if pct < 50
-              error("Coverage below 50%")
+            if pct < 80
+              error("Coverage below 80%")
             end
           '
 

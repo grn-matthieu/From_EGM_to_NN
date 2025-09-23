@@ -52,4 +52,12 @@ end
 """
 Convert predicted consumption back to the original grid element type.
 """
-convert_to_grid_eltype(grid, values) = convert.(eltype(grid), values)
+function convert_to_grid_eltype(grid, values)
+    T = eltype(grid)
+    if T <: Integer
+        # round down to integer grid elements
+        return floor.(T, values)
+    else
+        return convert.(T, values)
+    end
+end
