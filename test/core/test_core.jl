@@ -27,6 +27,9 @@
     method = build_method(config)
     @test isa(method, ThesisProject.API.AbstractMethod)
 
+    # Throws if name of method is unknown
+    @test_throws ErrorException build_method(merge(config, (; method = "unknown")))
+
     # Test solver
     sol = nothing
     @testset "solve" begin # Battery of tests on the solution obtained
