@@ -38,6 +38,8 @@ solver:
   stabilize: true
   stab_method: log1p_square
   residual_weighting: none
+  objective: euler_fb_aio
+  v_h: 1.0
 
 random:
   seed: 1234

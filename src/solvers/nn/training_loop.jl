@@ -8,6 +8,8 @@ struct NNSolverSettings
     patience::Int
     hidden_sizes::NTuple{2,Int}
     has_shocks::Bool
+    objective::Symbol
+    v_h::Float64
 end
 
 struct TrainingResult
@@ -32,6 +34,8 @@ function solver_settings(opts; has_shocks::Bool = false)
     patience = max(Int(get_option(opts, :patience, 200)), 0)
     hid1 = max(Int(get_option(opts, :hid1, 128)), 1)
     hid2 = max(Int(get_option(opts, :hid2, 128)), 1)
+    objective = Symbol(get_option(opts, :objective, :euler))
+    v_h = Float64(get_option(opts, :v_h, 1.0))
     return NNSolverSettings(
         epochs,
         batch_choice,
@@ -42,6 +46,8 @@ function solver_settings(opts; has_shocks::Bool = false)
         patience,
         (hid1, hid2),
         has_shocks,
+        objective,
+        v_h,
     )
 end
 
@@ -79,9 +85,31 @@ function build_loss_function(
     S,
     scaler::FeatureScaler,
     settings::NNSolverSettings,
+    model_cfg = nothing,
+    rng = Random.GLOBAL_RNG,
 )
     return function (model, ps, st, data)
         X = data[1]
+
+        # If caller selected the FB AiO objective, delegate to the custom loss
+        if settings.objective == :euler_fb_aio
+            # loss_euler_fb_aio! returns (loss, (st1, aux_namedtuple))
+            loss_val, st_pack = loss_euler_fb_aio!(model, ps, st, X, model_cfg, rng)
+            st1, aux = st_pack
+            # package diagnostics: include FB aux diagnostics and leave phi/h fields empty
+            diag = (;
+                phi = nothing,
+                h = nothing,
+                a = nothing,
+                z = nothing,
+                w = nothing,
+                c = nothing,
+                fb = aux,
+            )
+            return loss_val, st1, diag
+        end
+
+        # Default Euler residual loss path (existing behaviour)
         prediction = model(X, ps, st)
         st_out = st
 
@@ -251,12 +279,14 @@ function train_consumption_network!(
     P_resid,
     G,
     S,
+    model_cfg = nothing,
+    rng = Random.GLOBAL_RNG,
 )
     ps, st = Lux.setup(Random.GLOBAL_RNG, chain)
     opt = create_optimizer(settings)
     train_state = Lux.Training.TrainState(chain, ps, st, opt)
     # build loss with scaler so we can compute cash-on-hand inside the loss
-    loss_function = build_loss_function(P_resid, G, S, scaler, settings)
+    loss_function = build_loss_function(P_resid, G, S, scaler, settings, model_cfg, rng)
     batch, sample_count = create_training_batch(G, S, scaler)
     total_samples = size(batch, 2)
     batch_size = compute_batch_size(total_samples, settings.batch_choice)

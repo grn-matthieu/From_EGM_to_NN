@@ -56,12 +56,31 @@ if !isdefined(Main, :DummyTrainResult)
 end
 
 # Return a stable, small train result
-NNKernel.train_consumption_network!(chain, settings, scaler, P_resid, G_, S_) =
-    DummyTrainResult(1, 4, 5, 0.1, (;))
+NNKernel.train_consumption_network!(
+    chain,
+    settings,
+    scaler,
+    P_resid,
+    G_,
+    S_,
+    model_cfg = nothing,
+    rng = Random.GLOBAL_RNG,
+) = DummyTrainResult(1, 4, 5, 0.1, (;))
 
 NNKernel.build_network(in_dim, settings) = :fake_chain
-NNKernel.solver_settings(opts) =
-    (; epochs = 3, learning_rate = 0.001, verbose = false, target_loss = 0.5)
+NNKernel.solver_settings(opts) = (;
+    epochs = 3,
+    batch_choice = 64,
+    learning_rate = 0.001,
+    verbose = false,
+    resample_interval = 1,
+    target_loss = 0.5,
+    patience = 10,
+    hidden_sizes = (64, 64),
+    has_shocks = false,
+    objective = :euler,
+    v_h = 1.0,
+)
 
 NNKernel.select_model(chain, best_state) = :trained_model
 NNKernel.state_parameters(best_state) = :params

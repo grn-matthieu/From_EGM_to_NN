@@ -19,6 +19,8 @@ make_S(z::AbstractVector) = (zgrid = Float32.(z),)
     @test s.target_loss ≈ 2e-4 * 1.0f0
     @test s.patience == 200
     @test s.hidden_sizes == (128, 128)
+    @test s.objective == :euler
+    @test s.v_h == 1.0
 
     # provided opts with negatives and zeros to trigger clamps
     opts = (;
@@ -218,7 +220,16 @@ end
     P_resid = (r = 0.01f0, β = 0.95f0, σ = 2.0f0, y = 1.0f0)
 
     # Deterministic training run
-    tr = NN.train_consumption_network!(net, s, scaler, P_resid, G, nothing)
+    tr = NN.train_consumption_network!(
+        net,
+        s,
+        scaler,
+        P_resid,
+        G,
+        nothing,
+        nothing,
+        Random.GLOBAL_RNG,
+    )
     @test tr.epochs_run ≤ 1
     @test tr.batch_size ≥ 1
     @test tr.batches_per_epoch ≥ 1
@@ -233,7 +244,16 @@ end
 
     net2 = NN.build_network(2, s)
     # For stochastic problem training we expect full-batch; ensure call succeeds
-    tr2 = NN.train_consumption_network!(net2, s, scaler, P_resid, G, S)
+    tr2 = NN.train_consumption_network!(
+        net2,
+        s,
+        scaler,
+        P_resid,
+        G,
+        S,
+        nothing,
+        Random.GLOBAL_RNG,
+    )
     @test tr2.batch_size ≥ 1
     @test tr2.batches_per_epoch ≥ 1
 end

@@ -26,6 +26,8 @@ solver:
   residual_weighting: "none"
   weight_α: 5.0
   weight_κ: 20.0
+  objective: euler_fb_aio
+  v_h: 1.0
 
 random:
   seed: 42

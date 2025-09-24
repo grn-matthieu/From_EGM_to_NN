@@ -38,6 +38,8 @@ solver:
   weight_α: 5.0
   weight_κ: 20.0
   pretrain: false
+  objective: euler_fb_aio
+  v_h: 1.0
 
 random:
   seed: 1234

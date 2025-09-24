@@ -150,7 +150,11 @@ function solve_nn(model; opts = nothing)
 
     chain = build_dual_head_network(input_dimension(S), settings.hidden_sizes)
     P_resid = scalar_params(P)
-    training_result = train_consumption_network!(chain, settings, scaler, P_resid, G, S)
+    # model_cfg provides fields expected by custom losses (P, U, v_h)
+    model_cfg = (P = P, U = U, v_h = settings.v_h)
+    rng = Random.default_rng()
+    training_result =
+        train_consumption_network!(chain, settings, scaler, P_resid, G, S, model_cfg, rng)
     best_state = training_result.best_state
     trained_model = select_model(chain, best_state)
     params = state_parameters(best_state)
