@@ -56,12 +56,8 @@ function solve(model::AbstractModel, method::NNMethod, cfg::NamedTuple;)::Soluti
     value = compute_value_policy(p, g, S, U, policy)
 
     model_id = hash_hex(canonicalize_cfg(cfg))
-    diagnostics = (;
-        model_id = model_id,
-        method = method.opts.name,
-        seed = sol.opts.seed,
-        runtime = sol.opts.runtime,
-    )
+    diagnostics =
+        (; model_id = model_id, method = method.opts.name, runtime = sol.opts.runtime)
 
     metadata = Dict{Symbol,Any}(
         :iters => sol.iters,

@@ -130,14 +130,19 @@ function solve_nn(model; opts = nothing)
     σ_crra = U.σ
     # -- model: shared trunk + two heads (phi in (0,1), h > 0)
     function build_dual_head_network(input_dim::Int, hidden::NTuple{2,Int})
-        using Lux
         H1, H2 = hidden
-        trunk = Chain(Dense(input_dim, H1, leakyrelu), Dense(H1, H2, leakyrelu))
-        head_phi = Chain(Dense(H2, 1), x -> sigmoid.(x))      # Φ = c/w in (0,1)
-        head_h = Chain(Dense(H2, 1), x -> exp.(x))          # h = exp(·) > 0
+        # trunk ends with a Dense producing 2 outputs (one per head)
+        trunk =
+            Chain(Dense(input_dim, H1, leakyrelu), Dense(H1, H2, leakyrelu), Dense(H2, 2))
 
-        # Wrap so forward returns (phi, h)
-        model = Chain(x -> trunk(x), x -> (Φ = head_phi(x), h = head_h(x)))
+        # final mapping: split the 2×N output into Φ and h and apply activations
+        model = Chain(trunk, x -> begin
+            # x is 2×N; first row -> pre-Φ, second row -> pre-h
+            pre = x
+            φ_pre = view(pre, 1:1, :)
+            h_pre = view(pre, 2:2, :)
+            (Φ = sigmoid.(φ_pre), h = exp.(h_pre))
+        end)
         return model
     end
 

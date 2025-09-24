@@ -256,6 +256,11 @@ function train_consumption_network!(
     batch, sample_count = create_training_batch(G, S, scaler)
     total_samples = size(batch, 2)
     batch_size = compute_batch_size(total_samples, settings.batch_choice)
+    # For stochastic problems we require predictions on the full grid
+    # (Na * Nz) so force full-batch training when shocks are present.
+    if !isnothing(S) && batch_size < total_samples
+        batch_size = total_samples
+    end
     batches_per_epoch = cld(total_samples, batch_size)
     best_state = train_state
     best_loss = Inf
@@ -273,6 +278,10 @@ function train_consumption_network!(
             )
             total_samples = size(batch, 2)
             batch_size = compute_batch_size(total_samples, settings.batch_choice)
+            # same rule: force full-batch when stochastic
+            if !isnothing(S) && batch_size < total_samples
+                batch_size = total_samples
+            end
             batches_per_epoch = cld(total_samples, batch_size)
         end
         shuffled = batch[:, randperm(rng, total_samples)]
