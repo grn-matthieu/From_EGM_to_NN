@@ -16,8 +16,10 @@ params:
 solver:
   method: "NN"
   epochs: 20
-  batch: 256
+  batch: 64
   lr: 1e-3
+  hid1: 64
+  hid2: 64
   projection_kind: "softplus"
   stabilize: true
   stab_method: "log1p_square"

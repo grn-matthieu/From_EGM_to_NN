@@ -27,8 +27,10 @@ utility:
 solver:
   method: "NN"
   epochs: 20
-  batch: 128
+  batch: 64
   lr: 1.0e-3
+  hid1: 64
+  hid2: 64
   projection_kind: "softplus"
   stabilize: true
   stab_method: "log1p_square"
