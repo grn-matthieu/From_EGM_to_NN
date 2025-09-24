@@ -267,7 +267,11 @@ function loss_euler_fb_aio!(chain, ps, st, batch, model_cfg, rng)
     v_h = hasproperty(model_cfg, :v_h) ? T(getfield(model_cfg, :v_h)) : one(T)
     loss_vec = kt .+ v_h .* aio_pen
 
-    return mean(loss_vec), (st1, (; kt_mean = mean(kt), aio_mean = mean(aio_pen)))
+    # diagnostics: include max absolute Euler residual q for monitoring
+    max_abs_q = maximum(abs.(vcat(q1, q2)))
+
+    return mean(loss_vec),
+    (st1, (; kt_mean = mean(kt), aio_mean = mean(aio_pen), max_abs_q = max_abs_q))
 end
 
 end # module

@@ -364,6 +364,18 @@ function train_consumption_network!(
         P_resid = P_resid,
         settings = settings,
     )
+    # create a fixed validation batch for periodic diagnostics (held out)
+    val_nsamples = min(4096, sample_count)
+    val_batch, _ = create_training_batch(
+        G,
+        S,
+        scaler;
+        mode = :rand,
+        nsamples = val_nsamples,
+        rng = rng,
+        P_resid = P_resid,
+        settings = settings,
+    )
     total_samples = size(batch, 2)
     batch_size = compute_batch_size(total_samples, settings.batch_choice)
     # For stochastic problems we require predictions on the full grid
@@ -428,6 +440,43 @@ function train_consumption_network!(
         end
         if settings.verbose && (epoch % 10 == 0 || epoch == settings.epochs)
             @printf "Epoch: %3d \t Loss: %.5g \t GradNorm: %.5g\n" epoch average_loss gradient_norm
+        end
+        # periodic validation logging every 100 epochs
+        if settings.verbose && epoch % 100 == 0
+            try
+                # loss_function returns (loss, st_out, diag) for the outer training API
+                val_loss, val_st, val_diag = loss_function(
+                    select_model(chain, train_state),
+                    state_parameters(train_state),
+                    state_states(train_state),
+                    (val_batch,),
+                )
+                if :fb in keys(val_diag)
+                    aux = val_diag.fb
+                    try
+                        @printf(
+                            "[VAL] Epoch %4d: kt_mean=%.6g aio_mean=%.6g max_abs_q=%.6g\n",
+                            epoch,
+                            aux.kt_mean,
+                            aux.aio_mean,
+                            aux.max_abs_q
+                        )
+                    catch
+                        @printf(
+                            "[VAL] Epoch %4d: diagnostics present but failed to print (missing fields)\n",
+                            epoch
+                        )
+                    end
+                else
+                    @printf(
+                        "[VAL] Epoch %4d: validation loss=%.6g (no FB diagnostics)\n",
+                        epoch,
+                        val_loss
+                    )
+                end
+            catch err
+                @warn "Validation logging failed" error = err
+            end
         end
         if best_loss ≤ settings.target_loss && stall_epochs ≥ settings.patience
             return TrainingResult(

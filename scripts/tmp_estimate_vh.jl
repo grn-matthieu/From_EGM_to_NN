@@ -82,9 +82,10 @@ S = (; zgrid = Float32.([-0.1f0, 0.0f0, 0.1f0]), Π = ones(3, 3) / 3)
 scaler = NN.FeatureScaler(G, S)
 P_resid = NN.scalar_params(P)
 
-# solver settings: full-run defaults for stability (lower lr, conservative v_h)
+# solver settings: full-run defaults for long training and monitoring
 opts = (;
-    epochs = 100,
+    epochs = 2000,
+    batch = 64,
     objective = :euler_fb_aio,
     lr = 1e-4,
     v_h = 0.5,
@@ -93,8 +94,14 @@ opts = (;
 )
 settings = NN.solver_settings(opts; has_shocks = scaler.has_shocks)
 
-model_cfg =
-    (P = P, U = U, v_h = 1.0, scaler = scaler, P_resid = P_resid, settings = settings)
+model_cfg = (
+    P = P,
+    U = U,
+    v_h = settings.v_h,
+    scaler = scaler,
+    P_resid = P_resid,
+    settings = settings,
+)
 
 training_result =
     NN.train_consumption_network!(chain, settings, scaler, P_resid, G, S, model_cfg, rng)
