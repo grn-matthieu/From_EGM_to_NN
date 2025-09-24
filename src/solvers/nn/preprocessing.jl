@@ -43,6 +43,16 @@ function normalize_feature_batch!(scaler::FeatureScaler, X)
     return X
 end
 
+function normalize_feature_batch(s::FeatureScaler, X::AbstractMatrix)
+    a1 = @. 2.0f0 * (X[1, :] - s.a_min) / s.a_range - 1.0f0
+    if s.has_shocks
+        z1 = @. 2.0f0 * (X[2, :] - s.z_min) / s.z_range - 1.0f0
+        return vcat(reshape(a1, 1, :), reshape(z1, 1, :))
+    else
+        return reshape(a1, 1, :)
+    end
+end
+
 get_param(container, name::Symbol, default) = begin
     value = hasproperty(container, name) ? getfield(container, name) : default
     return value === nothing ? default : value

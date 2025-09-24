@@ -65,7 +65,7 @@ function build_network(input_dim::Int, settings::NNSolverSettings)
 end
 
 create_optimizer(settings::NNSolverSettings) = Optimisers.OptimiserChain(
-    Optimisers.ClipGrad(0.1),
+    Optimisers.ClipGrad(0.02),
     Optimisers.Adam(settings.learning_rate),
 )
 
@@ -78,13 +78,13 @@ huber_loss(x, δ) = abs(x) ≤ δ ? 0.5f0 * x * x : δ * (abs(x) - 0.5f0 * δ)
 
 @inline function cash_on_hand(a, z, P, has_shocks::Bool)
     R = 1.0f0 + Float32(P.r)
+    μ = Float32(P.y)                # log-mean income level
     if has_shocks
-        # income from shock state; simple AR(1) level. Adjust if you use exp(z).
-        y = Float32(P.y) .+ z
+        inc = @. exp(μ + z)
     else
-        y = Float32(P.y)
+        inc = exp(μ)
     end
-    return @. R * a + y
+    return @. R * a + inc
 end
 
 function build_loss_function(
@@ -240,39 +240,67 @@ function create_training_batch(
     G,
     S,
     scaler::FeatureScaler;
-    mode = :full,
-    nsamples::Int = 0,
+    mode = :rand,
+    nsamples::Int = 4096,
     rng = Random.GLOBAL_RNG,
     P_resid = nothing,
     settings::Union{NNSolverSettings,Nothing} = nothing,
 )
-    # Generate raw dataset samples (rows = samples)
-    X, _ = generate_dataset(G, S; mode = mode, nsamples = nsamples, rng = rng)
+    want =
+        nsamples > 0 ? nsamples :
+        (isnothing(S) ? length(G[:a].grid) : length(G[:a].grid) * length(S.zgrid))
 
-    # If requested, filter the sampled rows so cash-on-hand w lies in [w_min, w_max]
-    if !(mode == :full) && P_resid !== nothing && settings !== nothing
-        # compute w for each sample row
-        if settings.has_shocks
-            a_samples = X[:, 1]
-            z_samples = X[:, 2]
-            w = cash_on_hand(a_samples, z_samples, P_resid, true)
-        else
-            a_samples = X[:, 1]
-            w = cash_on_hand(a_samples, 0.0f0, P_resid, false)
-        end
-        # mask rows whose w is within [w_min, w_max]
-        mask = map(x -> x >= settings.w_min && x <= settings.w_max, w)
-        if any(mask)
-            X = X[mask, :]
-        else
-            # no samples within the requested window: fall back to original X
-        end
+    # deterministic full grid path unchanged
+    if mode == :full
+        X, _ = generate_dataset(G, S; mode = :full)
+        normalize_samples!(scaler, X)
+        return prepare_training_batch(X), size(X, 1)
     end
 
-    sample_count = size(X, 1)
+    @assert P_resid !== nothing && settings !== nothing
+    Rg = 1.0f0 + Float32(P_resid.r)
+    μ = Float32(P_resid.y)
+    a_min = Float32(G[:a].min)
+    a_max = Float32(G[:a].max)
+    z_min = scaler.z_min
+    z_max = scaler.z_min + scaler.z_range
+    w_lo = settings.w_min
+    w_hi = settings.w_max
+
+    A = Vector{Float32}(undef, want)
+    Z = settings.has_shocks ? Vector{Float32}(undef, want) : Float32[]
+    filled = 0
+    max_tries = 1000
+    tries = 0
+    while filled < want && tries < max_tries
+        # draw in bulk
+        m = max(want - filled, 4096)
+        a = rand(rng, Float32, m) .* (a_max - a_min) .+ a_min
+        z =
+            settings.has_shocks ? rand(rng, Float32, m) .* (z_max - z_min) .+ z_min :
+            fill(0.0f0, m)
+        # lognormal income
+        inc = @. exp(μ + z)
+        w = @. Rg * a + inc
+        keep = (w .>= w_lo) .& (w .<= w_hi)
+        k = count(keep)
+        if k > 0
+            idx = findall(keep)
+            take = min(k, want - filled)
+            A[filled+1:filled+take] .= a[idx[1:take]]
+            if settings.has_shocks
+                Z[filled+1:filled+take] .= z[idx[1:take]]
+            end
+            filled += take
+        end
+        tries += 1
+    end
+    @assert filled == want "Sampler could not hit the w-window; widen [w_min,w_max] or raise nsamples."
+
+    X = settings.has_shocks ? hcat(A, Z) : reshape(A, :, 1)
     normalize_samples!(scaler, X)
     batch = prepare_training_batch(X)
-    return batch, sample_count
+    return batch, want
 end
 
 function select_model(chain, state)
@@ -323,12 +351,15 @@ function train_consumption_network!(
     train_state = Lux.Training.TrainState(chain, ps, st, opt)
     # build loss with scaler so we can compute cash-on-hand inside the loss
     loss_function = build_loss_function(P_resid, G, S, scaler, settings, model_cfg, rng)
+    # use the strict rejection sampler to build an initial training pool large enough
+    init_nsamples =
+        max(settings.batch_choice === nothing ? 64 : settings.batch_choice, 64) * 128
     batch, sample_count = create_training_batch(
         G,
         S,
         scaler;
-        mode = :full,
-        nsamples = 0,
+        mode = :rand,
+        nsamples = init_nsamples,
         rng = Random.GLOBAL_RNG,
         P_resid = P_resid,
         settings = settings,

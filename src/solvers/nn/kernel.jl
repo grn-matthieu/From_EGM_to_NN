@@ -30,6 +30,9 @@ struct EvaluationResult
     max_resid::Float64
 end
 
+const H_ALPHA = 5.0f0
+
+
 function evaluate_deterministic(model, params, states, P_resid, P, G, scaler)
     X_forward, _ = det_forward_inputs(G)
     normalize_feature_batch!(scaler, X_forward)
@@ -141,7 +144,7 @@ function solve_nn(model; opts = nothing)
             pre = x
             φ_pre = view(pre, 1:1, :)
             h_pre = view(pre, 2:2, :)
-            (Φ = sigmoid.(φ_pre), h = exp.(h_pre))
+            (Φ = sigmoid.(φ_pre), h = exp.(H_ALPHA .* tanh.(h_pre)))
         end)
         return model
     end
@@ -150,8 +153,15 @@ function solve_nn(model; opts = nothing)
 
     chain = build_dual_head_network(input_dimension(S), settings.hidden_sizes)
     P_resid = scalar_params(P)
-    # model_cfg provides fields expected by custom losses (P, U, v_h)
-    model_cfg = (P = P, U = U, v_h = settings.v_h)
+    # model_cfg provides fields expected by custom losses (P, U, v_h, scaler, P_resid, settings)
+    model_cfg = (
+        P = P,
+        U = U,
+        v_h = settings.v_h,
+        scaler = scaler,
+        P_resid = P_resid,
+        settings = settings,
+    )
     rng = Random.default_rng()
     training_result =
         train_consumption_network!(chain, settings, scaler, P_resid, G, S, model_cfg, rng)
@@ -182,80 +192,82 @@ function solve_nn(model; opts = nothing)
     )
 end
 
-end # module
-
 
 # Fischer–Burmeister (Eq. 25)
 @inline fb(a, h) = a + h .- sqrt.(a .^ 2 .+ h .^ 2)  # zero iff a≥0, h≥0, a*h=0
 
 function loss_euler_fb_aio!(chain, ps, st, batch, model_cfg, rng)
-    # unpack model + params
-    P = model_cfg.P                      # β, r, ρ, σ, etc.
-    uprime = model_cfg.U.u_prime
+    P = model_cfg.P
+    U = model_cfg.U
+    scaler = model_cfg.scaler
+    P_resid = model_cfg.P_resid
+    settings = model_cfg.settings
+    uprime = U.u_prime
 
-    # inputs
-    a0 = @view batch[1, :]               # assets or any internal state you used
-    if size(batch, 1) == 2
-        y0 = @view batch[2, :]
-    else
-        y0 = zeros(eltype(batch), size(batch, 2))
-    end
+    T = eltype(batch)
+    C_MIN = T(1e-3)
 
-    # forward pass
+    # 1) Unnormalize current (a0, z0) from features×samples batch
+    a0 = ((batch[1, :] .+ one(T)) ./ T(2)) .* T(scaler.a_range) .+ T(scaler.a_min)
+    z0 =
+        settings.has_shocks ?
+        ((batch[2, :] .+ one(T)) ./ T(2)) .* T(scaler.z_range) .+ T(scaler.z_min) :
+        fill(zero(T), size(a0))
+
+    # 2) Forward at t to get φ,h then compute c0 and w0
     out, st1 = Lux.apply(chain, batch, ps, st)
-    ϕ = vec(out[:Φ])                     # ensure vector
-    h = vec(out[:h])                     # ensure vector
+    φ = vec(out[:Φ])                 # in (0,1)
+    h = vec(out[:h])                 # >0
 
-    # cash-on-hand and consumption — assume fields exist on P (use Greek letters)
-    R = P.r
-    β = P.β
-    w0 = @. R * a0 + exp(y0)
-    c0 = clamp.(ϕ .* w0, eps(eltype(batch)), Inf)
-    a_term = @. 1 - c0 / w0              # a = 1 - c/w
+    w0 = cash_on_hand(a0, z0, P_resid, settings.has_shocks) |> x -> T.(x)
+    c0 = clamp.(φ .* w0, C_MIN, T(Inf))
+    a_term = @. one(T) - c0 / w0     # KT piece a = 1 - c/w ≥ 0
 
-    # shocks for AiO
-    ε1 = randn!(rng, similar(y0))
-    ε2 = randn!(rng, similar(y0))
-    rho = P.ρ
-    sigma = P.σ
-    y1 = @. rho * y0 + sigma * ε1
-    y2 = @. rho * y0 + sigma * ε2
+    # 3) Shocks and next state (a1,z1)
+    ρ = T(get_param(P, :rho, get_param(P, :ρ, 0.0)))
+    σ = T(get_param(P, :sigma, get_param(P, :σ, 0.0)))
+    σ_shocks = T(get_param(P, :sigma_shocks, get_param(P, :σ_shocks, σ)))
+    ε1 = randn!(rng, similar(z0))
+    ε2 = randn!(rng, similar(z0))
+    z1 = @. ρ * z0 + σ_shocks * ε1
+    z2 = @. ρ * z0 + σ_shocks * ε2
 
-    # transitions
-    w1 = @. R * (w0 - c0) + exp(y1)
-    w2 = @. R * (w0 - c0) + exp(y2)
+    a1 = @. w0 - c0                  # next assets
+    a2 = a1                          # same a′ for both draws
 
-    # next-period consumption via NN
-    # Use the same feature mapping as the training pipeline: if inputs were
-    # (a, z) we used X = vcat(w - w0 + a, y); if inputs are (w,y) use vcat(w1, y1)
-    if size(batch, 1) == 2
-        X1 = vcat(w1 .- w0 .+ a0, y1)
-        X2 = vcat(w2 .- w0 .+ a0, y2)
-    else
-        X1 = vcat(w1, y1)
-        X2 = vcat(w2, y2)
-    end
-    out1, _ = Lux.apply(chain, X1, ps, st1)  # re-use st1 for determinism
-    out2, _ = Lux.apply(chain, X2, ps, st1)
+    # 4) Build next-step inputs (a′, z′) and NORMALIZE them before forward
+    X1 = vcat(reshape(a1, 1, :), reshape(z1, 1, :))
+    X2 = vcat(reshape(a2, 1, :), reshape(z2, 1, :))
 
-    c1 = clamp.(vec(out1[:Φ]) .* w1, eps(eltype(batch)), Inf)
-    c2 = clamp.(vec(out2[:Φ]) .* w2, eps(eltype(batch)), Inf)
+    NX1 = normalize_feature_batch(scaler, X1)
+    NX2 = normalize_feature_batch(scaler, X2)
 
-    # Euler pieces
-    q1 = @. β * R * uprime(c1) / uprime(c0)
-    q2 = @. β * R * uprime(c2) / uprime(c0)
+    out1, _ = Lux.apply(chain, NX1, ps, st1)
+    out2, _ = Lux.apply(chain, NX2, ps, st1)
 
-    # FB(KT) term uses 1 - h as the inequality residual proxy (Eq. 29)
-    fb_term = fb(a_term, @. 1 - h)
+    # 5) Compute c′ using w′ = cash_on_hand(a′, z′, …)
+    w1 = cash_on_hand(a1, z1, P_resid, settings.has_shocks) |> x -> T.(x)
+    w2 = cash_on_hand(a2, z2, P_resid, settings.has_shocks) |> x -> T.(x)
+    c1 = clamp.(vec(out1[:Φ]) .* w1, C_MIN, T(Inf))
+    c2 = clamp.(vec(out2[:Φ]) .* w2, C_MIN, T(Inf))
+
+    # 6) Euler pieces with consistent params
+    β = T(get_param(P, :beta, get_param(P, :β, 0.95)))
+    Rg = one(T) + T(model_cfg.P_resid.r)
+    q1 = @. β * Rg * uprime(c1) / uprime(c0)
+    q2 = @. β * Rg * uprime(c2) / uprime(c0)
+
+    # 7) FB term and AiO product (square the product to avoid sign runaway)
+    fb_term = fb(a_term, @. one(T) - h)
     kt = @. fb_term^2
+    gh1 = clamp.(q1 .- h, -T(1e3), T(1e3))
+    gh2 = clamp.(q2 .- h, -T(1e3), T(1e3))
+    aio_pen = (gh1 .* gh2) .^ 2
 
-    # AiO product (Eq. 30)
-    gh1 = @. q1 - h
-    gh2 = @. q2 - h
-    aio = gh1 .* gh2
+    v_h = hasproperty(model_cfg, :v_h) ? T(getfield(model_cfg, :v_h)) : one(T)
+    loss_vec = kt .+ v_h .* aio_pen
 
-    # weight
-    v_h = hasproperty(model_cfg, :v_h) ? getfield(model_cfg, :v_h) : 1.0
-    loss_vec = kt .+ v_h .* aio
-    return mean(loss_vec), (st1, (; kt_mean = mean(kt), aio_mean = mean(aio)))
+    return mean(loss_vec), (st1, (; kt_mean = mean(kt), aio_mean = mean(aio_pen)))
 end
+
+end # module
