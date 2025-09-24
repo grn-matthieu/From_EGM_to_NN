@@ -3,6 +3,7 @@
 # Plotting helpers for policies and residuals (activated via package extension).
 # Defines implementations for `plot_policy` and `plot_euler_errors`.
 import ThesisProject: plot_policy, plot_euler_errors
+using StatsBase, Plots
 
 const LINE_KW = (; lw = 2)
 
@@ -206,4 +207,38 @@ function plot_euler_errors(sol::ThesisProject.API.Solution; by::Symbol = :auto)
     return plt
 end
 
-export plot_policy, plot_euler_errors
+"""
+    plot_policy_slices(w, z, c; z_levels=[-1.0,0.0,1.0])
+
+Plot c(w|z) for selected z.
+"""
+function plot_policy_slices(
+    w::AbstractVector,
+    z::AbstractVector,
+    c::AbstractVector;
+    z_levels = [-1.0, 0.0, 1.0],
+)
+    plt = plot(; xlabel = "w", ylabel = "c(w,z)", legend = :topright)
+    for z0 in z_levels
+        idx = map(zi -> abs(zi - z0) ≤ 0.05, z)
+        if any(idx)
+            plot!(plt, w[idx], c[idx]; label = "z=$(round(z0,digits=2))")
+        end
+    end
+    return plt
+end
+
+"""
+    plot_residual_hist(abs_resid)
+
+Histogram of |Euler residual|.
+"""
+plot_residual_hist(abs_resid) = histogram(
+    abs_resid;
+    nbins = 60,
+    xlabel = "|Euler residual|",
+    ylabel = "count",
+    yscale = :log10,
+)
+
+export plot_policy, plot_euler_errors, plot_policy_slices, plot_residual_hist

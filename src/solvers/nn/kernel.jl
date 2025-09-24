@@ -15,7 +15,7 @@ using Lux
 using Optimisers
 using Random
 using Printf
-using Statistics: mean
+using Statistics: mean, quantile
 
 include("mixed_precision.jl")
 include("preprocessing.jl")
@@ -181,6 +181,32 @@ function solve_nn(model; opts = nothing)
     opts_summary = build_options_summary(settings, training_result, runtime)
     converged = training_result.best_loss ≤ settings.target_loss
 
+    # Attach dense evaluation metrics when stochastic shocks are present
+    eval_mc =
+        isnothing(S) ? nothing :
+        eval_euler_residuals_mc(
+            trained_model,
+            params,
+            states,
+            P_resid,
+            U,
+            scaler,
+            settings;
+            N = 8192,
+        )
+    eval_gh =
+        isnothing(S) ? nothing :
+        eval_euler_residuals_gh(
+            trained_model,
+            params,
+            states,
+            P_resid,
+            U,
+            scaler,
+            settings;
+            N = 4096,
+        )
+
     return (;
         a_grid = G[:a].grid,
         c = evaluation.c,
@@ -191,6 +217,8 @@ function solve_nn(model; opts = nothing)
         max_resid = evaluation.max_resid,
         model_params = P,
         opts = opts_summary,
+        eval_mc = eval_mc,
+        eval_gh = eval_gh,
     )
 end
 
@@ -276,6 +304,192 @@ function loss_euler_fb_aio!(chain, ps, st, batch, model_cfg, rng)
 
     return mean(loss_vec),
     (st1, (; kt_mean = mean(kt), aio_mean = mean(aio_pen), max_abs_q = max_abs_q))
+end
+
+# --- Euler residual on dense random test set (Monte Carlo) ---
+"""
+    eval_euler_residuals_mc(model, ps, st, P_resid, U, scaler, settings; N=8192, rng=Random.GLOBAL_RNG)
+
+Returns NamedTuple:
+- abs_resid :: Vector{Float32} of |1 - βR E[u'(c')]/u'(c)|
+- w, z, c   :: Vectors for diagnostics
+- stats     :: (mean, p50, p95, max)
+"""
+function eval_euler_residuals_mc(
+    model,
+    ps,
+    st,
+    P_resid,
+    U,
+    scaler,
+    settings;
+    N = 8192,
+    rng = Random.GLOBAL_RNG,
+)
+    @assert settings.has_shocks "MC eval is for stochastic spec"
+    # sample inside w-window using the strict sampler (uses Main.G and Main.S)
+    batch, _ = create_training_batch(
+        getfield(Main, :G),
+        getfield(Main, :S),
+        scaler;
+        mode = :rand,
+        nsamples = N,
+        rng = rng,
+        P_resid = P_resid,
+        settings = settings,
+    )
+
+    # unnormalize
+    a0 = ((batch[1, :] .+ 1.0f0) ./ 2.0f0) .* scaler.a_range .+ scaler.a_min
+    z0 = ((batch[2, :] .+ 1.0f0) ./ 2.0f0) .* scaler.z_range .+ scaler.z_min
+
+    # forward c,h
+    out, _ = Lux.apply(model, batch, ps, st)
+    ϕ = vec(out[:Φ])
+    h = vec(out[:h])
+
+    w0 = cash_on_hand(a0, z0, P_resid, true)
+    c0 = clamp.(ϕ .* w0, 1.0f-3, Inf)
+
+    # one-shot Monte Carlo for E[u'(c')]
+    # prefer global P (script-level) for shock params
+    P = getfield(Main, :P)
+    ρ = Float32(P.ρ)
+    σϵ = Float32(P.σ_shocks)
+    β = Float32(P.β)
+    Rg = 1.0f0 + Float32(P.r)
+
+    ε = randn(rng, Float32, N)
+    z1 = @. ρ * z0 + σϵ * ε
+    a1 = @. w0 - c0
+    w1 = cash_on_hand(a1, z1, P_resid, true)
+
+    X1 = vcat(reshape(a1, 1, :), reshape(z1, 1, :))
+    NX1 = normalize_feature_batch(scaler, X1)
+    out1, _ = Lux.apply(model, NX1, ps, st)
+    c1 = clamp.(vec(out1[:Φ]) .* w1, 1.0f-3, Inf)
+
+    uprime = U.u_prime
+    ratio = @. β * Rg * uprime(c1) / uprime(c0)
+    resid = abs.(1.0f0 .- ratio)  # |1 - βR E[u'(c')]/u'(c)| with one draw
+
+    # compute p50 and p95 via sorted indexing (no extra dependency)
+    sr = sort(vec(resid))
+    n = length(sr)
+    p50 = sr[clamp(Int(round(0.5 * n)), 1, n)]
+    p95 = sr[clamp(Int(ceil(0.95 * n)), 1, n)]
+
+    stats = (mean = mean(resid), p50 = p50, p95 = p95, max = maximum(resid))
+    return (
+        abs_resid = Float32.(resid),
+        w = Float32.(w0),
+        z = Float32.(z0),
+        c = Float32.(c0),
+        stats = stats,
+        h = Float32.(h),
+    )
+end
+
+# 10-node Gauss–Hermite nodes/weights
+const GH10_X =
+    Float32.([
+        -3.436159,
+        -2.532736,
+        -1.756684,
+        -1.036611,
+        -0.342901,
+        0.342901,
+        1.036611,
+        1.756684,
+        2.532736,
+        3.436159,
+    ])
+const GH10_W =
+    Float32.([
+        7.640433e-6,
+        0.001343645,
+        0.033874394,
+        0.24013861,
+        0.61086263,
+        0.61086263,
+        0.24013861,
+        0.033874394,
+        0.001343645,
+        7.640433e-6,
+    ])
+
+"""
+    eval_euler_residuals_gh(model, ps, st, P_resid, U, scaler, settings; N=4096)
+
+Computes |1 - βR E[u'(c')]/u'(c)| with 10-node Gauss–Hermite on ε.
+"""
+function eval_euler_residuals_gh(
+    model,
+    ps,
+    st,
+    P_resid,
+    U,
+    scaler,
+    settings;
+    N = 4096,
+    rng = Random.GLOBAL_RNG,
+)
+    @assert settings.has_shocks
+    batch, _ = create_training_batch(
+        getfield(Main, :G),
+        getfield(Main, :S),
+        scaler;
+        mode = :rand,
+        nsamples = N,
+        rng = rng,
+        P_resid = P_resid,
+        settings = settings,
+    )
+    a0 = ((batch[1, :] .+ 1.0f0) ./ 2.0f0) .* scaler.a_range .+ scaler.a_min
+    z0 = ((batch[2, :] .+ 1.0f0) ./ 2.0f0) .* scaler.z_range .+ scaler.z_min
+    out, _ = Lux.apply(model, batch, ps, st)
+    ϕ = vec(out[:Φ])
+    w0 = cash_on_hand(a0, z0, P_resid, true)
+    c0 = clamp.(ϕ .* w0, 1.0f-3, Inf)
+
+    # prefer the full P for shock params (rho, sigma) and scalars
+    P = getfield(Main, :P)
+    ρ = Float32(P.ρ)
+    σϵ = Float32(P.σ_shocks)
+    β = Float32(P.β)
+    Rg = 1.0f0 + Float32(P.r)
+    uprime = U.u_prime
+
+    # quadrature
+    EUprime = zeros(Float32, length(a0))
+    @inbounds for k in eachindex(GH10_X)
+        εk = GH10_X[k]
+        wk = GH10_W[k] / sqrt(pi)  # standard normal expectation
+        z1 = @. ρ * z0 + σϵ * εk
+        a1 = @. w0 - c0
+        w1 = cash_on_hand(a1, z1, P_resid, true)
+        X1 = vcat(reshape(a1, 1, :), reshape(z1, 1, :))
+        NX1 = normalize_feature_batch(scaler, X1)
+        out1, _ = Lux.apply(model, NX1, ps, st)
+        c1 = clamp.(vec(out1[:Φ]) .* w1, 1.0f-3, Inf)
+        EUprime .+= wk .* uprime(c1)
+    end
+
+    ratio = @. β * Rg * EUprime / uprime(c0)
+    resid = abs.(1.0f0 .- ratio)
+    stats = (
+        mean = mean(resid),
+        p50 = quantile(resid, 0.5),
+        p95 = quantile(resid, 0.95),
+        max = maximum(resid),
+    )
+    return (
+        abs_resid = Float32.(resid),
+        w = Float32.(w0),
+        z = Float32.(z0),
+        c = Float32.(c0),
+        stats = stats,
+    )
 end
 
 end # module
