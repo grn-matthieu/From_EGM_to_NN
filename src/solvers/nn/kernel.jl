@@ -62,8 +62,8 @@ function evaluate_deterministic(model, params, states, P_resid, P, G, scaler)
         c_on_grid = convert_to_grid_eltype(G[:a].grid, c_vec)
     end
     max_resid = maximum(abs.(residuals))
-    R = 1 + get_param(P, :r, 0.0)
-    y = get_param(P, :y, 0.0)
+    R = 1 + P.r
+    y = P.y
     a_next = @. R * G[:a].grid + y - c_on_grid
     a_next = clamp_to_asset_bounds(a_next, G[:a])
     return EvaluationResult(c_on_grid, a_next, residuals, max_resid)
@@ -102,8 +102,8 @@ function evaluate_stochastic(model, params, states, P_resid, P, G, S, scaler)
         euler_resid_stoch_grid(P_resid, a_grid_f32, z_grid_f32, Pz_f32, c_matrix_f32)
     c_on_grid = convert_to_grid_eltype(G[:a].grid, c_matrix)
     max_resid = maximum(abs.(residuals))
-    R = 1 + get_param(P, :r, 0.0)
-    y = get_param(P, :y, 0.0)
+    R = 1 + P.r
+    y = P.y
     a_next = @. R * G[:a].grid + y - c_on_grid
     a_next = clamp_to_asset_bounds(a_next, G[:a])
     return EvaluationResult(c_on_grid, a_next, residuals, max_resid)
@@ -152,6 +152,7 @@ function solve_nn(model; opts = nothing)
     input_dimension(S) = isnothing(S) ? 1 : 2
 
     chain = build_dual_head_network(input_dimension(S), settings.hidden_sizes)
+    # ScalarParams expects exact fields in P (σ, β, r, y). Validation lives in the config validator.
     P_resid = scalar_params(P)
     # model_cfg provides fields expected by custom losses (P, U, v_h, scaler, P_resid, settings)
     model_cfg = (
@@ -161,6 +162,7 @@ function solve_nn(model; opts = nothing)
         scaler = scaler,
         P_resid = P_resid,
         settings = settings,
+        sigma_shocks = settings.sigma_shocks,
     )
     rng = Random.default_rng()
     training_result =
@@ -224,9 +226,11 @@ function loss_euler_fb_aio!(chain, ps, st, batch, model_cfg, rng)
     a_term = @. one(T) - c0 / w0     # KT piece a = 1 - c/w ≥ 0
 
     # 3) Shocks and next state (a1,z1)
-    ρ = T(get_param(P, :rho, get_param(P, :ρ, 0.0)))
-    σ = T(get_param(P, :sigma, get_param(P, :σ, 0.0)))
-    σ_shocks = T(get_param(P, :sigma_shocks, get_param(P, :σ_shocks, σ)))
+    ρ = T(P.ρ)
+    # Shock std: prefer explicit override in model_cfg.sigma_shocks, otherwise use P.σ_shocks
+    σ_shocks =
+        hasproperty(model_cfg, :sigma_shocks) && model_cfg.sigma_shocks !== nothing ?
+        T(model_cfg.sigma_shocks) : T(P.σ_shocks)
     ε1 = randn!(rng, similar(z0))
     ε2 = randn!(rng, similar(z0))
     z1 = @. ρ * z0 + σ_shocks * ε1
@@ -252,8 +256,8 @@ function loss_euler_fb_aio!(chain, ps, st, batch, model_cfg, rng)
     c2 = clamp.(vec(out2[:Φ]) .* w2, C_MIN, T(Inf))
 
     # 6) Euler pieces with consistent params
-    β = T(get_param(P, :beta, get_param(P, :β, 0.95)))
-    Rg = one(T) + T(model_cfg.P_resid.r)
+    β = T(P.β)
+    Rg = one(T) + T(P.r)
     q1 = @. β * Rg * uprime(c1) / uprime(c0)
     q2 = @. β * Rg * uprime(c2) / uprime(c0)
 

@@ -59,11 +59,9 @@ get_param(container, name::Symbol, default) = begin
 end
 
 function scalar_params(P)
-    σ = Float64(get_param(P, :σ, 1.0))
-    β = Float64(get_param(P, :β, 0.95))
-    r = Float64(get_param(P, :r, 0.02))
-    y = Float64(get_param(P, :y, 1.0))
-    return ScalarParams(σ, β, r, y)
+    # Expect exact parameter names to be present in the config. Validation should
+    # be performed by the config/validation module; here we access fields directly.
+    return ScalarParams(Float64(P.σ), Float64(P.β), Float64(P.r), Float64(P.y))
 end
 
 function clamp_to_asset_bounds(values, grid_info)

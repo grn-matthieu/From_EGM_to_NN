@@ -12,6 +12,7 @@ struct NNSolverSettings
     v_h::Float64
     w_min::Float32
     w_max::Float32
+    sigma_shocks::Union{Nothing,Float64}
 end
 
 struct TrainingResult
@@ -37,11 +38,13 @@ function solver_settings(opts; has_shocks::Bool = false)
     patience = max(Int(get_option(opts, :patience, 200)), 0)
     hid1 = max(Int(get_option(opts, :hid1, 128)), 1)
     hid2 = max(Int(get_option(opts, :hid2, 128)), 1)
-    objective = Symbol(get_option(opts, :objective, :euler))
-    # clamp v_h to recommended range [0.5, 2.0] for stability and balancing
-    v_h = clamp(Float64(get_option(opts, :v_h, 1.0)), 0.5, 2.0)
+    objective = Symbol(get_option(opts, :objective, :euler_fb_aio))
+    # clamp v_h to a broader safe range [0.2, 5.0] to allow more tuning flexibility
+    v_h = clamp(Float64(get_option(opts, :v_h, 0.5)), 0.2, 5.0)
     w_min = Float32(get_option(opts, :w_min, 0.1))
     w_max = Float32(get_option(opts, :w_max, 4.0))
+    sigma_shocks = get_option(opts, :sigma_shocks, nothing)
+
     return NNSolverSettings(
         epochs,
         batch_choice,
@@ -56,6 +59,7 @@ function solver_settings(opts; has_shocks::Bool = false)
         v_h,
         w_min,
         w_max,
+        sigma_shocks,
     )
 end
 
