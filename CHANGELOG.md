@@ -1,6 +1,13 @@
-## [Unreleased]
 
-### Added
+## [0.6.0] - 2025-09-24
+### Bugfixes & Improvements
+- Robust test isolation for NN kernel: dependency injection for diagnostics, no global method overwrites.
+- Fixed test failures when running kernel tests individually vs. full suite.
+- Updated test harness to avoid method table issues and ensure reliable stubbing.
+- No impact on core logic or performance; all changes are test-only or optional arguments.
+- Minor: fixed zeroing of Lux parameter/state NamedTuples for compatibility.
+
+### Added (since 0.5.0)
 - Consolidated the neural-network kernel test harness, covering the dual-head Lux model, Fischer–Burmeister loss, stochastic diagnostics, and adapter plumbing with lightweight fixtures.
 - Extended mixed-precision utilities and preprocessing helpers with targeted unit tests, bringing overall project coverage above 90%.
 

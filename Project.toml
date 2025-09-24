@@ -1,7 +1,7 @@
 name = "ThesisProject"
 uuid = "858fd8f9-c2bb-462a-9462-edbfec3d0185"
 authors = ["Matthieu Grenier <matthieu.grenier@ensae.fr>"]
-version = "0.5.0"
+version = "0.6.0"
 
 [deps]
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
