@@ -119,10 +119,15 @@ function build_options_summary(settings, training_result, runtime)
 end
 
 function solve_nn(model; opts = nothing)
-    P, G, S, _ = get_params(model), get_grids(model), get_shocks(model), get_utility(model)
+    P, G, S, U = get_params(model), get_grids(model), get_shocks(model), get_utility(model)
     start_time = time_ns()
     scaler = FeatureScaler(G, S)
     settings = solver_settings(opts; has_shocks = scaler.has_shocks)
+
+    # Utility hooks from the model's utility object
+    uprime = U.u_prime
+    uprime_inv = U.u_prime_inv
+    σ_crra = U.σ
     # -- model: shared trunk + two heads (phi in (0,1), h > 0)
     function build_dual_head_network(input_dim::Int, hidden::NTuple{2,Int})
         using Lux
