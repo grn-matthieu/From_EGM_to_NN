@@ -7,7 +7,7 @@ in dedicated helpers so that this file focuses on the solver flow.
 """
 module NNKernel
 
-using ..API: get_params, get_grids, get_shocks, get_utility
+using ..API: get_grids, get_shocks, get_utility
 using ..CommonInterp: InterpKind, LinearInterp
 using ..DataNN: generate_dataset
 using ..EulerResiduals: euler_resid_det_grid, euler_resid_stoch_grid
@@ -179,3 +179,79 @@ function solve_nn(model; opts = nothing)
 end
 
 end # module
+
+
+# Fischer–Burmeister (Eq. 25)
+@inline fb(a, h) = a + h .- sqrt.(a .^ 2 .+ h .^ 2)  # zero iff a≥0, h≥0, a*h=0
+
+function loss_euler_fb_aio!(chain, ps, st, batch, model_cfg, rng)
+    # unpack model + params
+    P = model_cfg.P                      # β, r, ρ, σ, etc.
+    uprime = model_cfg.U.u_prime
+
+    # inputs
+    a0 = @view batch[1, :]               # assets or any internal state you used
+    if size(batch, 1) == 2
+        y0 = @view batch[2, :]
+    else
+        y0 = zeros(eltype(batch), size(batch, 2))
+    end
+
+    # forward pass
+    out, st1 = Lux.apply(chain, batch, ps, st)
+    ϕ = vec(out[:Φ])                     # ensure vector
+    h = vec(out[:h])                     # ensure vector
+
+    # cash-on-hand and consumption — assume fields exist on P (use Greek letters)
+    R = P.r
+    β = P.β
+    w0 = @. R * a0 + exp(y0)
+    c0 = clamp.(ϕ .* w0, eps(eltype(batch)), Inf)
+    a_term = @. 1 - c0 / w0              # a = 1 - c/w
+
+    # shocks for AiO
+    ε1 = randn!(rng, similar(y0))
+    ε2 = randn!(rng, similar(y0))
+    rho = P.ρ
+    sigma = P.σ
+    y1 = @. rho * y0 + sigma * ε1
+    y2 = @. rho * y0 + sigma * ε2
+
+    # transitions
+    w1 = @. R * (w0 - c0) + exp(y1)
+    w2 = @. R * (w0 - c0) + exp(y2)
+
+    # next-period consumption via NN
+    # Use the same feature mapping as the training pipeline: if inputs were
+    # (a, z) we used X = vcat(w - w0 + a, y); if inputs are (w,y) use vcat(w1, y1)
+    if size(batch, 1) == 2
+        X1 = vcat(w1 .- w0 .+ a0, y1)
+        X2 = vcat(w2 .- w0 .+ a0, y2)
+    else
+        X1 = vcat(w1, y1)
+        X2 = vcat(w2, y2)
+    end
+    out1, _ = Lux.apply(chain, X1, ps, st1)  # re-use st1 for determinism
+    out2, _ = Lux.apply(chain, X2, ps, st1)
+
+    c1 = clamp.(vec(out1[:Φ]) .* w1, eps(eltype(batch)), Inf)
+    c2 = clamp.(vec(out2[:Φ]) .* w2, eps(eltype(batch)), Inf)
+
+    # Euler pieces
+    q1 = @. β * R * uprime(c1) / uprime(c0)
+    q2 = @. β * R * uprime(c2) / uprime(c0)
+
+    # FB(KT) term uses 1 - h as the inequality residual proxy (Eq. 29)
+    fb_term = fb(a_term, @. 1 - h)
+    kt = @. fb_term^2
+
+    # AiO product (Eq. 30)
+    gh1 = @. q1 - h
+    gh2 = @. q2 - h
+    aio = gh1 .* gh2
+
+    # weight
+    v_h = hasproperty(model_cfg, :v_h) ? getfield(model_cfg, :v_h) : 1.0
+    loss_vec = kt .+ v_h .* aio
+    return mean(loss_vec), (st1, (; kt_mean = mean(kt), aio_mean = mean(aio)))
+end
