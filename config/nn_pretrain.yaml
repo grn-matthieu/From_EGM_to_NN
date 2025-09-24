@@ -28,6 +28,8 @@ solver:
   weight_κ: 20.0
   objective: euler_fb_aio
   v_h: 1.0
+  w_min: 0.1
+  w_max: 4.0
 
 random:
   seed: 42

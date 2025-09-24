@@ -10,6 +10,8 @@ struct NNSolverSettings
     has_shocks::Bool
     objective::Symbol
     v_h::Float64
+    w_min::Float32
+    w_max::Float32
 end
 
 struct TrainingResult
@@ -25,17 +27,21 @@ get_option(opts, key::Symbol, default) =
 
 function solver_settings(opts; has_shocks::Bool = false)
     epochs = max(Int(get_option(opts, :epochs, 1000)), 0)
-    batch_choice = get_option(opts, :batch, nothing)
+    batch_choice = get_option(opts, :batch, 64)
     batch_choice = isnothing(batch_choice) ? nothing : max(Int(batch_choice), 1)
-    learning_rate = Float64(get_option(opts, :lr, 1e-4))
+    learning_rate = Float64(get_option(opts, :lr, 1e-3))
     verbose = Bool(get_option(opts, :verbose, false))
-    resample_interval = max(Int(get_option(opts, :resample_every, 25)), 0)
+    # resample every epoch by default for stability
+    resample_interval = max(Int(get_option(opts, :resample_every, 1)), 0)
     target_loss = Float32(get_option(opts, :target_loss, 2e-4))
     patience = max(Int(get_option(opts, :patience, 200)), 0)
     hid1 = max(Int(get_option(opts, :hid1, 128)), 1)
     hid2 = max(Int(get_option(opts, :hid2, 128)), 1)
     objective = Symbol(get_option(opts, :objective, :euler))
-    v_h = Float64(get_option(opts, :v_h, 1.0))
+    # clamp v_h to recommended range [0.5, 2.0] for stability and balancing
+    v_h = clamp(Float64(get_option(opts, :v_h, 1.0)), 0.5, 2.0)
+    w_min = Float32(get_option(opts, :w_min, 0.1))
+    w_max = Float32(get_option(opts, :w_max, 4.0))
     return NNSolverSettings(
         epochs,
         batch_choice,
@@ -48,6 +54,8 @@ function solver_settings(opts; has_shocks::Bool = false)
         has_shocks,
         objective,
         v_h,
+        w_min,
+        w_max,
     )
 end
 
@@ -145,10 +153,14 @@ function build_loss_function(
             end
 
             c_pred = Φ_row .* reshape(w, 1, :)
+            # avoid u'(0) by clamping consumption away from zero
+            c_pred = clamp.(c_pred, eps(eltype(X)), Inf)
         elseif prediction isa Tuple
             c_pred, st_out = prediction
+            c_pred = clamp.(c_pred, eps(eltype(X)), Inf)
         else
             c_pred = prediction
+            c_pred = clamp.(c_pred, eps(eltype(X)), Inf)
         end
 
         if isnothing(S)
@@ -231,8 +243,32 @@ function create_training_batch(
     mode = :full,
     nsamples::Int = 0,
     rng = Random.GLOBAL_RNG,
+    P_resid = nothing,
+    settings::Union{NNSolverSettings,Nothing} = nothing,
 )
+    # Generate raw dataset samples (rows = samples)
     X, _ = generate_dataset(G, S; mode = mode, nsamples = nsamples, rng = rng)
+
+    # If requested, filter the sampled rows so cash-on-hand w lies in [w_min, w_max]
+    if !(mode == :full) && P_resid !== nothing && settings !== nothing
+        # compute w for each sample row
+        if settings.has_shocks
+            a_samples = X[:, 1]
+            z_samples = X[:, 2]
+            w = cash_on_hand(a_samples, z_samples, P_resid, true)
+        else
+            a_samples = X[:, 1]
+            w = cash_on_hand(a_samples, 0.0f0, P_resid, false)
+        end
+        # mask rows whose w is within [w_min, w_max]
+        mask = map(x -> x >= settings.w_min && x <= settings.w_max, w)
+        if any(mask)
+            X = X[mask, :]
+        else
+            # no samples within the requested window: fall back to original X
+        end
+    end
+
     sample_count = size(X, 1)
     normalize_samples!(scaler, X)
     batch = prepare_training_batch(X)
@@ -287,7 +323,16 @@ function train_consumption_network!(
     train_state = Lux.Training.TrainState(chain, ps, st, opt)
     # build loss with scaler so we can compute cash-on-hand inside the loss
     loss_function = build_loss_function(P_resid, G, S, scaler, settings, model_cfg, rng)
-    batch, sample_count = create_training_batch(G, S, scaler)
+    batch, sample_count = create_training_batch(
+        G,
+        S,
+        scaler;
+        mode = :full,
+        nsamples = 0,
+        rng = Random.GLOBAL_RNG,
+        P_resid = P_resid,
+        settings = settings,
+    )
     total_samples = size(batch, 2)
     batch_size = compute_batch_size(total_samples, settings.batch_choice)
     # For stochastic problems we require predictions on the full grid
@@ -309,6 +354,8 @@ function train_consumption_network!(
                 mode = :rand,
                 nsamples = sample_count,
                 rng = rng,
+                P_resid = P_resid,
+                settings = settings,
             )
             total_samples = size(batch, 2)
             batch_size = compute_batch_size(total_samples, settings.batch_choice)
