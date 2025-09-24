@@ -73,7 +73,13 @@ huber_loss(x, δ) = abs(x) ≤ δ ? 0.5f0 * x * x : δ * (abs(x) - 0.5f0 * δ)
     return @. R * a + y
 end
 
-function build_loss_function(P_resid, G, S, scaler::FeatureScaler)
+function build_loss_function(
+    P_resid,
+    G,
+    S,
+    scaler::FeatureScaler,
+    settings::NNSolverSettings,
+)
     return function (model, ps, st, data)
         X = data[1]
         prediction = model(X, ps, st)
@@ -82,6 +88,7 @@ function build_loss_function(P_resid, G, S, scaler::FeatureScaler)
         # If the model returns the new NamedTuple (Φ, h), compute consumption c = Φ * w
         if prediction isa NamedTuple
             Φ = prediction[:Φ]
+            h_raw = prediction[:h]
 
             # Recover original (unnormalized) a and z from normalized input X
             a = ((X[1, :] .+ 1.0f0) ./ 2.0f0) .* scaler.a_range .+ scaler.a_min
@@ -93,13 +100,20 @@ function build_loss_function(P_resid, G, S, scaler::FeatureScaler)
 
             w = cash_on_hand(a, z, P_resid, scaler.has_shocks)
 
-            # Align shapes: Φ may be 1×N (row) or N×1 (column) — convert to a 1×N row
+            # Align shapes: Φ and h may be 1×N (row) or N×1 (column)
             if ndims(Φ) == 2 && size(Φ, 1) == 1
                 Φ_row = Φ
             elseif ndims(Φ) == 2 && size(Φ, 2) == 1
                 Φ_row = permutedims(Φ)
             else
                 Φ_row = reshape(vec(Φ), 1, :)
+            end
+            if ndims(h_raw) == 2 && size(h_raw, 1) == 1
+                h_row = h_raw
+            elseif ndims(h_raw) == 2 && size(h_raw, 2) == 1
+                h_row = permutedims(h_raw)
+            else
+                h_row = reshape(vec(h_raw), 1, :)
             end
 
             c_pred = Φ_row .* reshape(w, 1, :)
@@ -119,7 +133,40 @@ function build_loss_function(P_resid, G, S, scaler::FeatureScaler)
                 euler_resid_stoch_grid(P_resid, a_grid_f32, z_grid_f32, Pz_f32, c_pred_f32)
         end
         loss = mean(huber_loss.(resid, 1.0f0))
-        return loss, st_out, NamedTuple()
+
+        # Build diagnostics NamedTuple for minibatch (phi, h, a, z, w, c)
+        if prediction isa NamedTuple
+            diag = (;
+                phi = Φ_row,
+                h = h_row,
+                a = a,
+                z = settings.has_shocks ? z : nothing,
+                w = w,
+                c = c_pred,
+            )
+        else
+            # fallback diagnostics when model returned c directly
+            # compute a,z,w for diagnostics
+            a = ((X[1, :] .+ 1.0f0) ./ 2.0f0) .* scaler.a_range .+ scaler.a_min
+            if scaler.has_shocks
+                z = ((X[2, :] .+ 1.0f0) ./ 2.0f0) .* scaler.z_range .+ scaler.z_min
+            else
+                z = nothing
+            end
+            w =
+                scaler.has_shocks ? cash_on_hand(a, z, P_resid, scaler.has_shocks) :
+                cash_on_hand(a, 0.0f0, P_resid, false)
+            diag = (;
+                phi = nothing,
+                h = nothing,
+                a = a,
+                z = settings.has_shocks ? z : nothing,
+                w = w,
+                c = c_pred,
+            )
+        end
+
+        return loss, st_out, diag
     end
 end
 
@@ -205,7 +252,7 @@ function train_consumption_network!(
     opt = create_optimizer(settings)
     train_state = Lux.Training.TrainState(chain, ps, st, opt)
     # build loss with scaler so we can compute cash-on-hand inside the loss
-    loss_function = build_loss_function(P_resid, G, S, scaler)
+    loss_function = build_loss_function(P_resid, G, S, scaler, settings)
     batch, sample_count = create_training_batch(G, S, scaler)
     total_samples = size(batch, 2)
     batch_size = compute_batch_size(total_samples, settings.batch_choice)
