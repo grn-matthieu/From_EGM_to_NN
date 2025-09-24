@@ -150,8 +150,35 @@ function state_states(state)
 end
 
 function run_model(model, params, states, X)
+    # Expect the model to return a NamedTuple like (phi=..., h=...)
     output = params === nothing ? model(X) : model(X, params, states)
-    return output isa Tuple ? output[1] : output
+
+    # If model already returns a numeric prediction (backwards compatible), pass through
+    if !(output isa NamedTuple)
+        return output
+    end
+
+    # Adapter: compute predicted consumption `c` from Φ = c/w and input wealth `w`.
+    # Input `X` is expected in Lux format: features × samples (e.g., 1×N for deterministic,
+    # 2×N for stochastic where first row is asset a)
+    Φ = output[:Φ]
+    # Ensure Φ is an array with same shape as model heads (1×N or Nx1 depending on Lux)
+    # Extract wealth/scale w from X: assume first feature is asset/wealth
+    w = size(X, 1) >= 1 ? X[1, :] : ones(eltype(X), size(X, 2))
+
+    # Align shapes: Φ may be 1×N (row) or N×1 (column) — convert to a 1×N row
+    if ndims(Φ) == 2 && size(Φ, 1) == 1
+        Φ_row = Φ
+    elseif ndims(Φ) == 2 && size(Φ, 2) == 1
+        Φ_row = permutedims(Φ)
+    else
+        # fallback: try to vec and reshape to 1×N
+        Φ_row = reshape(vec(Φ), 1, :)
+    end
+
+    # Compute consumption c = Φ * w, result should be 1×N row vector to match previous c_pred
+    c_row = Φ_row .* reshape(w, 1, :)
+    return c_row
 end
 
 function train_consumption_network!(

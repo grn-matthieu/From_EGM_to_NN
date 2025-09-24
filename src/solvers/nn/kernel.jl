@@ -80,7 +80,22 @@ function solve_nn(model; opts = nothing)
     start_time = time_ns()
     settings = solver_settings(opts)
     scaler = FeatureScaler(G, S)
-    chain = build_network(input_dimension(S), settings)
+    # -- model: shared trunk + two heads (phi in (0,1), h > 0)
+    function build_dual_head_network(input_dim::Int, hidden::NTuple{2,Int})
+        using Lux
+        H1, H2 = hidden
+        trunk = Chain(Dense(input_dim, H1, leakyrelu), Dense(H1, H2, leakyrelu))
+        head_phi = Chain(Dense(H2, 1), x -> sigmoid.(x))      # Φ = c/w in (0,1)
+        head_h = Chain(Dense(H2, 1), x -> exp.(x))          # h = exp(·) > 0
+
+        # Wrap so forward returns (phi, h)
+        model = Chain(x -> trunk(x), x -> (Φ = head_phi(x), h = head_h(x)))
+        return model
+    end
+
+    input_dimension(S) = isnothing(S) ? 1 : 2
+
+    chain = build_dual_head_network(input_dimension(S), settings.hidden_sizes)
     P_resid = scalar_params(P)
     training_result = train_consumption_network!(chain, settings, scaler, P_resid, G, S)
     best_state = training_result.best_state
