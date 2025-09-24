@@ -84,6 +84,16 @@ EGM method options (from `src/methods/EGM.jl`):
 
 
 
+NN method options (from `src/methods/NN.jl` and `src/solvers/nn/`):
+
+- `solver.objective`: default `:euler_fb_aio`; `:euler` restores the legacy Euler residual loss.
+- `solver.v_h`: default `0.5`, clamped to `[0.2, 5.0]` for stability.
+- `solver.w_min`: default `0.1` – lower bound on cash-on-hand samples drawn for training.
+- `solver.w_max`: default `4.0` – upper bound on sampled cash-on-hand.
+- `solver.sigma_shocks`: optional override for the stochastic loss; falls back to the model parameter when omitted.
+
+
+
 EGM kernel internals (not user-configurable today; noted for completeness):
 
 - Relaxation `relax = 0.5`, patience `= 50`, small epsilon `≈ 1e-10` for progress detection
@@ -283,6 +293,37 @@ Common to all methods:
 - solver.method: enforce one of EGM, Projection, Perturbation (case-insensitive; symbol/string accepted).
 
 - Keep existing EGM-specific checks (interp_kind, warm_start) and add the above for Projection and Perturbation.
+
+---
+
+## Example: Neural-Network solver configuration
+
+Below is a copy-paste-ready YAML snippet showing the relevant `solver` options when using the neural-network (`NN`) method. These settings are the knobs used by the NN adapter and training loop (epochs, batch size, learning rate), the objective selection, and the sampling / shock override options.
+
+```yaml
+solver:
+  method: NN
+  epochs: 5000
+  batch: 64
+  lr: 1e-4
+  objective: euler_fb_aio
+  v_h: 0.5
+  w_min: 0.1
+  w_max: 4.0
+  sigma_shocks: 0.3
+  verbose: true
+```
+
+Field notes:
+- `method`: must be `NN` to select the neural-network solver adapter.
+- `epochs`, `batch`, `lr`: standard training hyperparameters (number of epochs, minibatch size, and learning rate).
+- `objective`: selects the loss used during training. `euler_fb_aio` selects the Fischer–Burmeister AiO objective implemented in the NN kernel.
+- `v_h`: relative weight applied to the AiO penalty term (tuning knob).
+- `w_min`, `w_max`: enforce a sampling window on cash-on-hand when drawing minibatches; training batches will be sampled so that `w ∈ [w_min, w_max]`.
+- `sigma_shocks`: optional override for the shock standard deviation used during training (if provided it will be used instead of the model's default shock std).
+- `verbose`: enables extra logging during training (includes periodic validation diagnostics such as `kt_mean`, `aio_mean`, `max_abs_q`).
+
+If you want early stopping or checkpointing for long runs, consider adding those options under `solver` and wiring them into the training loop (`train_consumption_network!`) — I can add examples if you'd like.
 
 
 

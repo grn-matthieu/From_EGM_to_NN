@@ -53,6 +53,29 @@ sol = solve(model, method, cfg)
   plot_euler_errors(sol)
   ```
 
+### Neural-network solver options
+
+The rebuilt NN kernel trains a dual-head Lux network that outputs the marginal propensity to consume (`Φ`) and the slackness variable (`h`). The default objective minimises the Fischer–Burmeister all-in-one loss. Key tuning knobs exposed through the configuration schema are:
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `solver.objective` | `:euler_fb_aio` (hybrid Fischer–Burmeister); set to `:euler` for the classic residual loss. | `:euler_fb_aio` |
+| `solver.v_h` | Penalty weight on the Gauss–Hermite complementarity term. Clamped to `[0.2, 5.0]`. | `0.5` |
+| `solver.w_min`, `solver.w_max` | Cash-on-hand window enforced by the rejection sampler that generates training data. Tightening the window focuses the NN on regions of economic interest. | `0.1`, `4.0` |
+| `solver.sigma_shocks` | Optional override of the shock standard deviation used in the stochastic loss; defaults to the model parameter. | `nothing` |
+
+All options are available through YAML configs, e.g.
+
+```yaml
+solver:
+  method: "NN"
+  epochs: 500
+  objective: "euler_fb_aio"
+  v_h: 0.75
+  w_min: 0.25
+  w_max: 6.0
+```
+
 ## Configuration Schema (YAML)
 
 | Key            | Required | Notes |
@@ -85,7 +108,7 @@ Because `NamedTuple`s are immutable, create experiment-specific overrides with `
 | Stochastic shocks                 | ✅  | ✅         | ⚠️ (linear)  | ✅             |
 | Handles kinks / non-smoothness    | ✅  | ✅         | ❌           | ✅             |
 | Automatic differentiation         | ❌  | ❌         | ⚠️ (manual)  | ✅ (Zygote)    |
-| Mixed-precision support           | ❌  | ❌         | ❌           | Deprecated     |
+| Mixed-precision support           | ❌  | ❌         | ❌           | ✅ (Float32 helpers) |
 | CSV logging built-in              | ❌  | ❌         | ❌           | ✅ (optional)  |
 
 ## Reproducibility
@@ -125,6 +148,12 @@ Install Aqua.jl and JET.jl for deeper hygiene/type checks:
 julia --project -e 'using Pkg; Pkg.add(["Aqua", "JET"])'
 ```
 
+To generate coverage reports (the suite now exceeds 90% statement coverage):
+
+```bash
+julia --project -e 'using Pkg; Pkg.test(coverage=true)'
+```
+
 ## Licensing & Citation
 
 This repository is released under the [MIT License](LICENSE). When using it in academic work, please cite the thesis and the original numerical method references highlighted below.
@@ -133,7 +162,7 @@ This repository is released under the [MIT License](LICENSE). When using it in a
 
 - **Slow first load:** ensure you have Julia ≥1.11; precompile reduces latency after the first `using ThesisProject`.
 - **BLAS multithreading issues:** set `JULIA_NUM_THREADS` to the desired value or `1` for deterministic comparisons.
-- **Mixed precision:** explicit mixed-precision utilities have been removed from the public API. Use `NNUtils.to_fp32` to convert tensors back to Float32 where needed. If you require GPU mixed-precision kernels, extend `src/solvers/nn/` with project-specific implementations.
+- **Mixed precision:** neural-network helpers centralise Float32 conversions in `src/solvers/nn/mixed_precision.jl`. Downstream experiments can call these utilities when interoperating with GPU kernels or alternative libraries.
 
 Happy experimenting!
 

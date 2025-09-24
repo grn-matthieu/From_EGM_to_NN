@@ -7,6 +7,12 @@ struct NNSolverSettings
     target_loss::Float32
     patience::Int
     hidden_sizes::NTuple{2,Int}
+    has_shocks::Bool
+    objective::Symbol
+    v_h::Float64
+    w_min::Float32
+    w_max::Float32
+    sigma_shocks::Union{Nothing,Float64}
 end
 
 struct TrainingResult
@@ -20,17 +26,25 @@ end
 get_option(opts, key::Symbol, default) =
     opts === nothing ? default : (hasproperty(opts, key) ? getfield(opts, key) : default)
 
-function solver_settings(opts)
+function solver_settings(opts; has_shocks::Bool = false)
     epochs = max(Int(get_option(opts, :epochs, 1000)), 0)
-    batch_choice = get_option(opts, :batch, nothing)
+    batch_choice = get_option(opts, :batch, 64)
     batch_choice = isnothing(batch_choice) ? nothing : max(Int(batch_choice), 1)
-    learning_rate = Float64(get_option(opts, :lr, 1e-4))
+    learning_rate = Float64(get_option(opts, :lr, 1e-3))
     verbose = Bool(get_option(opts, :verbose, false))
-    resample_interval = max(Int(get_option(opts, :resample_every, 25)), 0)
+    # resample every epoch by default for stability
+    resample_interval = max(Int(get_option(opts, :resample_every, 1)), 0)
     target_loss = Float32(get_option(opts, :target_loss, 2e-4))
     patience = max(Int(get_option(opts, :patience, 200)), 0)
     hid1 = max(Int(get_option(opts, :hid1, 128)), 1)
     hid2 = max(Int(get_option(opts, :hid2, 128)), 1)
+    objective = Symbol(get_option(opts, :objective, :euler_fb_aio))
+    # clamp v_h to a broader safe range [0.2, 5.0] to allow more tuning flexibility
+    v_h = clamp(Float64(get_option(opts, :v_h, 0.5)), 0.2, 5.0)
+    w_min = Float32(get_option(opts, :w_min, 0.1))
+    w_max = Float32(get_option(opts, :w_max, 4.0))
+    sigma_shocks = get_option(opts, :sigma_shocks, nothing)
+
     return NNSolverSettings(
         epochs,
         batch_choice,
@@ -40,6 +54,12 @@ function solver_settings(opts)
         target_loss,
         patience,
         (hid1, hid2),
+        has_shocks,
+        objective,
+        v_h,
+        w_min,
+        w_max,
+        sigma_shocks,
     )
 end
 
@@ -49,7 +69,7 @@ function build_network(input_dim::Int, settings::NNSolverSettings)
 end
 
 create_optimizer(settings::NNSolverSettings) = Optimisers.OptimiserChain(
-    Optimisers.ClipGrad(0.1),
+    Optimisers.ClipGrad(0.02),
     Optimisers.Adam(settings.learning_rate),
 )
 
@@ -60,16 +80,93 @@ end
 
 huber_loss(x, δ) = abs(x) ≤ δ ? 0.5f0 * x * x : δ * (abs(x) - 0.5f0 * δ)
 
-function build_loss_function(P_resid, G, S)
+@inline function cash_on_hand(a, z, P, has_shocks::Bool)
+    R = 1.0f0 + Float32(P.r)
+    μ = Float32(P.y)                # log-mean income level
+    if has_shocks
+        inc = @. exp(μ + z)
+    else
+        inc = exp(μ)
+    end
+    return @. R * a + inc
+end
+
+function build_loss_function(
+    P_resid,
+    G,
+    S,
+    scaler::FeatureScaler,
+    settings::NNSolverSettings,
+    model_cfg = nothing,
+    rng = Random.GLOBAL_RNG,
+)
     return function (model, ps, st, data)
         X = data[1]
+
+        # If caller selected the FB AiO objective, delegate to the custom loss
+        if settings.objective == :euler_fb_aio
+            # loss_euler_fb_aio! returns (loss, (st1, aux_namedtuple))
+            loss_val, st_pack = loss_euler_fb_aio!(model, ps, st, X, model_cfg, rng)
+            st1, aux = st_pack
+            # package diagnostics: include FB aux diagnostics and leave phi/h fields empty
+            diag = (;
+                phi = nothing,
+                h = nothing,
+                a = nothing,
+                z = nothing,
+                w = nothing,
+                c = nothing,
+                fb = aux,
+            )
+            return loss_val, st1, diag
+        end
+
+        # Default Euler residual loss path (existing behaviour)
         prediction = model(X, ps, st)
-        if prediction isa Tuple
+        st_out = st
+
+        # If the model returns the new NamedTuple (Φ, h), compute consumption c = Φ * w
+        if prediction isa NamedTuple
+            Φ = prediction.Φ
+            h_raw = prediction.h
+
+            # Recover original (unnormalized) a and z from normalized input X
+            a = ((X[1, :] .+ 1.0f0) ./ 2.0f0) .* scaler.a_range .+ scaler.a_min
+            if scaler.has_shocks
+                z = ((X[2, :] .+ 1.0f0) ./ 2.0f0) .* scaler.z_range .+ scaler.z_min
+            else
+                z = zeros(eltype(a), size(a))
+            end
+
+            w = cash_on_hand(a, z, P_resid, scaler.has_shocks)
+
+            # Align shapes: Φ and h may be 1×N (row) or N×1 (column)
+            if ndims(Φ) == 2 && size(Φ, 1) == 1
+                Φ_row = Φ
+            elseif ndims(Φ) == 2 && size(Φ, 2) == 1
+                Φ_row = permutedims(Φ)
+            else
+                Φ_row = reshape(vec(Φ), 1, :)
+            end
+            if ndims(h_raw) == 2 && size(h_raw, 1) == 1
+                h_row = h_raw
+            elseif ndims(h_raw) == 2 && size(h_raw, 2) == 1
+                h_row = permutedims(h_raw)
+            else
+                h_row = reshape(vec(h_raw), 1, :)
+            end
+
+            c_pred = Φ_row .* reshape(w, 1, :)
+            # avoid u'(0) by clamping consumption away from zero
+            c_pred = clamp.(c_pred, eps(eltype(X)), Inf)
+        elseif prediction isa Tuple
             c_pred, st_out = prediction
+            c_pred = clamp.(c_pred, eps(eltype(X)), Inf)
         else
             c_pred = prediction
-            st_out = st
+            c_pred = clamp.(c_pred, eps(eltype(X)), Inf)
         end
+
         if isnothing(S)
             a_grid_f32, _, c_pred_vec_f32 = det_residual_inputs(c_pred, G)
             resid = euler_resid_det_grid(P_resid, a_grid_f32, c_pred_vec_f32)
@@ -80,7 +177,40 @@ function build_loss_function(P_resid, G, S)
                 euler_resid_stoch_grid(P_resid, a_grid_f32, z_grid_f32, Pz_f32, c_pred_f32)
         end
         loss = mean(huber_loss.(resid, 1.0f0))
-        return loss, st_out, NamedTuple()
+
+        # Build diagnostics NamedTuple for minibatch (phi, h, a, z, w, c)
+        if prediction isa NamedTuple
+            diag = (;
+                phi = Φ_row,
+                h = h_row,
+                a = a,
+                z = settings.has_shocks ? z : nothing,
+                w = w,
+                c = c_pred,
+            )
+        else
+            # fallback diagnostics when model returned c directly
+            # compute a,z,w for diagnostics
+            a = ((X[1, :] .+ 1.0f0) ./ 2.0f0) .* scaler.a_range .+ scaler.a_min
+            if scaler.has_shocks
+                z = ((X[2, :] .+ 1.0f0) ./ 2.0f0) .* scaler.z_range .+ scaler.z_min
+            else
+                z = nothing
+            end
+            w =
+                scaler.has_shocks ? cash_on_hand(a, z, P_resid, scaler.has_shocks) :
+                cash_on_hand(a, 0.0f0, P_resid, false)
+            diag = (;
+                phi = nothing,
+                h = nothing,
+                a = a,
+                z = settings.has_shocks ? z : nothing,
+                w = w,
+                c = c_pred,
+            )
+        end
+
+        return loss, st_out, diag
     end
 end
 
@@ -114,15 +244,67 @@ function create_training_batch(
     G,
     S,
     scaler::FeatureScaler;
-    mode = :full,
-    nsamples::Int = 0,
+    mode = :rand,
+    nsamples::Int = 4096,
     rng = Random.GLOBAL_RNG,
+    P_resid = nothing,
+    settings::Union{NNSolverSettings,Nothing} = nothing,
 )
-    X, _ = generate_dataset(G, S; mode = mode, nsamples = nsamples, rng = rng)
-    sample_count = size(X, 1)
+    want =
+        nsamples > 0 ? nsamples :
+        (isnothing(S) ? length(G[:a].grid) : length(G[:a].grid) * length(S.zgrid))
+
+    # deterministic full grid path unchanged
+    if mode == :full
+        X, _ = generate_dataset(G, S; mode = :full)
+        normalize_samples!(scaler, X)
+        return prepare_training_batch(X), size(X, 1)
+    end
+
+    @assert P_resid !== nothing && settings !== nothing
+    Rg = 1.0f0 + Float32(P_resid.r)
+    μ = Float32(P_resid.y)
+    a_min = Float32(G[:a].min)
+    a_max = Float32(G[:a].max)
+    z_min = scaler.z_min
+    z_max = scaler.z_min + scaler.z_range
+    w_lo = settings.w_min
+    w_hi = settings.w_max
+
+    A = Vector{Float32}(undef, want)
+    Z = settings.has_shocks ? Vector{Float32}(undef, want) : Float32[]
+    filled = 0
+    max_tries = 1000
+    tries = 0
+    while filled < want && tries < max_tries
+        # draw in bulk
+        m = max(want - filled, 4096)
+        a = rand(rng, Float32, m) .* (a_max - a_min) .+ a_min
+        z =
+            settings.has_shocks ? rand(rng, Float32, m) .* (z_max - z_min) .+ z_min :
+            fill(0.0f0, m)
+        # lognormal income
+        inc = @. exp(μ + z)
+        w = @. Rg * a + inc
+        keep = (w .>= w_lo) .& (w .<= w_hi)
+        k = count(keep)
+        if k > 0
+            idx = findall(keep)
+            take = min(k, want - filled)
+            A[filled+1:filled+take] .= a[idx[1:take]]
+            if settings.has_shocks
+                Z[filled+1:filled+take] .= z[idx[1:take]]
+            end
+            filled += take
+        end
+        tries += 1
+    end
+    @assert filled == want "Sampler could not hit the w-window; widen [w_min,w_max] or raise nsamples."
+
+    X = settings.has_shocks ? hcat(A, Z) : reshape(A, :, 1)
     normalize_samples!(scaler, X)
     batch = prepare_training_batch(X)
-    return batch, sample_count
+    return batch, want
 end
 
 function select_model(chain, state)
@@ -150,8 +332,12 @@ function state_states(state)
 end
 
 function run_model(model, params, states, X)
-    output = params === nothing ? model(X) : model(X, params, states)
-    return output isa Tuple ? output[1] : output
+    # Call the model (Lux may call with or without params/states). If the
+    # model returns a Tuple like `(prediction, state)` unwrap and return the
+    # prediction (first element) to maintain backwards compatibility with
+    # callers that expect the raw prediction array.
+    out = params === nothing ? model(X) : model(X, params, states)
+    return out isa Tuple ? out[1] : out
 end
 
 function train_consumption_network!(
@@ -161,14 +347,46 @@ function train_consumption_network!(
     P_resid,
     G,
     S,
+    model_cfg = nothing,
+    rng = Random.GLOBAL_RNG,
 )
     ps, st = Lux.setup(Random.GLOBAL_RNG, chain)
     opt = create_optimizer(settings)
     train_state = Lux.Training.TrainState(chain, ps, st, opt)
-    loss_function = build_loss_function(P_resid, G, S)
-    batch, sample_count = create_training_batch(G, S, scaler)
+    # build loss with scaler so we can compute cash-on-hand inside the loss
+    loss_function = build_loss_function(P_resid, G, S, scaler, settings, model_cfg, rng)
+    # use the strict rejection sampler to build an initial training pool large enough
+    init_nsamples =
+        min(settings.batch_choice === nothing ? 64 : settings.batch_choice, 4096)
+    batch, sample_count = create_training_batch(
+        G,
+        S,
+        scaler;
+        mode = :rand,
+        nsamples = init_nsamples,
+        rng = Random.GLOBAL_RNG,
+        P_resid = P_resid,
+        settings = settings,
+    )
+    # create a fixed validation batch for periodic diagnostics (held out)
+    val_nsamples = min(4096, sample_count)
+    val_batch, _ = create_training_batch(
+        G,
+        S,
+        scaler;
+        mode = :rand,
+        nsamples = val_nsamples,
+        rng = rng,
+        P_resid = P_resid,
+        settings = settings,
+    )
     total_samples = size(batch, 2)
     batch_size = compute_batch_size(total_samples, settings.batch_choice)
+    # For stochastic problems we require predictions on the full grid
+    # (Na * Nz) so force full-batch training when shocks are present.
+    if !isnothing(S) && batch_size < total_samples
+        batch_size = total_samples
+    end
     batches_per_epoch = cld(total_samples, batch_size)
     best_state = train_state
     best_loss = Inf
@@ -183,9 +401,15 @@ function train_consumption_network!(
                 mode = :rand,
                 nsamples = sample_count,
                 rng = rng,
+                P_resid = P_resid,
+                settings = settings,
             )
             total_samples = size(batch, 2)
             batch_size = compute_batch_size(total_samples, settings.batch_choice)
+            # same rule: force full-batch when stochastic
+            if !isnothing(S) && batch_size < total_samples
+                batch_size = total_samples
+            end
             batches_per_epoch = cld(total_samples, batch_size)
         end
         shuffled = batch[:, randperm(rng, total_samples)]
@@ -220,6 +444,43 @@ function train_consumption_network!(
         end
         if settings.verbose && (epoch % 10 == 0 || epoch == settings.epochs)
             @printf "Epoch: %3d \t Loss: %.5g \t GradNorm: %.5g\n" epoch average_loss gradient_norm
+        end
+        # periodic validation logging every 100 epochs
+        if settings.verbose && epoch % 100 == 0
+            try
+                # loss_function returns (loss, st_out, diag) for the outer training API
+                val_loss, val_st, val_diag = loss_function(
+                    select_model(chain, train_state),
+                    state_parameters(train_state),
+                    state_states(train_state),
+                    (val_batch,),
+                )
+                if :fb in keys(val_diag)
+                    aux = val_diag.fb
+                    try
+                        @printf(
+                            "[VAL] Epoch %4d: kt_mean=%.6g aio_mean=%.6g max_abs_q=%.6g\n",
+                            epoch,
+                            aux.kt_mean,
+                            aux.aio_mean,
+                            aux.max_abs_q
+                        )
+                    catch
+                        @printf(
+                            "[VAL] Epoch %4d: diagnostics present but failed to print (missing fields)\n",
+                            epoch
+                        )
+                    end
+                else
+                    @printf(
+                        "[VAL] Epoch %4d: validation loss=%.6g (no FB diagnostics)\n",
+                        epoch,
+                        val_loss
+                    )
+                end
+            catch err
+                @warn "Validation logging failed" error = err
+            end
         end
         if best_loss ≤ settings.target_loss && stall_epochs ≥ settings.patience
             return TrainingResult(

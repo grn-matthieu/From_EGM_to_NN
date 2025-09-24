@@ -21,6 +21,14 @@ include("../../../src/solvers/nn/mixed_precision.jl")
     @test size(Xprep) == (3, 2)
     @test Xprep[1, :] == Float32[1, 4]
 
+    # extract_consumption handles NamedTuple and Tuple outputs (dual-head model)
+    named_pred = (Φ = Float32[0.2 0.3], h = Float32[1.0 1.1])
+    @test extract_consumption(named_pred) === named_pred.Φ
+    tuple_pred = (named_pred, :state)
+    @test extract_consumption(tuple_pred) === named_pred.Φ
+    plain_pred = Float32[0.4, 0.5]
+    @test extract_consumption(plain_pred) === plain_pred
+
     # -- det_residual_inputs
     G = Dict(:a => (grid = [0.0, 1.0, 2.0],))
     c_pred = [10.0 20.0 30.0]   # row vector
@@ -47,6 +55,16 @@ include("../../../src/solvers/nn/mixed_precision.jl")
     @test P_f32 == Float32.(S.Π)
     @test size(c_mat) == (3, 2)
     @test c_mat2 == Float32.(c_mat)
+
+    # when only Na entries are returned tile across shocks
+    c_assets_only = Float32[10, 20, 30]
+    _, _, _, c_tiled, _ = stoch_residual_inputs(c_assets_only, G, S)
+    @test c_tiled == Float32[10 10; 20 20; 30 30]
+
+    # when only Nz entries are returned tile across assets
+    c_shock_only = Float32[5, 7]
+    _, _, _, c_tiled2, _ = stoch_residual_inputs(c_shock_only, G, S)
+    @test c_tiled2 == Float32[5 7; 5 7; 5 7]
 
     # stoch_loss
     resid2 = [-1.0, 2.0, -2.0]

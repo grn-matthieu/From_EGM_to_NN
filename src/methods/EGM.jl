@@ -220,7 +220,14 @@ function solve(
         runtime = sol.opts.runtime,
     )
 
-    return Solution(policy, value, diagnostics, metadata, model, method)
+    return Solution(
+        policy = policy,
+        value = value,
+        diagnostics = diagnostics,
+        metadata = metadata,
+        model = model,
+        method = method,
+    )
 end
 
 end # module

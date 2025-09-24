@@ -43,17 +43,25 @@ function normalize_feature_batch!(scaler::FeatureScaler, X)
     return X
 end
 
+function normalize_feature_batch(s::FeatureScaler, X::AbstractMatrix)
+    a1 = @. 2.0f0 * (X[1, :] - s.a_min) / s.a_range - 1.0f0
+    if s.has_shocks
+        z1 = @. 2.0f0 * (X[2, :] - s.z_min) / s.z_range - 1.0f0
+        return vcat(reshape(a1, 1, :), reshape(z1, 1, :))
+    else
+        return reshape(a1, 1, :)
+    end
+end
+
 get_param(container, name::Symbol, default) = begin
     value = hasproperty(container, name) ? getfield(container, name) : default
     return value === nothing ? default : value
 end
 
 function scalar_params(P)
-    σ = Float64(get_param(P, :σ, 1.0))
-    β = Float64(get_param(P, :β, 0.95))
-    r = Float64(get_param(P, :r, 0.02))
-    y = Float64(get_param(P, :y, 1.0))
-    return ScalarParams(σ, β, r, y)
+    # Expect exact parameter names to be present in the config. Validation should
+    # be performed by the config/validation module; here we access fields directly.
+    return ScalarParams(Float64(P.σ), Float64(P.β), Float64(P.r), Float64(P.y))
 end
 
 function clamp_to_asset_bounds(values, grid_info)

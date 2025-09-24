@@ -2,12 +2,13 @@ using ThesisProject
 using ThesisProject.NNKernel:
     FeatureScaler,
     ScalarParams,
-    get_param,
-    scalar_params,
     clamp_to_asset_bounds,
+    get_param,
     input_dimension,
+    normalize_feature_batch,
+    normalize_feature_batch!,
     normalize_samples!,
-    normalize_feature_batch!
+    scalar_params
 
 @testset "ScalarParams basics" begin
     sp = ScalarParams(2.0, 0.9, 0.01, 3.0)
@@ -51,6 +52,13 @@ end
     normalize_feature_batch!(sc2, X2b)
     @test all(-1.0f0 .<= X2b[1, :] .<= 1.0f0)
     @test all(-1.0f0 .<= X2b[2, :] .<= 1.0f0)
+
+    # non-mutating helper mirrors the in-place behaviour and supports shockless grids
+    X2c = Float32[0.0 2.0; -1.0 1.0]
+    X2c_norm = normalize_feature_batch(sc2, X2c)
+    @test size(X2c_norm) == size(X2c)
+    @test all(-1.0f0 .<= X2c_norm[1, :] .<= 1.0f0)
+    @test all(-1.0f0 .<= X2c_norm[2, :] .<= 1.0f0)
 end
 
 
@@ -68,10 +76,8 @@ end
     sp = scalar_params(obj)
     @test sp == ScalarParams(2.0, 0.9, 0.01, 3.0)
 
-    # missing fields → defaults
-    obj2 = (;)
-    sp2 = scalar_params(obj2)
-    @test sp2 == ScalarParams(1.0, 0.95, 0.02, 1.0)
+    # missing fields → throw when accessed (guard against silent defaults)
+    @test_throws Exception scalar_params((;))
 end
 
 @testset "clamp_to_asset_bounds" begin

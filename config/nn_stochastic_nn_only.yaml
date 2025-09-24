@@ -27,8 +27,10 @@ utility:
 solver:
   method: "NN"
   epochs: 20
-  batch: 128
+  batch: 64
   lr: 1.0e-3
+  hid1: 64
+  hid2: 64
   projection_kind: "softplus"
   stabilize: true
   stab_method: "log1p_square"
@@ -36,6 +38,10 @@ solver:
   weight_α: 5.0
   weight_κ: 20.0
   pretrain: false
+  objective: euler_fb_aio
+  v_h: 1.0
+  w_min: 0.1
+  w_max: 4.0
 
 random:
   seed: 1234
