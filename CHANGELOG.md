@@ -1,6 +1,16 @@
 ## [Unreleased]
+
+No notable changes since `v0.5.0` was prepared. Add upcoming changes here before cutting a new release.
+
+## [0.5.0] - 2025-09-24
 ### Breaking
 - `load_config` now returns nested NamedTuples; downstream code must switch from `cfg[:key]` indexing to dot access (`cfg.key`).
+
+### Notable
+- Stability: core solver and public APIs considered stable for the `v0.5` line.
+- Refactor: reorganized and cleaned up core modules and test layout to simplify maintenance and future extensions.
+- NN solver: added a neural-network-based solver to experiment with learned policy/value approximations.
+- Tests: greatly improved test coverage across `analysis`, `methods`, and `solvers` with clearer smoke and unit harnesses.
 
 ## [0.4.0] - 2025-09-18
 - Cleanup: organized tests into folders and updated runtests includes.
