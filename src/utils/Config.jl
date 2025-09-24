@@ -218,7 +218,7 @@ function validate_config(cfg::NamedTuple)
                 (c0 isa AbstractVector && length(c0) == Na) ||
                     error("init.c length mismatch")
             end
-            all(>(0), c0) || error("init.c must be > 0")
+            all(x -> x > 0, c0) || error("init.c must be > 0")
         end
     end
 
