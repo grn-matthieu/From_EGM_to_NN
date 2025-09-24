@@ -6,7 +6,7 @@ using Random
 const NN = ThesisProject.NNKernel  # adjust if these funcs live under a submodule
 
 # ---- helpers for grids/shocks -------------------------------------------------
-make_G(a::AbstractVector) = Dict(:a => (grid = a,))
+make_G(a::AbstractVector) = Dict(:a => (grid = a, min = minimum(a), max = maximum(a)))
 make_S(z::AbstractVector) = (zgrid = Float32.(z),)
 
 # ---- solver_settings ----------------------------------------------------------
@@ -18,7 +18,7 @@ make_S(z::AbstractVector) = (zgrid = Float32.(z),)
     @test s.learning_rate ≈ 1e-3
     @test s.verbose == false
     @test s.resample_interval == 1
-    @test s.target_loss ≈ 2e-4f0
+    @test s.target_loss ≈ 2e-4 * 1.0f0
     @test s.patience == 200
     @test s.hidden_sizes == (128, 128)
     @test s.objective == :euler_fb_aio
@@ -278,7 +278,7 @@ end
     s_stoch = NN.solver_settings(
         (;
             epochs = 1,
-            batch = nothing,
+            batch = 2,
             lr = 1e-3,
             verbose = false,
             resample_every = 1,
@@ -298,7 +298,7 @@ end
         s_stoch,
         scaler_s,
         P_resid,
-        G,
+        G,  # Na
         S,
         nothing,
         Random.GLOBAL_RNG,

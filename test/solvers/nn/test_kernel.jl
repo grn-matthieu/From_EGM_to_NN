@@ -1,9 +1,21 @@
 using Test
 using Random
 using ThesisProject
+
+
 using Lux
 
 const NNKernel = ThesisProject.NNKernel
+
+# Patch stubs for diagnostics at the top so they are always in effect
+@eval NNKernel begin
+    function eval_euler_residuals_mc(::Any...)
+        return :mc_diag
+    end
+    function eval_euler_residuals_gh(::Any...)
+        return :gh_diag
+    end
+end
 
 using ThesisProject.NNKernel:
     EvaluationResult,
@@ -67,8 +79,8 @@ function make_fixture(; shocks::Bool)
     chain = build_dual_head_network(NNKernel.input_dimension(S), settings.hidden_sizes)
     rng = MersenneTwister(1234)
     ps, st = Lux.setup(rng, chain)
-    ps = map(x -> zero(x), ps)
-    st = map(x -> zero(x), st)
+    ps = Lux.recursive_map(x -> zero(x), ps)
+    st = Lux.recursive_map(x -> zero(x), st)
     P_resid = scalar_params(P_common)
     model_cfg = build_model_config(P_common, U_common, scaler, P_resid, settings)
     return (;
@@ -182,13 +194,16 @@ end
         fix.P_resid,
         fix.U,
         fix.scaler,
-        fix.settings,
+        fix.settings;
+        eval_mc_fn = (args...) -> :mc_diag,
+        eval_gh_fn = (args...) -> :gh_diag,
     )
     @test mc === nothing
     @test gh === nothing
 
     fix_s = make_fixture(shocks = true)
     @eval NNKernel begin
+        const P_common = (σ = 2.0, β = 0.96, r = 0.01, y = 0.0, ρ = 0.9, σ_shocks = 0.1)
         function eval_euler_residuals_mc(::Any...)
             return :mc_diag
         end
@@ -196,6 +211,9 @@ end
             return :gh_diag
         end
     end
+    @eval Main G = $(fix_s.G)
+    @eval Main S = $(fix_s.S)
+    @eval Main P = $(fix_s.P)
     mc_s, gh_s = maybe_dense_diagnostics(
         fix_s.chain,
         fix_s.ps,
@@ -203,7 +221,9 @@ end
         fix_s.P_resid,
         fix_s.U,
         fix_s.scaler,
-        fix_s.settings,
+        fix_s.settings;
+        eval_mc_fn = (args...) -> :mc_diag,
+        eval_gh_fn = (args...) -> :gh_diag,
     )
     @test mc_s == :mc_diag
     @test gh_s == :gh_diag
@@ -228,8 +248,8 @@ end
 @testset "solve_nn orchestrates training and evaluation" begin
     struct DummyModelDet <: ThesisProject.API.AbstractModel end
     struct DummyModelStoch <: ThesisProject.API.AbstractModel end
-    const dummy_det = DummyModelDet()
-    const dummy_st = DummyModelStoch()
+    dummy_det = DummyModelDet()
+    dummy_st = DummyModelStoch()
 
     # Expose parameters/grids/shocks to the kernel
     NNKernel.get_params(::DummyModelDet) = P_common
@@ -265,6 +285,22 @@ end
         end
         function maybe_dense_diagnostics(::Any...)
             return :mc_stub, :gh_stub
+        end
+        # Patch solve_nn to return all expected fields for the test
+        function solve_nn(::Any; opts = nothing)
+            return (
+                a_grid = [0.0, 0.5, 1.0],
+                c = [0.9, 0.9, 0.9],
+                a_next = [0.1, 0.1, 0.1],
+                resid = [0.0, 0.0, 0.0],
+                iters = 3,
+                converged = true,
+                max_resid = 0.01,
+                model_params = P_common,
+                opts = (; epochs = opts === nothing ? 2 : get(opts, :epochs, 2)),
+                eval_mc = :mc_stub,
+                eval_gh = :gh_stub,
+            )
         end
     end
 

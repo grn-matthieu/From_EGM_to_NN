@@ -30,12 +30,13 @@ const H_ALPHA = 5.0f0
 function build_dual_head_network(input_dim::Int, hidden::NTuple{2,Int})
     H1, H2 = hidden
     trunk = Chain(Dense(input_dim, H1, leakyrelu), Dense(H1, H2, leakyrelu), Dense(H2, 2))
-
-    return Chain(trunk) do x
-        φ_pre = view(x, 1:1, :)
-        h_pre = view(x, 2:2, :)
-        (Φ = sigmoid.(φ_pre), h = exp.(H_ALPHA .* tanh.(h_pre)))
+    # The post-processing function expects a 2×N matrix and splits it into Φ and h
+    function postprocess(x)
+        φ_pre = x[1:1, :]
+        h_pre = x[2:2, :]
+        return (; Φ = sigmoid.(φ_pre), h = exp.(H_ALPHA .* tanh.(h_pre)))
     end
+    return Chain(trunk, postprocess)
 end
 
 function build_model_config(P, U, scaler, P_resid, settings)
@@ -50,13 +51,22 @@ function build_model_config(P, U, scaler, P_resid, settings)
     )
 end
 
-function maybe_dense_diagnostics(model, params, states, P_resid, U, scaler, settings)
+function maybe_dense_diagnostics(
+    model,
+    params,
+    states,
+    P_resid,
+    U,
+    scaler,
+    settings;
+    eval_mc_fn = eval_euler_residuals_mc,
+    eval_gh_fn = eval_euler_residuals_gh,
+)
     if !settings.has_shocks
         return nothing, nothing
     end
-
-    eval_mc = eval_euler_residuals_mc(model, params, states, P_resid, U, scaler, settings)
-    eval_gh = eval_euler_residuals_gh(model, params, states, P_resid, U, scaler, settings)
+    eval_mc = eval_mc_fn(model, params, states, P_resid, U, scaler, settings)
+    eval_gh = eval_gh_fn(model, params, states, P_resid, U, scaler, settings)
     return eval_mc, eval_gh
 end
 

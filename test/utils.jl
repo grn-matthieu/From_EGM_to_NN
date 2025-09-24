@@ -128,3 +128,5 @@ function is_nondec(x::AbstractMatrix; tol = 1e-8)
     end
     return true
 end
+
+Base.zero(x::NamedTuple) = map(zero, x)

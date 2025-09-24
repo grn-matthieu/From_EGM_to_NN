@@ -24,9 +24,10 @@ Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 
 [weakdeps]
 Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
+StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 
 [extensions]
-ThesisProjectPlotsExt = ["Plots"]
+ThesisProjectPlotsExt = ["Plots", "StatsBase"]
 
 [compat]
 CUDA = "5.8.3"
@@ -37,10 +38,11 @@ JSON3 = "1"
 Lux = "1.21"
 Optimisers = "0.4"
 Plots = "1"
-PrecompileTools = "1"
+PrecompileTools = "1.2.1"
 SHA = "0.7"
 SpecialFunctions = "2"
 StableRNGs = "1"
+StatsBase = "0.34.6"
 YAML = "0.4"
 Zygote = "0.7"
 julia = "1.11"
@@ -49,7 +51,8 @@ julia = "1.11"
 Coverage = "a2441757-f6aa-5fb2-8edb-039e3f45d037"
 Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
 Revise = "295af30f-e4ad-537b-8983-00126c2a3abe"
+StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Test", "Plots", "Coverage"]
+test = ["Test", "Plots", "Coverage", "StatsBase"]

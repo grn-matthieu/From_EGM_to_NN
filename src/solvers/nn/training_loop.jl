@@ -127,8 +127,8 @@ function build_loss_function(
 
         # If the model returns the new NamedTuple (Φ, h), compute consumption c = Φ * w
         if prediction isa NamedTuple
-            Φ = prediction[:Φ]
-            h_raw = prediction[:h]
+            Φ = prediction.Φ
+            h_raw = prediction.h
 
             # Recover original (unnormalized) a and z from normalized input X
             a = ((X[1, :] .+ 1.0f0) ./ 2.0f0) .* scaler.a_range .+ scaler.a_min
@@ -357,7 +357,7 @@ function train_consumption_network!(
     loss_function = build_loss_function(P_resid, G, S, scaler, settings, model_cfg, rng)
     # use the strict rejection sampler to build an initial training pool large enough
     init_nsamples =
-        max(settings.batch_choice === nothing ? 64 : settings.batch_choice, 64) * 128
+        min(settings.batch_choice === nothing ? 64 : settings.batch_choice, 4096)
     batch, sample_count = create_training_batch(
         G,
         S,
