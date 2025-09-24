@@ -7,6 +7,7 @@ struct NNSolverSettings
     target_loss::Float32
     patience::Int
     hidden_sizes::NTuple{2,Int}
+    has_shocks::Bool
 end
 
 struct TrainingResult
@@ -20,7 +21,7 @@ end
 get_option(opts, key::Symbol, default) =
     opts === nothing ? default : (hasproperty(opts, key) ? getfield(opts, key) : default)
 
-function solver_settings(opts)
+function solver_settings(opts; has_shocks::Bool = false)
     epochs = max(Int(get_option(opts, :epochs, 1000)), 0)
     batch_choice = get_option(opts, :batch, nothing)
     batch_choice = isnothing(batch_choice) ? nothing : max(Int(batch_choice), 1)
@@ -40,6 +41,7 @@ function solver_settings(opts)
         target_loss,
         patience,
         (hid1, hid2),
+        has_shocks,
     )
 end
 
@@ -60,16 +62,53 @@ end
 
 huber_loss(x, δ) = abs(x) ≤ δ ? 0.5f0 * x * x : δ * (abs(x) - 0.5f0 * δ)
 
-function build_loss_function(P_resid, G, S)
+@inline function cash_on_hand(a, z, P, has_shocks::Bool)
+    R = 1.0f0 + Float32(P.r)
+    if has_shocks
+        # income from shock state; simple AR(1) level. Adjust if you use exp(z).
+        y = Float32(P.y) .+ z
+    else
+        y = Float32(P.y)
+    end
+    return @. R * a + y
+end
+
+function build_loss_function(P_resid, G, S, scaler::FeatureScaler)
     return function (model, ps, st, data)
         X = data[1]
         prediction = model(X, ps, st)
-        if prediction isa Tuple
+        st_out = st
+
+        # If the model returns the new NamedTuple (Φ, h), compute consumption c = Φ * w
+        if prediction isa NamedTuple
+            Φ = prediction[:Φ]
+
+            # Recover original (unnormalized) a and z from normalized input X
+            a = ((X[1, :] .+ 1.0f0) ./ 2.0f0) .* scaler.a_range .+ scaler.a_min
+            if scaler.has_shocks
+                z = ((X[2, :] .+ 1.0f0) ./ 2.0f0) .* scaler.z_range .+ scaler.z_min
+            else
+                z = zeros(eltype(a), size(a))
+            end
+
+            w = cash_on_hand(a, z, P_resid, scaler.has_shocks)
+
+            # Align shapes: Φ may be 1×N (row) or N×1 (column) — convert to a 1×N row
+            if ndims(Φ) == 2 && size(Φ, 1) == 1
+                Φ_row = Φ
+            elseif ndims(Φ) == 2 && size(Φ, 2) == 1
+                Φ_row = permutedims(Φ)
+            else
+                Φ_row = reshape(vec(Φ), 1, :)
+            end
+
+            c_pred = Φ_row .* reshape(w, 1, :)
+        elseif prediction isa Tuple
             c_pred, st_out = prediction
         else
             c_pred = prediction
-            st_out = st
         end
+
         if isnothing(S)
             a_grid_f32, _, c_pred_vec_f32 = det_residual_inputs(c_pred, G)
             resid = euler_resid_det_grid(P_resid, a_grid_f32, c_pred_vec_f32)
@@ -150,35 +189,8 @@ function state_states(state)
 end
 
 function run_model(model, params, states, X)
-    # Expect the model to return a NamedTuple like (phi=..., h=...)
-    output = params === nothing ? model(X) : model(X, params, states)
-
-    # If model already returns a numeric prediction (backwards compatible), pass through
-    if !(output isa NamedTuple)
-        return output
-    end
-
-    # Adapter: compute predicted consumption `c` from Φ = c/w and input wealth `w`.
-    # Input `X` is expected in Lux format: features × samples (e.g., 1×N for deterministic,
-    # 2×N for stochastic where first row is asset a)
-    Φ = output[:Φ]
-    # Ensure Φ is an array with same shape as model heads (1×N or Nx1 depending on Lux)
-    # Extract wealth/scale w from X: assume first feature is asset/wealth
-    w = size(X, 1) >= 1 ? X[1, :] : ones(eltype(X), size(X, 2))
-
-    # Align shapes: Φ may be 1×N (row) or N×1 (column) — convert to a 1×N row
-    if ndims(Φ) == 2 && size(Φ, 1) == 1
-        Φ_row = Φ
-    elseif ndims(Φ) == 2 && size(Φ, 2) == 1
-        Φ_row = permutedims(Φ)
-    else
-        # fallback: try to vec and reshape to 1×N
-        Φ_row = reshape(vec(Φ), 1, :)
-    end
-
-    # Compute consumption c = Φ * w, result should be 1×N row vector to match previous c_pred
-    c_row = Φ_row .* reshape(w, 1, :)
-    return c_row
+    # Return the model output directly (expect NamedTuple like (Φ=..., h=...)).
+    return params === nothing ? model(X) : model(X, params, states)
 end
 
 function train_consumption_network!(
@@ -192,7 +204,8 @@ function train_consumption_network!(
     ps, st = Lux.setup(Random.GLOBAL_RNG, chain)
     opt = create_optimizer(settings)
     train_state = Lux.Training.TrainState(chain, ps, st, opt)
-    loss_function = build_loss_function(P_resid, G, S)
+    # build loss with scaler so we can compute cash-on-hand inside the loss
+    loss_function = build_loss_function(P_resid, G, S, scaler)
     batch, sample_count = create_training_batch(G, S, scaler)
     total_samples = size(batch, 2)
     batch_size = compute_batch_size(total_samples, settings.batch_choice)
