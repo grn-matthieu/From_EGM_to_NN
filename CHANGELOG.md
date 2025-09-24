@@ -1,6 +1,12 @@
 ## [Unreleased]
 
-No notable changes since `v0.5.0` was prepared. Add upcoming changes here before cutting a new release.
+### Added
+- Consolidated the neural-network kernel test harness, covering the dual-head Lux model, Fischer–Burmeister loss, stochastic diagnostics, and adapter plumbing with lightweight fixtures.
+- Extended mixed-precision utilities and preprocessing helpers with targeted unit tests, bringing overall project coverage above 90%.
+
+### Documentation
+- Documented the new NN solver options (`objective`, `v_h`, `w_min`/`w_max`, `sigma_shocks`) in the README and configuration audit notes.
+- Highlighted the coverage workflow in the README and refreshed mixed-precision guidance.
 
 ## [0.5.0] - 2025-09-24
 ### Breaking

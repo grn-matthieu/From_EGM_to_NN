@@ -84,6 +84,16 @@ EGM method options (from `src/methods/EGM.jl`):
 
 
 
+NN method options (from `src/methods/NN.jl` and `src/solvers/nn/`):
+
+- `solver.objective`: default `:euler_fb_aio`; `:euler` restores the legacy Euler residual loss.
+- `solver.v_h`: default `0.5`, clamped to `[0.2, 5.0]` for stability.
+- `solver.w_min`: default `0.1` – lower bound on cash-on-hand samples drawn for training.
+- `solver.w_max`: default `4.0` – upper bound on sampled cash-on-hand.
+- `solver.sigma_shocks`: optional override for the stochastic loss; falls back to the model parameter when omitted.
+
+
+
 EGM kernel internals (not user-configurable today; noted for completeness):
 
 - Relaxation `relax = 0.5`, patience `= 50`, small epsilon `≈ 1e-10` for progress detection
