@@ -236,8 +236,12 @@ function state_states(state)
 end
 
 function run_model(model, params, states, X)
-    # Return the model output directly (expect NamedTuple like (Φ=..., h=...)).
-    return params === nothing ? model(X) : model(X, params, states)
+    # Call the model (Lux may call with or without params/states). If the
+    # model returns a Tuple like `(prediction, state)` unwrap and return the
+    # prediction (first element) to maintain backwards compatibility with
+    # callers that expect the raw prediction array.
+    out = params === nothing ? model(X) : model(X, params, states)
+    return out isa Tuple ? out[1] : out
 end
 
 function train_consumption_network!(

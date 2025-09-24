@@ -154,34 +154,39 @@ end
 
     P_resid = (r = 0.01f0, β = 0.95f0, σ = 2.0f0, y = 1.0f0)
 
-    # Deterministic
-    loss_det = NN.build_loss_function(P_resid, G, nothing)
-    model = (X, ps, st) -> (vec(X), st)
+    # Deterministic: new signature includes scaler and settings
+    scaler = NN.FeatureScaler(G, nothing)
+    settings = NN.solver_settings(nothing)
+    loss_det = NN.build_loss_function(P_resid, G, nothing, scaler, settings)
+    model = (X, ps, st) -> vec(X)
     ps = nothing
     st = nothing
     data = (reshape(Float32.(a), :, 1),)
     l1, st_out, meta = loss_det(model, ps, st, data)
     @test l1 isa Real
     @test st_out === nothing
-    @test meta === NamedTuple()
+    @test isa(meta, NamedTuple)
 
     # Stochastic
     z = [-0.7f0, 0.2f0]
     Π = Matrix{Float32}(I, length(z), length(z))
     S = (zgrid = Float32.(z), Π = Π)
-    loss_st = NN.build_loss_function(P_resid, G, S)
+    scaler_s = NN.FeatureScaler(G, S)
+    settings_s = NN.solver_settings((; hid1 = 4, hid2 = 4))
+    loss_st = NN.build_loss_function(P_resid, G, S, scaler_s, settings_s)
 
-    # Model should output (Na, Nz) consumption matrix
+    # Model should output (Na, Nz) consumption matrix (or NamedTuple with :Φ)
     Na, Nz = length(a), length(z)
-    model_stoch = (X, ps, st) -> (reshape(Float32.(1:Na*Nz), Na, Nz), st)
+    model_stoch = (X, ps, st) -> reshape(Float32.(1:Na*Nz), Na, Nz)
 
-    # Input batch doesn’t matter much as long as it has 2 features
+    # Input batch used by loss: features×samples; for stochastic full-grid we
+    # typically use Na*Nz samples with two features
     X_dummy = rand(Float32, Na * Nz, 2)
     data2 = (X_dummy,)
     l2, st_out2, meta2 = loss_st(model_stoch, ps, st, data2)
     @test l2 isa Real
     @test st_out2 === nothing
-    @test meta2 === NamedTuple()
+    @test isa(meta2, NamedTuple)
 end
 
 
@@ -227,6 +232,7 @@ end
     S = (zgrid = Float32.(z), Π = Π)
 
     net2 = NN.build_network(2, s)
+    # For stochastic problem training we expect full-batch; ensure call succeeds
     tr2 = NN.train_consumption_network!(net2, s, scaler, P_resid, G, S)
     @test tr2.batch_size ≥ 1
     @test tr2.batches_per_epoch ≥ 1
