@@ -10,7 +10,7 @@
     if has_plots
         cfg = deepcopy(SMOKE_CFG)
         model = build_model(cfg)
-        method = build_method(cfg)
+        method = build_method(cfg_patch(cfg, (:solver, :method) => "EGM"))
         sol = solve(model, method, cfg)
 
         @testset "plot_policy" begin

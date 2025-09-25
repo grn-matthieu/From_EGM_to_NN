@@ -12,6 +12,8 @@ using ThesisProject.EulerResiduals: euler_resid_det_grid, euler_resid_stoch
         (:solver, :orders) => [3],
         (:solver, :Nval) => 41,
     )
+    # Ensure deterministic shape: remove shocks so policy arrays are vectors
+    cfg_det = cfg_without(cfg_det, :shocks)
     model_det = build_model(cfg_det)
     method_det = build_method(cfg_det)
     sol_det = solve(model_det, method_det, cfg_det)

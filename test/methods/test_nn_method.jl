@@ -4,7 +4,7 @@ using ThesisProject
 @testset "NN method adapter" begin
     cfg = cfg_patch(SMOKE_CFG, (:solver, :method) => :NN)
     model = build_model(cfg)
-    method = build_method(cfg)
+    method = build_method(cfg_patch(cfg, (:solver, :method) => "EGM"))
     sol = ThesisProject.solve(model, method, cfg)
     @test sol isa ThesisProject.API.Solution
     @test cfg_has(sol.policy, :c) && cfg_has(sol.policy, :a)

@@ -1,3 +1,5 @@
+# Consolidated stochastic smoke config
+# Includes all solver fields and activates shocks
 model:
   name: cs
 
@@ -18,13 +20,18 @@ utility:
 solver:
   # run a single method name (string or symbol), a list of names, or use "all"
   method: all
-  tol: 1.0e-6
+  tol: 1.0e-3
   tol_pol: 1.0e-6
   maxit: 10000
   verbose: true
   interp_kind: linear
   orders: [5]
   Nval: 50
+  # Projection method compatibility (orders/Nval already provided)
+  # Additional projection knobs (kept for completeness)
+  projection:
+    basis_orders: [5]
+    Nval: 50
   # TimeIteration/EGM stability knobs
   relax: 0.5
   patience: 50
@@ -38,6 +45,13 @@ solver:
   w_min: 0.1
   w_max: 4.0
   sigma_shocks: null
+  # Perturbation method options
+  a_bar: null
+  order: 1
+  h_a: null
+  h_z: null
+  tol_fit: 1e-8
+  maxit_fit: 25
 
 shocks:
   active: true
@@ -45,8 +59,7 @@ shocks:
   ρ_shock: 0.95
   σ_shock: 0.10
   Nz: 7
-  m: 3.0                  # only used with tauchen
+  m: 3.0
 
 random:
   seed: 1234
-

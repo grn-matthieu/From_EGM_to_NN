@@ -101,7 +101,7 @@ include("viz/api.jl")      # visualization API stubs; enabled by Plots extension
 export plot_policy, plot_euler_errors
 
 @setup_workload begin
-    cfg_path = joinpath(@__DIR__, "..", "config", "smoke_config", "smoke_config.yaml")
+    cfg_path = joinpath(@__DIR__, "..", "config", "smoke_config", "smoke_cfg_det.yaml")
     if isfile(cfg_path)
         @compile_workload begin
             cfg = load_config(cfg_path)

@@ -12,9 +12,11 @@ Validated configs:
 
 - [OK] `config/simple_stochastic.yaml`
 
-- [OK] `config/smoke_config/smoke_config.yaml`
 
-- [OK] `config/smoke_config/smoke_config_stochastic.yaml`
+
+- [OK] `config/smoke_cfg_det.yaml`
+
+- [OK] `config/smoke_cfg_stoch.yaml`
 
 
 

@@ -33,7 +33,7 @@ ThesisProject
 ```julia
 using ThesisProject
 
-cfg = load_config("config/smoke_config/smoke_config.yaml")
+cfg = load_config("config/smoke_cfg_det.yaml")
 
 # load_config now returns a nested NamedTuple, so fields are dot-accessible
 @show cfg.model.name
@@ -91,7 +91,7 @@ solver:
 `load_config` returns a nested `NamedTuple` with symbol keys and runs validation, so configuration values are accessed via property syntax and invalid schemas fail early.
 
 ```julia
-cfg = load_config("config/smoke_config/smoke_config.yaml")
+cfg = load_config("config/smoke_cfg_det.yaml")
 cfg.params.β        # → 0.96
 cfg.grids.Na        # → 40
 cfg.solver.method   # → :EGM

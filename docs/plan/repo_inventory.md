@@ -48,8 +48,8 @@ This inventory lists files under `src/`, `scripts/`, `config/`, `test/`, and `ex
 
 - `config/simple_baseline.yaml`: Minimal deterministic baseline configuration.
 - `config/simple_stochastic.yaml`: Minimal stochastic configuration (with shocks).
-- `config/smoke_config/smoke_config.yaml`: CI smoke configuration (deterministic).
-- `config/smoke_config/smoke_config_stochastic.yaml`: CI smoke configuration (stochastic).
+- `config/smoke_cfg_det.yaml`: CI smoke configuration (deterministic).
+- `config/smoke_cfg_stoch.yaml`: CI smoke configuration (stochastic).
 
 ## test/
 

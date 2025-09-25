@@ -13,7 +13,7 @@ using ThesisProject.EulerResiduals: euler_resid_det_grid, euler_resid_stoch
         (:grids, :Na) => 20,
     )
     model = build_model(cfg)
-    method = build_method(cfg)
+    method = build_method(cfg_patch(cfg, (:solver, :method) => "Projection"))
     sol = solve(model, method, cfg)
     @test sol.metadata[:order] in cfg_get(cfg, :solver, :orders)
 
