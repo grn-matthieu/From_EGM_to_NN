@@ -124,11 +124,18 @@ function eval_euler_residuals_mc(
     settings;
     N = 8192,
     rng = Random.GLOBAL_RNG,
+    G = nothing,
+    S = nothing,
+    P = nothing,
 )
     @assert settings.has_shocks "MC eval is for stochastic spec"
+    @assert !(G === nothing) "eval_euler_residuals_mc requires G to be provided"
+    @assert !(S === nothing) "eval_euler_residuals_mc requires S to be provided"
+    @assert !(P === nothing) "eval_euler_residuals_mc requires P to be provided"
+
     batch, _ = create_training_batch(
-        getfield(Main, :G),
-        getfield(Main, :S),
+        G,
+        S,
         scaler;
         mode = :rand,
         nsamples = N,
@@ -145,7 +152,7 @@ function eval_euler_residuals_mc(
     c0 = vec(phi_to_consumption(out[:Φ], w0; min_c = 1.0f-3))
     h = vec(ensure_row(out[:h]))
 
-    P = getfield(Main, :P)
+    # use passed P when available (already resolved above)
     ρ = Float32(P.ρ)
     σϵ = Float32(P.σ_shocks)
     β = Float32(P.β)
@@ -219,11 +226,18 @@ function eval_euler_residuals_gh(
     settings;
     N = 4096,
     rng = Random.GLOBAL_RNG,
+    G = nothing,
+    S = nothing,
+    P = nothing,
 )
     @assert settings.has_shocks
+    @assert !(G === nothing) "eval_euler_residuals_gh requires G to be provided"
+    @assert !(S === nothing) "eval_euler_residuals_gh requires S to be provided"
+    @assert !(P === nothing) "eval_euler_residuals_gh requires P to be provided"
+
     batch, _ = create_training_batch(
-        getfield(Main, :G),
-        getfield(Main, :S),
+        G,
+        S,
         scaler;
         mode = :rand,
         nsamples = N,
@@ -238,7 +252,7 @@ function eval_euler_residuals_gh(
         phi_to_consumption(out[:Φ], cash_on_hand(a0, z0, P_resid, true); min_c = 1.0f-3),
     )
 
-    P = getfield(Main, :P)
+    # use passed P when available (already resolved above)
     ρ = Float32(P.ρ)
     σϵ = Float32(P.σ_shocks)
     β = Float32(P.β)

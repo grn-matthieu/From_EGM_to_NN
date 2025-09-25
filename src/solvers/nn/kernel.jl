@@ -59,15 +59,50 @@ function maybe_dense_diagnostics(
     U,
     scaler,
     settings;
-    eval_mc_fn = eval_euler_residuals_mc,
-    eval_gh_fn = eval_euler_residuals_gh,
+    eval_mc_fn = nothing,
+    eval_gh_fn = nothing,
+    G = nothing,
+    S = nothing,
+    P = nothing,
 )
     if !settings.has_shocks
         return nothing, nothing
     end
-    eval_mc = eval_mc_fn(model, params, states, P_resid, U, scaler, settings)
-    eval_gh = eval_gh_fn(model, params, states, P_resid, U, scaler, settings)
-    return eval_mc, eval_gh
+    # forward explicit grids/shocks/params when available to avoid relying on Main
+    # Resolve eval function bindings at call time so test patches to
+    # `NNKernel.eval_euler_residuals_mc`/`_gh` are respected. Tests may also
+    # pass explicit functions via kwargs.
+    fmc = eval_mc_fn === nothing ? eval_euler_residuals_mc : eval_mc_fn
+    fgh = eval_gh_fn === nothing ? eval_euler_residuals_gh : eval_gh_fn
+
+    # Prepare diagnostics variables and call the eval functions. Some tests or
+    # user code may have patched simple
+    # varargs versions that don't accept keyword args; try keyword call first
+    # and fall back to positional-only if that fails with MethodError.
+    mc_diag = nothing
+    gh_diag = nothing
+    try
+        mc_diag =
+            fmc(model, params, states, P_resid, U, scaler, settings; G = G, S = S, P = P)
+    catch err
+        if err isa MethodError
+            mc_diag = fmc(model, params, states, P_resid, U, scaler, settings)
+        else
+            rethrow()
+        end
+    end
+
+    try
+        gh_diag =
+            fgh(model, params, states, P_resid, U, scaler, settings; G = G, S = S, P = P)
+    catch err
+        if err isa MethodError
+            gh_diag = fgh(model, params, states, P_resid, U, scaler, settings)
+        else
+            rethrow()
+        end
+    end
+    return mc_diag, gh_diag
 end
 
 function build_options_summary(settings, training_result, runtime)
@@ -112,8 +147,18 @@ function solve_nn(model; opts = nothing)
     opts_summary = build_options_summary(settings, training_result, runtime)
     converged = training_result.best_loss ≤ settings.target_loss
 
-    eval_mc, eval_gh =
-        maybe_dense_diagnostics(trained_model, params, states, P_resid, U, scaler, settings)
+    eval_mc, eval_gh = maybe_dense_diagnostics(
+        trained_model,
+        params,
+        states,
+        P_resid,
+        U,
+        scaler,
+        settings;
+        G = G,
+        S = S,
+        P = P,
+    )
 
     return (;
         a_grid = G[:a].grid,
