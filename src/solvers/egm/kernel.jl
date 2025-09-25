@@ -76,17 +76,18 @@ function solve_egm_det_impl(
     a_max = model_grids[:a].max
     Na = model_grids[:a].N
 
-    βR = model_params.β * (1 + model_params.r)
-    R = (1 + model_params.r)
+    β = model_params.β
+    R = 1 + model_params.r
+    σ = model_params.σ
     cmin = 1e-12
 
-    # Initial guess for resources and consumption
+    # initial consumption on exogenous grid
     resources = @. R * a_grid - a_min + model_params.y
     c = c_init === nothing ? clamp.(0.5 .* resources, cmin, resources) : copy(c_init)
 
-    # Buffers
-    cnext = similar(c)
+    # buffers
     cnew = similar(c)
+    resid = similar(c)
     a_next = similar(c)
 
     converged = false
@@ -94,26 +95,53 @@ function solve_egm_det_impl(
     max_resid = Inf
     best_resid = Inf
     no_progress = 0
-    resid = similar(c)
 
     for it = 1:maxit
         iters = it
 
-        @. a_next = model_params.y + R * a_grid - c
-        @. a_next = clamp(a_next, a_min, a_max)
+        # --- EGM backsolve: map from a' grid to current a via Euler inversion ---
+        a_prime = a_grid
+        # consumption at a' (next period) is available on exogenous grid (c)
+        c_prime = copy(c)
+        @. c_prime = max(c_prime, cmin)
+        c_endo = similar(c_prime)
 
-        # Linear interpolation
-        interp_linear!(cnext, a_grid, c, a_next)
+        # compute current consumption from Euler: c = u_prime_inv(β R u'(c'))
+        @. c_endo = model_utility.u_prime_inv(β * R * c_prime .^ (-σ))
 
-        @. cnext = max(cnext, cmin)
+        # compute corresponding current assets a = (a' - y + c) / R
+        a_endo = (@. (a_prime - model_params.y + c_endo) / R)
 
-        @. cnew = model_utility.u_prime_inv(βR * cnext .^ (-model_params.σ))
+        # handle borrowing constraint: if computed a < a_min then set a = a_min and recompute c from budget constraint
+        @inbounds for i = 1:Na
+            if a_endo[i] < a_min
+                a_endo[i] = a_min
+                # budget: a' = R * a_min + y - c  => c = y + R*a_min - a'
+                c_endo[i] = clamp(model_params.y + R * a_min - a_prime[i], cmin, Inf)
+            end
+        end
+
+        # sort endogenous points by a_endo for interpolation
+        perm = sortperm(a_endo)
+        a_endo_s = a_endo[perm]
+        c_endo_s = c_endo[perm]
+
+        # interpolate from endogenous (a_endo_s, c_endo_s) to exogenous a_grid
+        interp_linear!(cnew, a_endo_s, c_endo_s, a_grid)
+
+        # clamp to feasible consumption
         cmax = @. model_params.y + R * a_grid - a_min
         @. cnew = clamp(cnew, cmin, cmax)
 
         Δpol = maximum(abs.(c - cnew))
-        c .= (1 - relax) .* c .+ relax .* cnew
+        @. c = (1 - relax) * c + relax * cnew
 
+        # compute Euler residuals for diagnostics (using standard a_next interpolation)
+        @. a_next = model_params.y + R * a_grid - c
+        @. a_next = clamp(a_next, a_min, a_max)
+        cnext = similar(c)
+        interp_linear!(cnext, a_grid, c, a_next)
+        @. cnext = max(cnext, cmin)
         euler_resid_det!(resid, model_params, c, cnext)
         max_resid = maximum(resid[min(2, end):end])
 
@@ -134,10 +162,10 @@ function solve_egm_det_impl(
         end
     end
 
-    # Final consistency
+    # Final consistency and diagnostics
     @. a_next = R * a_grid + model_params.y - c
     @. a_next = clamp(a_next, a_min, a_max)
-    # Final interpolation consistency (linear)
+    cnext = similar(c)
     interp_linear!(cnext, a_grid, c, a_next)
     @. cnext = max(cnext, cmin)
     euler_resid_det!(resid, model_params, c, cnext)
@@ -180,17 +208,18 @@ function solve_egm_det_impl(
     a_max = model_grids[:a].max
     Na = model_grids[:a].N
 
-    βR = model_params.β * (1 + model_params.r)
-    R = (1 + model_params.r)
+    β = model_params.β
+    R = 1 + model_params.r
+    σ = model_params.σ
     cmin = 1e-12
 
-    # Initial guess for resources and consumption
+    # initial consumption on exogenous grid
     resources = @. R * a_grid - a_min + model_params.y
     c = c_init === nothing ? clamp.(0.5 .* resources, cmin, resources) : copy(c_init)
 
-    # Buffers
-    cnext = similar(c)
+    # buffers
     cnew = similar(c)
+    resid = similar(c)
     a_next = similar(c)
 
     converged = false
@@ -198,24 +227,38 @@ function solve_egm_det_impl(
     max_resid = Inf
     best_resid = Inf
     no_progress = 0
-    resid = similar(c)
 
     for it = 1:maxit
         iters = it
 
-        @. a_next = model_params.y + R * a_grid - c
-        @. a_next = clamp(a_next, a_min, a_max)
+        # EGM backsolve with PCHIP interpolation on endogenous points
+        a_prime = a_grid
+        c_prime = copy(c)
+        @. c_prime = max(c_prime, cmin)
+        c_endo = similar(c_prime)
 
-        # Monotone cubic interpolation
-        interp_pchip!(cnext, a_grid, c, a_next)
+        @. c_endo = model_utility.u_prime_inv(β * R * c_prime .^ (-σ))
+        a_endo = (@. (a_prime - model_params.y + c_endo) / R)
 
-        @. cnext = max(cnext, cmin)
+        @inbounds for i = 1:Na
+            if a_endo[i] < a_min
+                a_endo[i] = a_min
+                c_endo[i] = clamp(model_params.y + R * a_min - a_prime[i], cmin, Inf)
+            end
+        end
 
-        @. cnew = model_utility.u_prime_inv(βR * cnext .^ (-model_params.σ))
+        # sort endogenous nodes
+        perm = sortperm(a_endo)
+        a_endo_s = a_endo[perm]
+        c_endo_s = c_endo[perm]
+
+        # PCHIP interpolation from endogenous (a_endo_s, c_endo_s) to exogenous a_grid
+        interp_pchip!(cnew, a_endo_s, c_endo_s, a_grid)
+
+        # enforce monotonicity and clamp
+        @. cnew = max(cnew, cmin)
         cmax = @. model_params.y + R * a_grid - a_min
         @. cnew = clamp(cnew, cmin, cmax)
-
-        # Monotone enforcement under PCHIP
         @inbounds for i = 2:Na
             if cnew[i] < cnew[i-1]
                 cnew[i] = cnew[i-1] + 1e-12
@@ -223,8 +266,14 @@ function solve_egm_det_impl(
         end
 
         Δpol = maximum(abs.(c - cnew))
-        c .= (1 - relax) .* c .+ relax .* cnew
+        @. c = (1 - relax) * c + relax * cnew
 
+        # diagnostics via Euler residuals
+        @. a_next = model_params.y + R * a_grid - c
+        @. a_next = clamp(a_next, a_min, a_max)
+        cnext = similar(c)
+        interp_pchip!(cnext, a_grid, c, a_next)
+        @. cnext = max(cnext, cmin)
         euler_resid_det!(resid, model_params, c, cnext)
         max_resid = maximum(resid[min(2, end):end])
 
@@ -248,7 +297,7 @@ function solve_egm_det_impl(
     # Final consistency
     @. a_next = R * a_grid + model_params.y - c
     @. a_next = clamp(a_next, a_min, a_max)
-    # Final interpolation consistency (PCHIP)
+    cnext = similar(c)
     interp_pchip!(cnext, a_grid, c, a_next)
     @. cnext = max(cnext, cmin)
     euler_resid_det!(resid, model_params, c, cnext)
@@ -329,7 +378,6 @@ function solve_egm_stoch_impl(
     patience::Int = 50,
     c_init = nothing,
 )::NamedTuple
-
     start_time = time_ns()
 
     a_grid = model_grids[:a].grid
@@ -353,36 +401,65 @@ function solve_egm_stoch_impl(
     no_progress = 0
 
     c = c_init === nothing ? fill(1.0, Na, Nz) : copy(c_init)
-    a_star = similar(c)
-    cnext = similar(a_grid)
     cnew = similar(c)
     a_next = similar(c)
-    EUprime = similar(a_grid)
     resid_mat = similar(c)
 
+    # EGM loop: for each current state j, backsolve on endogenous nodes a' = a_grid
     for it = 1:maxit
         iters = it
 
         for (j, z) in enumerate(z_grid)
             y = exp(z)
 
-            @. a_star[:, j] = R * a_grid + y - c[:, j]
-            @. a_star[:, j] = clamp(a_star[:, j], a_min, a_max)
-
-            fill!(EUprime, 0.0)
-            for (jp, _) in enumerate(z_grid)
-                # Linear interpolation across future states
-                interp_linear!(cnext, a_grid, view(c, :, jp), view(a_star, :, j))
-                @. cnext = max(cnext, cmin)
-                @. EUprime += Π[j, jp] * (cnext^(-σ))
+            # expectation of marginal utility at nodes a' (which are a_grid)
+            EUprime = zeros(eltype(c), Na)
+            for jp = 1:Nz
+                c_future = view(c, :, jp)
+                # accumulate expected marginal utility elementwise: Π[j,jp] * (c_future .^ (-σ))
+                @. EUprime += Π[j, jp] * (max(c_future, cmin)^(-σ))
             end
 
-            @. cnew[:, j] = ((β * R) * EUprime)^(-1 / σ)
+            # compute c on endogenous nodes (a' nodes) via Euler inversion
+            c_endo = similar(EUprime)
+            @. c_endo = model_utility.u_prime_inv(β * R * EUprime)
+
+            # implied current assets from budget: a = (a' - y + c_endo) / R
+            a_endo = (@. (a_grid - y + c_endo) / R)
+
+            # handle borrowing constraint: if a_endo < a_min set a_endo=a_min and recompute c_endo from budget
+            @inbounds for i = 1:Na
+                if a_endo[i] < a_min
+                    a_endo[i] = a_min
+                    c_endo[i] = clamp(y + R * a_min - a_grid[i], cmin, Inf)
+                end
+            end
+
+            # sort endogenous nodes for interpolation
+            perm = sortperm(a_endo)
+            a_endo_s = a_endo[perm]
+            c_endo_s = c_endo[perm]
+
+            # enforce non-decreasing consumption for interpolation stability
+            @inbounds for ii = 2:Na
+                if c_endo_s[ii] < c_endo_s[ii-1]
+                    c_endo_s[ii] = c_endo_s[ii-1] + 1e-12
+                end
+            end
+
+            # ensure strictly increasing a_endo_s for interpolation
+            @inbounds for ii = 2:Na
+                if a_endo_s[ii] <= a_endo_s[ii-1]
+                    a_endo_s[ii] = a_endo_s[ii-1] + 1e-12
+                end
+            end
+
+            # interpolate from endogenous nodes to exogenous a_grid
+            interp_linear!(view(cnew, :, j), a_endo_s, c_endo_s, a_grid)
+
+            # clamp to feasible consumption
             cmax = @. y + R * a_grid - a_min
             @. cnew[:, j] = clamp(cnew[:, j], cmin, cmax)
-
-            @. a_next[:, j] = R * a_grid + y - cnew[:, j]
-            @. a_next[:, j] = clamp(a_next[:, j], a_min, a_max)
         end
 
         Δpol = maximum(abs.(c - cnew))
@@ -407,6 +484,7 @@ function solve_egm_stoch_impl(
             break
         end
     end
+
     euler_resid_stoch!(resid_mat, model_params, a_grid, z_grid, Π, c)
 
     runtime = (time_ns() - start_time) / 1e9
@@ -451,7 +529,6 @@ function solve_egm_stoch_impl(
     patience::Int = 50,
     c_init = nothing,
 )::NamedTuple
-
     start_time = time_ns()
 
     a_grid = model_grids[:a].grid
@@ -475,11 +552,8 @@ function solve_egm_stoch_impl(
     no_progress = 0
 
     c = c_init === nothing ? fill(1.0, Na, Nz) : copy(c_init)
-    a_star = similar(c)
-    cnext = similar(a_grid)
     cnew = similar(c)
     a_next = similar(c)
-    EUprime = similar(a_grid)
     resid_mat = similar(c)
 
     for it = 1:maxit
@@ -488,23 +562,44 @@ function solve_egm_stoch_impl(
         for (j, z) in enumerate(z_grid)
             y = exp(z)
 
-            @. a_star[:, j] = R * a_grid + y - c[:, j]
-            @. a_star[:, j] = clamp(a_star[:, j], a_min, a_max)
-
-            fill!(EUprime, 0.0)
-            for (jp, _) in enumerate(z_grid)
-                # Monotone cubic interpolation across future states
-                interp_pchip!(cnext, a_grid, view(c, :, jp), view(a_star, :, j))
-                @. cnext = max(cnext, cmin)
-                @. EUprime += Π[j, jp] * (cnext^(-σ))
+            # compute expected marginal utility at a' nodes using future-state consumption
+            EUprime = zeros(eltype(c), Na)
+            for jp = 1:Nz
+                c_future = view(c, :, jp)
+                @. EUprime += Π[j, jp] * (max(c_future, cmin)^(-σ))
             end
 
-            @. cnew[:, j] = ((β * R) * EUprime)^(-1 / σ)
+            # compute c on endogenous nodes
+            c_endo = similar(EUprime)
+            @. c_endo = model_utility.u_prime_inv(β * R * EUprime)
+
+            a_endo = (@. (a_grid - y + c_endo) / R)
+
+            @inbounds for i = 1:Na
+                if a_endo[i] < a_min
+                    a_endo[i] = a_min
+                    c_endo[i] = clamp(y + R * a_min - a_grid[i], cmin, Inf)
+                end
+            end
+
+            perm = sortperm(a_endo)
+            a_endo_s = a_endo[perm]
+            c_endo_s = c_endo[perm]
+
+            # enforce monotonicity and strictly increasing a nodes for PCHIP
+            @inbounds for ii = 2:Na
+                if c_endo_s[ii] < c_endo_s[ii-1]
+                    c_endo_s[ii] = c_endo_s[ii-1] + 1e-12
+                end
+                if a_endo_s[ii] <= a_endo_s[ii-1]
+                    a_endo_s[ii] = a_endo_s[ii-1] + 1e-12
+                end
+            end
+
+            interp_pchip!(view(cnew, :, j), a_endo_s, c_endo_s, a_grid)
+
             cmax = @. y + R * a_grid - a_min
             @. cnew[:, j] = clamp(cnew[:, j], cmin, cmax)
-
-            @. a_next[:, j] = R * a_grid + y - cnew[:, j]
-            @. a_next[:, j] = clamp(a_next[:, j], a_min, a_max)
 
             @inbounds for i = 2:Na
                 if cnew[i, j] < cnew[i-1, j]
@@ -535,6 +630,7 @@ function solve_egm_stoch_impl(
             break
         end
     end
+
     euler_resid_stoch!(resid_mat, model_params, a_grid, z_grid, Π, c)
 
     runtime = (time_ns() - start_time) / 1e9
