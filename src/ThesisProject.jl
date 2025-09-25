@@ -41,6 +41,7 @@ include("solvers/projection/kernel.jl")
 # egm specific
 include("solvers/egm/kernel.jl")
 include("solvers/perturbation/kernel.jl")
+include("solvers/time_iteration/kernel.jl")
 
 # NN solver
 include("solvers/nn/data_nn.jl")
@@ -51,6 +52,7 @@ include("methods/EGM.jl")
 include("methods/Projection.jl")
 include("methods/Perturbation.jl")
 include("methods/NN.jl")
+include("methods/TimeIteration.jl")
 
 # 6) method factory
 include("core/method_factory.jl")

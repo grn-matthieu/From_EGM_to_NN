@@ -4,6 +4,7 @@ using ..EGM: build_egm_method
 using ..Perturbation: build_perturbation_method
 using ..Projection: build_projection_method
 using ..NN: build_nn_method
+using ..TimeIteration: build_timeiteration_method
 using ..UtilsConfig: maybe
 
 # NN method loaded conditionally in build_method to avoid load-order cycles
@@ -23,6 +24,8 @@ function build_method(cfg::NamedTuple)
         return build_perturbation_method(cfg)
     elseif method_sym == :NN
         return build_nn_method(cfg)
+    elseif method_sym == :TimeIteration || method_sym == :TI
+        return build_timeiteration_method(cfg)
     else
         error("Unknown method: $(method_name)")
     end
