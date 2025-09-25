@@ -207,7 +207,11 @@ function solve(
     metadata[:valid] = valid
     if !valid
         metadata[:validation] = violations
-        @warn "EGM solution failed monotonicity/positivity checks; marking as invalid." violations
+        if method.opts.verbose
+            @warn "EGM solution failed monotonicity/positivity checks; marking as invalid." violations
+        else
+            @info "EGM solution failed validation; set solver.verbose=true for details."
+        end
     end
 
     # Model ID

@@ -16,13 +16,28 @@ utility:
   u_type: CRRA
 
 solver:
-  method: EGM
+  # run a single method name (string or symbol), a list of names, or use "all"
+  method: all
   tol: 1.0e-6
+  tol_pol: 1.0e-6
   maxit: 10000
   verbose: true
   interp_kind: linear
   orders: [5]
   Nval: 50
+  # TimeIteration/EGM stability knobs
+  relax: 0.5
+  patience: 50
+  warm_start: default
+  # NN method options (used only when method includes NN)
+  epochs: 200
+  batch: 64
+  lr: 1e-3
+  objective: euler_fb_aio
+  v_h: 0.5
+  w_min: 0.1
+  w_max: 4.0
+  sigma_shocks: null
 
 shocks:
   active: true

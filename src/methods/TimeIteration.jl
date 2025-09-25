@@ -191,7 +191,11 @@ function solve(
     metadata[:valid] = valid
     if !valid
         metadata[:validation] = violations
-        @warn "TimeIteration solution failed monotonicity/positivity checks; marking as invalid." violations
+        if method.opts.verbose
+            @warn "TimeIteration solution failed monotonicity/positivity checks; marking as invalid." violations
+        else
+            @info "TimeIteration solution failed validation; set solver.verbose=true for details."
+        end
     end
 
     diagnostics = (;

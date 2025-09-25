@@ -73,4 +73,77 @@ function solve(x)
     error("The function solve is not compatible with $(typeof(x)).")
 end
 
+# --- Multi-method convenience ---
+# Supported method names (keeps the order deterministic when using :all)
+const SUPPORTED_METHODS = (:TimeIteration, :EGM, :Projection, :Perturbation, :NN)
+
+"""
+    solve(model::AbstractModel, cfg::NamedTuple)
+
+Run one or more solver methods based on `cfg.solver.method`.
+If `cfg.solver.method == :all` (or "all") the function runs all supported
+methods in `SUPPORTED_METHODS`. If `cfg.solver.method` is a collection, each
+entry is interpreted as a method name (String or Symbol). Returns a
+Vector{Solution} with one Solution per requested solver, in the same order.
+"""
+function solve(model::AbstractModel, cfg::NamedTuple; rng = nothing)
+    # extract requested method(s)
+    if !haskey(cfg, :solver)
+        error("Configuration must contain a `solver` section with a `method` field.")
+    end
+    requested = cfg.solver.method
+
+    # normalize to vector of Symbols
+    methods::Vector{Symbol} = Vector{Symbol}()
+    if requested === :all || requested == "all"
+        methods = collect(SUPPORTED_METHODS)
+    elseif requested isa AbstractVector
+        for m in requested
+            push!(methods, m isa Symbol ? m : Symbol(m))
+        end
+    else
+        push!(methods, requested isa Symbol ? requested : Symbol(requested))
+    end
+
+    solutions = Vector{Solution}(undef, length(methods))
+    for (i, mname) in enumerate(methods)
+        # create a cfg copy with solver.method set to the single method name
+        solver_nt = merge(cfg.solver, (method = mname,))
+        cfg_m = merge(cfg, (solver = solver_nt,))
+
+        # build method object and dispatch to the per-method solve
+        method_m = build_method(cfg_m)
+        @info "Starting solver $(mname)..."
+        try
+            sol = solve(model, method_m, cfg_m)
+            solutions[i] = sol
+            # try to extract some diagnostics for the finish message
+            converged =
+                haskey(sol.metadata, :converged) ? sol.metadata[:converged] : nothing
+            max_resid =
+                haskey(sol.metadata, :max_resid) ? sol.metadata[:max_resid] : nothing
+            runtime =
+                haskey(sol.diagnostics, :runtime) ? sol.diagnostics.runtime :
+                (haskey(sol.metadata, :runtime) ? sol.metadata[:runtime] : nothing)
+            @info "Finished solver $(mname). converged=$(converged) max_resid=$(max_resid) runtime=$(runtime)"
+        catch err
+            @warn "Solver $(mname) failed; storing error in metadata." err
+            @info "Solver $(mname) failed with error: $(err)"
+            # create a minimal Solution-like placeholder capturing the error
+            # Use the local API.Solution constructor signature
+            dummy = Solution(
+                policy = Dict{Symbol,Any}(),
+                value = nothing,
+                diagnostics = (method = string(mname), runtime = 0.0),
+                metadata = Dict(:error => string(err)),
+                model = model,
+                method = method_m,
+            )
+            solutions[i] = dummy
+        end
+    end
+
+    return solutions
+end
+
 end # module API

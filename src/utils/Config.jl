@@ -98,7 +98,9 @@ function validate_config(cfg::NamedTuple)
     s = cfg.solver
     hasproperty(s, :method) || error("missing solver.method")
     mth = _lower(getproperty(s, :method))
-    mth in ("egm", "projection", "perturbation", "nn") || error("solver.method invalid")
+    # Accept canonical method names, shorthand for TI, and the special "all" token
+    mth in ("egm", "projection", "perturbation", "nn", "timeiteration", "ti", "all") ||
+        error("solver.method invalid")
 
     if hasproperty(s, :tol)
         s.tol isa Real && s.tol > 0 || error("tol > 0 required")
