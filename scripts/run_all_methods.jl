@@ -9,6 +9,7 @@ using Dates
 using Printf
 using Random
 using ThesisProject
+using ThesisProject.CommonInterp: interp_linear!, interp_pchip!
 using Statistics: median
 
 include(joinpath(@__DIR__, "utils", "config_helpers.jl"))
@@ -17,8 +18,95 @@ using .ScriptConfigHelpers
 const ROOT = normpath(joinpath(@__DIR__, ".."))
 ensure_outputs_dir() = (out = joinpath(ROOT, "outputs"); isdir(out) || mkpath(out); out)
 
-# Compute binding statistics for the asset policy so downstream code can skip binding points.
-function binding_stats(sol; atol::Real = 1e-8)
+# Determine interpolation mode and helpers to regrid policies to the model grid.
+function infer_interp_mode(mode_meta)
+    if mode_meta === nothing || mode_meta === missing
+        return :linear
+    end
+    s = lowercase(String(mode_meta))
+    if occursin("monotone", s) || occursin("pchip", s) || occursin("cubic", s)
+        return :pchip
+    end
+    return :linear
+end
+
+function grids_match(src::AbstractVector, dst::AbstractVector; atol::Real = 1e-10)
+    length(src) == length(dst) && all(abs.(src .- dst) .<= atol)
+end
+
+function regrid_array(
+    values::AbstractVector,
+    src::AbstractVector,
+    dst::AbstractVector;
+    kind::Symbol,
+)
+    src_vec = collect(src)
+    dst_vec = collect(dst)
+    vals = collect(values)
+    if grids_match(src_vec, dst_vec)
+        return copy(vals)
+    end
+    T = promote_type(eltype(vals), eltype(dst_vec))
+    out = Vector{T}(undef, length(dst_vec))
+    if kind == :pchip
+        try
+            interp_pchip!(out, src_vec, vals, dst_vec)
+            return out
+        catch
+            # fall back to linear interpolation when shape-preserving fails
+        end
+    end
+    interp_linear!(out, src_vec, vals, dst_vec)
+    return out
+end
+
+function regrid_array(
+    values::AbstractMatrix,
+    src::AbstractVector,
+    dst::AbstractVector;
+    kind::Symbol,
+)
+    src_vec = collect(src)
+    dst_vec = collect(dst)
+    vals = Array(values)
+    if size(vals, 1) == length(dst_vec) && grids_match(src_vec, dst_vec)
+        return copy(vals)
+    end
+    cols = size(vals, 2)
+    T = promote_type(eltype(vals), eltype(dst_vec))
+    out = Array{T}(undef, length(dst_vec), cols)
+    for j = 1:cols
+        out[:, j] = regrid_array(view(vals, :, j), src_vec, dst_vec; kind = kind)
+    end
+    return out
+end
+
+function coerce_numeric(arr::AbstractArray)
+    data = similar(arr, Float64)
+    for idx in eachindex(arr)
+        v = arr[idx]
+        data[idx] = ismissing(v) ? NaN : Float64(v)
+    end
+    return data
+end
+
+function solve_once(cfg)
+    model = ThesisProject.build_model(cfg)
+    method = ThesisProject.build_method(cfg)
+    return ThesisProject.solve(model, method, cfg)
+end
+
+function solve_with_runtime(cfg)
+    warm_sol = solve_once(cfg)
+    GC.gc()
+    t0 = time_ns()
+    sol = solve_once(cfg)
+    runtime = (time_ns() - t0) / 1e9
+    return sol, runtime
+end
+
+# Compute binding statistics for the asset policy on the model's exogenous grid.
+function binding_stats(sol; atol::Real = 1e-8, interp_mode::Symbol = :linear)
     pol_a = get(sol.policy, :a, nothing)
     if pol_a === nothing
         return (share = missing, mask = nothing, rows = nothing)
@@ -34,16 +122,29 @@ function binding_stats(sol; atol::Real = 1e-8)
     catch
         nothing
     end
+    target_grid = try
+        grids[:a].grid
+    catch
+        nothing
+    end
     if amin === nothing
         return (share = missing, mask = nothing, rows = nothing)
     end
 
-    a_vals = pol_a.value
+    a_vals = hasproperty(pol_a, :value) ? pol_a.value : nothing
+    a_grid = hasproperty(pol_a, :grid) ? pol_a.grid : target_grid
     if !(a_vals isa AbstractArray)
         return (share = missing, mask = nothing, rows = nothing)
     end
 
-    mask = abs.(a_vals .- amin) .<= atol
+    eval_vals = a_vals
+    if target_grid !== nothing && a_grid !== nothing
+        eval_vals = regrid_array(a_vals, a_grid, target_grid; kind = interp_mode)
+    else
+        eval_vals = Array(a_vals)
+    end
+
+    mask = Array(abs.(eval_vals .- amin) .<= atol)
     total = length(mask)
     share = total == 0 ? missing : count(identity, mask) / total
 
@@ -57,53 +158,69 @@ function binding_stats(sol; atol::Real = 1e-8)
     return (share = share, mask = mask, rows = rows_mask)
 end
 
-# Compute simple Euler error summary from solution while optionally skipping binding points.
+# Compute Euler-error summary after regridding to the exogenous asset grid and
+# skipping binding points.
 function ee_stats(
     sol,
     binding_mask::Union{Nothing,AbstractArray} = nothing,
-    row_binding_mask::Union{Nothing,AbstractVector} = nothing,
+    row_binding_mask::Union{Nothing,AbstractVector} = nothing;
+    interp_mode::Symbol = :linear,
 )
     pol_c = sol.policy[:c]
     ee = pol_c.euler_errors
     ee_mat = pol_c.euler_errors_mat
+
+    grids = ThesisProject.get_grids(sol.model)
+    target_grid = try
+        grids[:a].grid
+    catch
+        nothing
+    end
+    source_grid = hasproperty(pol_c, :grid) ? pol_c.grid : target_grid
+
     vals = Float64[]
 
     if ee_mat === nothing
-        mask_vec = row_binding_mask
-        if mask_vec === nothing && binding_mask !== nothing
-            if binding_mask isa AbstractVector
-                mask_vec = binding_mask
-            elseif binding_mask isa AbstractMatrix
-                mask_vec = vec(any(binding_mask; dims = 2))
-            end
+        numeric = coerce_numeric(ee)
+        eval_vec =
+            target_grid !== nothing && source_grid !== nothing ?
+            regrid_array(numeric, source_grid, target_grid; kind = interp_mode) :
+            Array(numeric)
+        mask_vec = nothing
+        if binding_mask isa AbstractVector && length(binding_mask) == length(eval_vec)
+            mask_vec = binding_mask
+        elseif row_binding_mask isa AbstractVector &&
+               length(row_binding_mask) == length(eval_vec)
+            mask_vec = row_binding_mask
         end
-
-        if mask_vec === nothing
-            for err in ee
-                if ismissing(err)
-                    continue
-                end
-                push!(vals, Float64(err))
+        for i in eachindex(eval_vec)
+            if mask_vec !== nothing && mask_vec[i]
+                continue
             end
-        else
-            for (err, is_binding) in zip(ee, mask_vec)
-                if is_binding || ismissing(err)
-                    continue
-                end
-                push!(vals, Float64(err))
+            val = eval_vec[i]
+            if !isfinite(val)
+                continue
             end
+            push!(vals, val)
         end
     else
-        mask_mat = binding_mask isa AbstractArray ? binding_mask : nothing
-        for idx in eachindex(ee_mat)
+        numeric = coerce_numeric(ee_mat)
+        eval_mat =
+            target_grid !== nothing && source_grid !== nothing ?
+            regrid_array(numeric, source_grid, target_grid; kind = interp_mode) :
+            Array(numeric)
+        mask_mat =
+            binding_mask isa AbstractArray && size(binding_mask) == size(eval_mat) ?
+            binding_mask : nothing
+        for idx in eachindex(eval_mat)
             if mask_mat !== nothing && mask_mat[idx]
                 continue
             end
-            err = ee_mat[idx]
-            if ismissing(err)
+            val = eval_mat[idx]
+            if !isfinite(val)
                 continue
             end
-            push!(vals, Float64(err))
+            push!(vals, val)
         end
     end
 
@@ -166,7 +283,7 @@ function main()
         "run_id",
         "iters",
         "converged",
-        "max_resid",
+        "max_end_resid",
         "tol",
         "tol_pol",
         "interp_kind",
@@ -181,21 +298,27 @@ function main()
     for m in methods
         cfg = merge_section(base_cfg, :solver, Dict{Symbol,Any}(:method => m))
         try
-            model = ThesisProject.build_model(cfg)
-            method = ThesisProject.build_method(cfg)
-            sol = ThesisProject.solve(model, method, cfg)
+            sol, runtime = solve_with_runtime(cfg)
 
             meta = sol.metadata
             diag = sol.diagnostics
 
+            interp_raw =
+                haskey(meta, :interp_kind) ? meta[:interp_kind] :
+                (
+                    hasproperty(diag, :interp_kind) ? getproperty(diag, :interp_kind) :
+                    missing
+                )
+            interp_mode = infer_interp_mode(interp_raw)
+
             binding = try
-                binding_stats(sol)
+                binding_stats(sol; interp_mode = interp_mode)
             catch
                 (share = missing, mask = nothing, rows = nothing)
             end
 
             ee = try
-                ee_stats(sol, binding.mask, binding.rows)
+                ee_stats(sol, binding.mask, binding.rows; interp_mode = interp_mode)
             catch
                 (ee_max = missing, ee_median = missing)
             end
@@ -204,17 +327,15 @@ function main()
             run_id = get(diag, :model_id, missing)
             iters = get(meta, :iters, missing)
             converged = get(meta, :converged, missing)
-            max_resid = get(meta, :max_resid, missing)
+            max_end_resid = get(meta, :max_resid, missing)
             tol = get(meta, :tol, missing)
             tol_pol = get(meta, :tol_pol, missing)
             interp_kind = get(meta, :interp_kind, missing)
-            runtime = get(diag, :runtime, missing)
-
-            # Projection-specific convergence: prefer delta_pol < tol_pol when available
+            # Projection-specific convergence: require both residual and policy tolerances and avoid hitting the iteration cap.
             computed_converged = converged
             if m == "Projection"
+                raw_converged = converged === missing ? true : Bool(converged)
                 delta_pol = get(meta, :delta_pol, missing)
-                # determine a scalar norm for delta_pol
                 polnorm = missing
                 if delta_pol !== missing
                     if isa(delta_pol, Number)
@@ -227,9 +348,33 @@ function main()
                         end
                     end
                 end
-                if polnorm !== missing && tol_pol !== missing
-                    computed_converged = polnorm < tol_pol
+                pol_ok = true
+                if tol_pol !== missing
+                    if polnorm !== missing
+                        pol_ok = polnorm < tol_pol
+                    else
+                        pol_ok = raw_converged
+                    end
                 end
+                max_end_resid = get(meta, :max_resid, missing)
+                tol_val = get(meta, :tol, missing)
+                resid_ok = true
+                if tol_val !== missing
+                    if max_end_resid !== missing
+                        resid_ok = max_end_resid < tol_val
+                    elseif ee.ee_max !== missing
+                        resid_ok = ee.ee_max < tol_val
+                    else
+                        resid_ok = raw_converged
+                    end
+                end
+                iters = get(meta, :iters, missing)
+                max_it = get(meta, :max_it, missing)
+                iter_ok = true
+                if iters !== missing && max_it !== missing
+                    iter_ok = iters < max_it
+                end
+                computed_converged = raw_converged && resid_ok && pol_ok && iter_ok
             end
 
             push!(
@@ -242,7 +387,7 @@ function main()
                     run_id,
                     iters,
                     computed_converged,
-                    max_resid,
+                    max_end_resid,
                     tol,
                     tol_pol,
                     interp_kind,

@@ -26,9 +26,9 @@ function solve_egm_det(
     model_params,
     model_grids,
     model_utility;
-    tol::Real = 1e-8,
+    tol::Real = 1e-4,
     tol_pol::Real = 1e-6,
-    maxit::Int = 500,
+    maxit::Int = 10_000,
     interp_kind::InterpKind = LinearInterp(),
     relax::Real = 0.5,
     patience::Int = 50,
@@ -61,9 +61,9 @@ function solve_egm_det_impl(
     model_params,
     model_grids,
     model_utility;
-    tol::Real = 1e-8,
+    tol::Real = 1e-4,
     tol_pol::Real = 1e-6,
-    maxit::Int = 500,
+    maxit::Int = 10_000,
     relax::Real = 0.5,
     patience::Int = 50,
     ϵ::Real = 1e-10,
@@ -193,7 +193,7 @@ function solve_egm_det_impl(
     model_params,
     model_grids,
     model_utility;
-    tol::Real = 1e-8,
+    tol::Real = 1e-4,
     tol_pol::Real = 1e-6,
     maxit::Int = 500,
     relax::Real = 0.5,
@@ -332,7 +332,7 @@ function solve_egm_stoch(
     model_grids,
     model_shocks,
     model_utility;
-    tol::Real = 1e-8,
+    tol::Real = 1e-4,
     tol_pol::Real = 1e-6,
     maxit::Int = 1000,
     interp_kind::InterpKind = LinearInterp(),
@@ -370,7 +370,7 @@ function solve_egm_stoch_impl(
     model_grids,
     model_shocks,
     model_utility;
-    tol::Real = 1e-8,
+    tol::Real = 1e-4,
     tol_pol::Real = 1e-6,
     maxit::Int = 1000,
     relax::Real = 0.5,
@@ -486,6 +486,10 @@ function solve_egm_stoch_impl(
     end
 
     euler_resid_stoch!(resid_mat, model_params, a_grid, z_grid, Π, c)
+    for (j, z) in enumerate(z_grid)
+        y = exp(z)
+        @. a_next[:, j] = clamp(R * a_grid + y - c[:, j], a_min, a_max)
+    end
 
     runtime = (time_ns() - start_time) / 1e9
     opts = (;
@@ -521,7 +525,7 @@ function solve_egm_stoch_impl(
     model_grids,
     model_shocks,
     model_utility;
-    tol::Real = 1e-8,
+    tol::Real = 1e-4,
     tol_pol::Real = 1e-6,
     maxit::Int = 1000,
     relax::Real = 0.5,
@@ -632,6 +636,10 @@ function solve_egm_stoch_impl(
     end
 
     euler_resid_stoch!(resid_mat, model_params, a_grid, z_grid, Π, c)
+    for (j, z) in enumerate(z_grid)
+        y = exp(z)
+        @. a_next[:, j] = clamp(R * a_grid + y - c[:, j], a_min, a_max)
+    end
 
     runtime = (time_ns() - start_time) / 1e9
     opts = (;
