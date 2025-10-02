@@ -9,7 +9,7 @@ using Dates
 using Printf
 using Random
 using ThesisProject
-using Statistics: mean
+using Statistics: median
 
 include(joinpath(@__DIR__, "utils", "config_helpers.jl"))
 using .ScriptConfigHelpers
@@ -22,17 +22,18 @@ function ee_stats(sol)
     pol_c = sol.policy[:c]
     ee = pol_c.euler_errors
     ee_mat = pol_c.euler_errors_mat
+    vals = nothing
     if ee_mat === nothing
-        mx = maximum(skipmissing(ee))
-        mn = minimum(skipmissing(ee))
-        av = mean(skipmissing(ee))
-        return (ee_max = mx, ee_min = mn, ee_mean = av)
+        vals = collect(skipmissing(ee))
     else
-        mx = maximum(skipmissing(vec(ee_mat)))
-        mn = minimum(skipmissing(vec(ee_mat)))
-        av = mean(skipmissing(vec(ee_mat)))
-        return (ee_max = mx, ee_min = mn, ee_mean = av)
+        vals = collect(skipmissing(vec(ee_mat)))
     end
+    if isempty(vals)
+        return (ee_max = missing, ee_median = missing)
+    end
+    mx = maximum(vals)
+    med = median(vals)
+    return (ee_max = mx, ee_median = med)
 end
 
 function open_write(path::AbstractString, header::Vector{<:AbstractString}, rows)
@@ -70,7 +71,7 @@ function main()
     end
     if base_cfg === nothing
         error(
-            "Could not find a usable config (looked for smoke_config.yaml and simple_baseline.yaml)",
+            "Could not find a usable config (looked for smoke configs and simple_baseline)",
         )
     end
 
@@ -92,15 +93,12 @@ function main()
         "interp_kind",
         "runtime",
         "ee_max",
-        "ee_min",
-        "ee_mean",
+        "ee_median",
     ]
 
-    rows = Vector{NTuple{15,Any}}()
+    rows = Vector{NTuple{14,Any}}()
 
     for m in methods
-        # Set the solver.method field (matches config layout) so the
-        # method factory picks it up. Use solver.method = m.
         cfg = merge_section(base_cfg, :solver, Dict{Symbol,Any}(:method => m))
         try
             model = ThesisProject.build_model(cfg)
@@ -113,7 +111,7 @@ function main()
             ee = try
                 ee_stats(sol)
             catch
-                (ee_max = missing, ee_min = missing, ee_mean = missing)
+                (ee_max = missing, ee_median = missing)
             end
 
             # Use safe getters because not all methods populate the same metadata
@@ -164,8 +162,7 @@ function main()
                     interp_kind,
                     runtime,
                     ee.ee_max,
-                    ee.ee_min,
-                    ee.ee_mean,
+                    ee.ee_median,
                 ),
             )
         catch err
@@ -194,7 +191,6 @@ function main()
                     missing,
                     missing,
                     false,
-                    missing,
                     missing,
                     missing,
                     missing,
