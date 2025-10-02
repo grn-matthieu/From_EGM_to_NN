@@ -51,6 +51,7 @@ function solve_projection_det(
     orders::AbstractVector{Int} = Int[],
     Nval::Int = model_grids[:a].N,
     λ::Real = 0.0,
+    tol_pol::Real = tol,
 )::NamedTuple
     start_time = time_ns()
 
@@ -80,6 +81,7 @@ function solve_projection_det(
     best_iters = 0
     best_converged = false
     best_order = candidate_orders[1]
+    best_delta = nothing
 
     cmin = 1e-12
 
@@ -95,6 +97,7 @@ function solve_projection_det(
         converged = false
         iters = 0
 
+        last_delta = Inf
         for it = 1:maxit
             iters = it
             @. a_next = clamp(R * a_grid + income - c, a_min, a_max)
@@ -107,8 +110,9 @@ function solve_projection_det(
             )
             coeffs = solve_coefficients(B, c_new; λ = λ)
             delta = maximum(abs.(c_new .- c))
+            last_delta = delta
             c .= c_new
-            if delta < tol
+            if delta < tol_pol
                 converged = true
                 break
             end
@@ -130,6 +134,7 @@ function solve_projection_det(
             best_iters = iters
             best_converged = converged
             best_order = order
+            best_delta = last_delta
         end
     end
 
@@ -143,7 +148,8 @@ function solve_projection_det(
     max_resid_out = maximum(resid_out[min(2, end):end])
 
     runtime = (time_ns() - start_time) / 1e9
-    opts = (; tol, maxit, order = best_order, runtime, seed = nothing)
+    # include policy tolerance in opts
+    opts = (; tol, tol_pol, maxit, order = best_order, runtime, seed = nothing)
 
     return (
         a_grid = a_out,
@@ -155,6 +161,7 @@ function solve_projection_det(
         max_resid = max_resid_out,
         coeffs = best_coeffs,
         opts = opts,
+        delta_pol = best_delta,
     )
 end
 
@@ -172,6 +179,7 @@ function solve_projection_stoch(
     orders::AbstractVector{Int} = Int[],
     Nval::Int = model_grids[:a].N,
     λ::Real = 0.0,
+    tol_pol::Real = tol,
 )::NamedTuple
     start_time = time_ns()
 
@@ -205,6 +213,7 @@ function solve_projection_stoch(
     best_iters = 0
     best_converged = false
     best_order = candidate_orders[1]
+    best_delta = nothing
 
     cmin = 1e-12
 
@@ -225,6 +234,7 @@ function solve_projection_stoch(
         converged = false
         iters = 0
 
+        last_delta = Inf
         for it = 1:maxit
             iters = it
             for j = 1:Nz
@@ -246,10 +256,12 @@ function solve_projection_stoch(
 
             coeffs = solve_coefficients(B, c_new; λ = λ)
             delta = maximum(abs.(c_new .- c))
+            last_delta = delta
             c .= c_new
             resid_mat = euler_resid_stoch_grid(model_params, a_grid, z_grid, transition, c)
             max_resid = maximum(resid_mat[2:end, :])
-            if delta < tol && max_resid < tol
+            # use tol_pol for policy iteration delta and tol for residual
+            if delta < tol_pol && max_resid < tol
                 converged = true
                 break
             end
@@ -275,6 +287,7 @@ function solve_projection_stoch(
             best_iters = iters
             best_converged = converged
             best_order = order
+            best_delta = last_delta
         end
     end
 
@@ -296,7 +309,7 @@ function solve_projection_stoch(
     max_resid_out = maximum(resid_out[min(2, end):end, :])
 
     runtime = (time_ns() - start_time) / 1e9
-    opts = (; tol, maxit, order = best_order, runtime, seed = nothing)
+    opts = (; tol, tol_pol, maxit, order = best_order, runtime, seed = nothing)
 
     return (
         a_grid = a_out,
@@ -308,6 +321,7 @@ function solve_projection_stoch(
         max_resid = max_resid_out,
         coeffs = best_coeffs,
         opts = opts,
+        delta_pol = best_delta,
     )
 end
 

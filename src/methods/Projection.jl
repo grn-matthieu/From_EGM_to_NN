@@ -27,6 +27,7 @@ function build_projection_method(cfg::NamedTuple)
     return ProjectionMethod((
         name = maybe(cfg, :method, solver_cfg.method),
         tol = maybe(solver_cfg, :tol, 1e-6),
+        tol_pol = maybe(solver_cfg, :tol_pol, maybe(solver_cfg, :tol, 1e-6)),
         maxit = maybe(solver_cfg, :maxit, 1000),
         verbose = maybe(solver_cfg, :verbose, false),
         orders = maybe(solver_cfg, :orders, default_orders),
@@ -51,6 +52,7 @@ function solve(
             g,
             U;
             tol = method.opts.tol,
+            tol_pol = method.opts.tol_pol,
             maxit = method.opts.maxit,
             orders = method.opts.orders,
             Nval = method.opts.Nval,
@@ -61,6 +63,7 @@ function solve(
             S,
             U;
             tol = method.opts.tol,
+            tol_pol = method.opts.tol_pol,
             maxit = method.opts.maxit,
             orders = method.opts.orders,
             Nval = method.opts.Nval,
@@ -92,11 +95,13 @@ function solve(
 
     metadata = Dict{Symbol,Any}(
         :iters => sol.iters,
-        :max_it => sol.opts.maxit,
+        :max_it => get(sol.opts, :maxit, missing),
         :converged => sol.converged,
         :max_resid => sol.max_resid,
-        :tol => sol.opts.tol,
-        :order => sol.opts.order,
+        :tol => get(sol.opts, :tol, missing),
+        :order => get(sol.opts, :order, missing),
+        :tol_pol => hasproperty(sol.opts, :tol_pol) ? sol.opts.tol_pol : missing,
+        :delta_pol => hasproperty(sol, :delta_pol) ? sol.delta_pol : missing,
         :julia_version => string(VERSION),
     )
 
