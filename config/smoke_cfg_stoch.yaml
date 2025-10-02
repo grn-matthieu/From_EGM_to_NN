@@ -37,7 +37,7 @@ solver:
   patience: 50
   warm_start: default
   # NN method options (used only when method includes NN)
-  epochs: 200
+  epochs: 1000
   batch: 64
   lr: 1e-3
   objective: euler_fb_aio
