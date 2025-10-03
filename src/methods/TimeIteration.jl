@@ -180,10 +180,13 @@ function solve(
         :iters => sol.iters,
         :max_it => sol.opts.maxit,
         :converged => sol.converged,
-        :max_resid => sol.max_resid,
+        :max_resid => sol.max_resid, # kept for compatibility
+        :rmse => hasproperty(sol, :rmse) ? getfield(sol, :rmse) : sol.max_resid,
         :tol => sol.opts.tol,
         :tol_pol => sol.opts.tol_pol,
         :relax => sol.opts.relax,
+        :resid_metric =>
+            hasproperty(sol.opts, :resid_metric) ? sol.opts.resid_metric : :rmse,
         :interp_kind => string(sol.opts.interp_kind),
         :julia_version => string(VERSION),
     )

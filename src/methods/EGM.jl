@@ -30,6 +30,12 @@ function build_egm_method(cfg::NamedTuple)
     solver_cfg = cfg.solver
     ik = maybe(solver_cfg, :interp_kind, :linear)
     ik = ik isa Symbol ? ik : Symbol(ik)
+    try
+        _ = solver_cfg.patience
+        @warn "cfg.solver.patience is ignored by EGM; use maxit/tol/tol_pol instead"
+    catch
+        # missing field — nothing to warn about
+    end
     return EGMMethod((
         name = maybe(cfg, :method, solver_cfg.method),
         tol = maybe(solver_cfg, :tol, 1e-6),
@@ -131,6 +137,7 @@ function solve(
             tol_pol = method.opts.tol_pol,
             maxit = method.opts.maxit,
             interp_kind = interp,
+            verbose = method.opts.verbose,
             c_init = c_init,
         ) :
         solve_egm_stoch(
@@ -142,6 +149,7 @@ function solve(
             tol_pol = method.opts.tol_pol,
             maxit = method.opts.maxit,
             interp_kind = interp,
+            verbose = method.opts.verbose,
             c_init = c_init,
         )
 
@@ -163,11 +171,14 @@ function solve(
         :iters => sol.iters,
         :max_it => sol.opts.maxit,
         :converged => sol.converged,
-        :max_resid => sol.max_resid,
+        :max_resid => sol.max_resid, # kept for backward-compat; equals rmse when resid_metric=:rmse
+        :rmse => hasproperty(sol, :rmse) ? getfield(sol, :rmse) : sol.max_resid,
         :tol => sol.opts.tol,
         :tol_pol => sol.opts.tol_pol,
         :relax => sol.opts.relax,
-        :patience => sol.opts.patience,
+        :resid_metric =>
+            hasproperty(sol.opts, :resid_metric) ? sol.opts.resid_metric : :rmse,
+        :verbose => sol.opts.verbose,
         :interp_kind => string(sol.opts.interp_kind),
         :julia_version => string(VERSION),
     )
