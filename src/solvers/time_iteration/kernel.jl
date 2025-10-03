@@ -10,8 +10,9 @@ module TimeIterationKernel
 
 using ..CommonInterp:
     interp_linear!, interp_pchip!, InterpKind, LinearInterp, MonotoneCubicInterp
-using ..EulerResiduals: euler_resid_det!, euler_resid_stoch!
+using ..EulerResiduals: euler_resid_det!, euler_resid_stoch!, euler_resid_stoch_interp!
 using Printf
+using Statistics: mean
 
 export solve_ti_det, solve_ti_stoch
 
@@ -106,17 +107,16 @@ function solve_ti_det_impl(
         Δpol = maximum(abs.(c .- c_prev))
 
         euler_resid_det!(resid, model_params, c, cnext)
-        # Compute max residual only on non-binding points (where a_next > a_min).
+        # RMSE residual on non-binding points (where a_next > a_min)
         mask = a_next .> (a_min + bind_tol)
         if any(mask)
-            max_resid = maximum(abs.(resid[mask]))
+            max_resid = sqrt(mean((resid[mask]) .^ 2))
         else
-            # fallback to previous behaviour (exclude first row)
-            max_resid = maximum(abs.(resid[min(2, end):end]))
+            max_resid = sqrt(mean((resid[min(2, end):end]) .^ 2))
         end
 
         if verbose && (it % 10 == 0)
-            @printf("[TimeIteration] it=%d max_resid=%.6e Δpol=%.6e\n", it, max_resid, Δpol)
+            @printf("[TimeIteration] it=%d rmse=%.6e Δpol=%.6e\n", it, max_resid, Δpol)
             flush(stdout)
         end
 
@@ -141,9 +141,9 @@ function solve_ti_det_impl(
     euler_resid_det!(resid, model_params, c, cnext)
     mask = a_next .> (a_min + bind_tol)
     if any(mask)
-        max_resid = maximum(abs.(resid[mask]))
+        max_resid = sqrt(mean((resid[mask]) .^ 2))
     else
-        max_resid = maximum(abs.(resid[min(2, end):end]))
+        max_resid = sqrt(mean((resid[min(2, end):end]) .^ 2))
     end
 
     runtime = (time_ns() - start_time) / 1e9
@@ -154,11 +154,23 @@ function solve_ti_det_impl(
         interp_kind = interp_kind,
         relax = relax,
         ϵ = ϵ,
+        resid_metric = :rmse,
         seed = nothing,
         runtime = runtime,
     )
 
-    return (; a_grid, c, a_next, resid, iters, converged, max_resid, model_params, opts)
+    return (;
+        a_grid,
+        c,
+        a_next,
+        resid,
+        iters,
+        converged,
+        max_resid,
+        rmse = max_resid,
+        model_params,
+        opts,
+    )
 end
 
 # Monotone cubic variant (PCHIP)
@@ -229,14 +241,14 @@ function solve_ti_det_impl(
         euler_resid_det!(resid, model_params, c, cnext)
         mask = a_next .> (a_min + bind_tol)
         if any(mask)
-            max_resid = maximum(abs.(resid[mask]))
+            max_resid = sqrt(mean((resid[mask]) .^ 2))
         else
-            max_resid = maximum(abs.(resid[min(2, end):end]))
+            max_resid = sqrt(mean((resid[min(2, end):end]) .^ 2))
         end
 
         if verbose && (it % 10 == 0)
             @printf(
-                "[TimeIteration:PCHIP] it=%d max_resid=%.6e Δpol=%.6e\n",
+                "[TimeIteration:PCHIP] it=%d rmse=%.6e Δpol=%.6e\n",
                 it,
                 max_resid,
                 Δpol
@@ -277,11 +289,23 @@ function solve_ti_det_impl(
         interp_kind = interp_kind,
         relax = relax,
         ϵ = ϵ,
+        resid_metric = :rmse,
         seed = nothing,
         runtime = runtime,
     )
 
-    return (; a_grid, c, a_next, resid, iters, converged, max_resid, model_params, opts)
+    return (;
+        a_grid,
+        c,
+        a_next,
+        resid,
+        iters,
+        converged,
+        max_resid,
+        rmse = max_resid,
+        model_params,
+        opts,
+    )
 end
 
 
@@ -391,7 +415,7 @@ function solve_ti_stoch_impl(
 
         if verbose && (it % 10 == 0)
             @printf(
-                "[TimeIteration:STOCH] it=%d max_resid=%.6e Δpol=%.6e\n",
+                "[TimeIteration:STOCH] it=%d rmse=%.6e Δpol=%.6e\n",
                 it,
                 max_resid,
                 Δpol
@@ -399,13 +423,21 @@ function solve_ti_stoch_impl(
             flush(stdout)
         end
 
-        euler_resid_stoch!(resid_mat, model_params, a_grid, z_grid, Π, c)
+        euler_resid_stoch_interp!(
+            resid_mat,
+            model_params,
+            a_grid,
+            z_grid,
+            Π,
+            c,
+            interp_kind,
+        )
         # resid_mat is Na x Nz. Build mask of non-binding entries where a_next > a_min
         mask_mat = a_next .> (a_min + bind_tol)
         if any(mask_mat)
-            max_resid = maximum(abs.(resid_mat[mask_mat]))
+            max_resid = sqrt(mean((resid_mat[mask_mat]) .^ 2))
         else
-            max_resid = maximum(abs.(resid_mat[min(2, end):end, :]))
+            max_resid = sqrt(mean((resid_mat[min(2, end):end, :]) .^ 2))
         end
 
         if max_resid < tol && Δpol < tol_pol
@@ -420,12 +452,12 @@ function solve_ti_stoch_impl(
         end
     end
 
-    euler_resid_stoch!(resid_mat, model_params, a_grid, z_grid, Π, c)
+    euler_resid_stoch_interp!(resid_mat, model_params, a_grid, z_grid, Π, c, interp_kind)
     mask_mat = a_next .> (a_min + bind_tol)
     if any(mask_mat)
-        max_resid = maximum(abs.(resid_mat[mask_mat]))
+        max_resid = sqrt(mean((resid_mat[mask_mat]) .^ 2))
     else
-        max_resid = maximum(abs.(resid_mat[min(2, end):end, :]))
+        max_resid = sqrt(mean((resid_mat[min(2, end):end, :]) .^ 2))
     end
 
     runtime = (time_ns() - start_time) / 1e9
@@ -436,6 +468,7 @@ function solve_ti_stoch_impl(
         interp_kind = interp_kind,
         relax = relax,
         ϵ = ϵ,
+        resid_metric = :rmse,
         seed = nothing,
         runtime = runtime,
     )
@@ -449,6 +482,7 @@ function solve_ti_stoch_impl(
         iters,
         converged,
         max_resid,
+        rmse = max_resid,
         model_params,
         opts,
     )
