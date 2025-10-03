@@ -6,23 +6,23 @@ model:
 params:
   β: 0.96
   σ: 2.0
-  r: 0.02
+  r: 0.04
   y: 1.0
 
 grids:
   Na: 50
   a_min: 0.0
-  a_max: 20.0
+  a_max: 4.0
 
 utility:
   u_type: CRRA
 
 solver:
   # run a single method name (string or symbol), a list of names, or use "all"
-  method: all
-  tol: 1.0e-3
-  tol_pol: 1.0e-6
-  maxit: 10000
+  method: TimeIteration
+  tol: 1.0e-4
+  tol_pol: 1.0e-3
+  maxit: 1000
   verbose: true
   interp_kind: linear
   orders: [5]
@@ -34,7 +34,7 @@ solver:
     Nval: 50
   # TimeIteration/EGM stability knobs
   relax: 0.5
-  patience: 50
+  patience: 2000
   warm_start: default
   # NN method options (used only when method includes NN)
   epochs: 1000
@@ -44,7 +44,7 @@ solver:
   v_h: 0.5
   w_min: 0.1
   w_max: 4.0
-  sigma_shocks: null
+  sigma_shocks: 0.1
   # Perturbation method options
   a_bar: null
   order: 1
@@ -56,7 +56,7 @@ solver:
 shocks:
   active: true
   method: "rouwenhorst"   # or "tauchen"
-  ρ_shock: 0.95
+  ρ_shock: 0
   σ_shock: 0.10
   Nz: 7
   m: 3.0

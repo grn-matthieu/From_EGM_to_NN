@@ -26,11 +26,21 @@ function build_timeiteration_method(cfg::NamedTuple)
     solver_cfg = cfg.solver
     ik = maybe(solver_cfg, :interp_kind, :linear)
     ik = ik isa Symbol ? ik : Symbol(ik)
+    # Warn if user still sets `patience` in the config — TimeIteration no longer
+    # respects this option and it will be ignored. Keep the warning light-touch
+    # so CI logs remain readable.
+    try
+        _ = solver_cfg.patience
+        @warn "cfg.solver.patience is ignored by TimeIteration; use maxit/tol/tol_pol instead"
+    catch
+        # missing field — nothing to warn about
+    end
     return TimeIterationMethod((
         name = maybe(cfg, :method, solver_cfg.method),
         tol = maybe(solver_cfg, :tol, 1e-6),
         tol_pol = maybe(solver_cfg, :tol_pol, 1e-6),
         maxit = maybe(solver_cfg, :maxit, 1000),
+        relax = maybe(solver_cfg, :relax, 0.5),
         interp_kind = ik,
         verbose = maybe(solver_cfg, :verbose, false),
         warm_start = maybe(solver_cfg, :warm_start, :default),
@@ -117,6 +127,8 @@ function solve(
             tol_pol = method.opts.tol_pol,
             maxit = method.opts.maxit,
             interp_kind = interp,
+            relax = method.opts.relax,
+            verbose = method.opts.verbose,
             c_init = c_init,
         ) :
         solve_ti_stoch(
@@ -128,12 +140,29 @@ function solve(
             tol_pol = method.opts.tol_pol,
             maxit = method.opts.maxit,
             interp_kind = interp,
+            relax = method.opts.relax,
+            verbose = method.opts.verbose,
             c_init = c_init,
         )
 
     ee = sol.resid
-    ee_vec = ee isa AbstractMatrix ? vec(maximum(ee, dims = 2)) : ee
-    ee_mat = ee isa AbstractMatrix ? ee : nothing
+    # For stochastic solutions `ee` is a Na x Nz matrix (Euler residuals per a,z).
+    # Errors at the borrowing-constraint (first asset grid point) are allowed to be
+    # large; mask them out by setting to NaN so downstream diagnostics/plots ignore
+    # the constraint point. This mirrors solver behaviour which already ignores
+    # the first row when computing `max_resid`.
+    if ee isa AbstractMatrix
+        ee_mat = copy(ee)
+        # mask first asset row
+        if size(ee_mat, 1) >= 1
+            ee_mat[1, :] .= NaN
+        end
+        # per-asset max across shocks, preserve shape (Na,)
+        ee_vec = vec(maximum(ee_mat, dims = 2))
+    else
+        ee_mat = nothing
+        ee_vec = ee
+    end
     policy = Dict{Symbol,Any}(
         :c => (;
             value = sol.c,
@@ -155,7 +184,6 @@ function solve(
         :tol => sol.opts.tol,
         :tol_pol => sol.opts.tol_pol,
         :relax => sol.opts.relax,
-        :patience => sol.opts.patience,
         :interp_kind => string(sol.opts.interp_kind),
         :julia_version => string(VERSION),
     )
