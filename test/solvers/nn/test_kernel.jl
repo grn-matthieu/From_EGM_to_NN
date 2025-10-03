@@ -157,12 +157,15 @@ end
         fix.P,
         fix.G,
         nothing,
-        fix.scaler,
+        fix.scaler;
+        settings = fix.settings,
+        U = fix.U,
     )
     @test result isa EvaluationResult
-    @test length(result.c) == length(fix.G[:a].grid)
-    @test length(result.a_next) == length(fix.G[:a].grid)
-    @test length(result.resid) == length(fix.G[:a].grid)
+    expected = NNKernel.DEFAULT_EVAL_SAMPLES
+    @test length(result.c) == expected
+    @test length(result.a_next) == expected
+    @test length(result.resid) == expected
     @test result.max_resid ≥ 0
 end
 
@@ -176,12 +179,15 @@ end
         fix.P,
         fix.G,
         fix.S,
-        fix.scaler,
+        fix.scaler;
+        settings = fix.settings,
+        U = fix.U,
     )
     @test result isa EvaluationResult
-    @test size(result.c) == (length(fix.G[:a].grid), length(fix.S.zgrid))
-    @test size(result.a_next) == size(result.c)
-    @test size(result.resid) == size(result.c)
+    expected = NNKernel.DEFAULT_EVAL_SAMPLES
+    @test length(result.c) == expected
+    @test length(result.a_next) == expected
+    @test length(result.resid) == expected
     @test result.max_resid ≥ 0
 end
 

@@ -12,6 +12,7 @@ struct NNSolverSettings
     v_h::Float64
     w_min::Float32
     w_max::Float32
+    samples_per_epoch::Int
     sigma_shocks::Union{Nothing,Float64}
 end
 
@@ -43,6 +44,7 @@ function solver_settings(opts; has_shocks::Bool = false)
     v_h = clamp(Float64(get_option(opts, :v_h, 0.5)), 0.2, 5.0)
     w_min = Float32(get_option(opts, :w_min, 0.1))
     w_max = Float32(get_option(opts, :w_max, 4.0))
+    samples_per_epoch = max(Int(get_option(opts, :samples_per_epoch, 64)), 1)
     sigma_shocks = get_option(opts, :sigma_shocks, nothing)
 
     return NNSolverSettings(
@@ -59,6 +61,7 @@ function solver_settings(opts; has_shocks::Bool = false)
         v_h,
         w_min,
         w_max,
+        samples_per_epoch,
         sigma_shocks,
     )
 end
@@ -262,46 +265,28 @@ function create_training_batch(
     end
 
     @assert P_resid !== nothing && settings !== nothing
+    @assert want > 0 "create_training_batch requires a positive sample count"
     Rg = 1.0f0 + Float32(P_resid.r)
     μ = Float32(P_resid.y)
-    a_min = Float32(G[:a].min)
-    a_max = Float32(G[:a].max)
     z_min = scaler.z_min
     z_max = scaler.z_min + scaler.z_range
     w_lo = settings.w_min
     w_hi = settings.w_max
+    @assert w_hi > w_lo "Require w_max > w_min for uniform cash-on-hand sampling"
 
-    A = Vector{Float32}(undef, want)
-    Z = settings.has_shocks ? Vector{Float32}(undef, want) : Float32[]
-    filled = 0
-    max_tries = 1000
-    tries = 0
-    while filled < want && tries < max_tries
-        # draw in bulk
-        m = max(want - filled, 4096)
-        a = rand(rng, Float32, m) .* (a_max - a_min) .+ a_min
-        z =
-            settings.has_shocks ? rand(rng, Float32, m) .* (z_max - z_min) .+ z_min :
-            fill(0.0f0, m)
-        # lognormal income
-        inc = @. exp(μ + z)
-        w = @. Rg * a + inc
-        keep = (w .>= w_lo) .& (w .<= w_hi)
-        k = count(keep)
-        if k > 0
-            idx = findall(keep)
-            take = min(k, want - filled)
-            A[filled+1:filled+take] .= a[idx[1:take]]
-            if settings.has_shocks
-                Z[filled+1:filled+take] .= z[idx[1:take]]
-            end
-            filled += take
-        end
-        tries += 1
+    W = rand(rng, Float32, want) .* (w_hi - w_lo) .+ w_lo
+
+    if settings.has_shocks
+        Z = rand(rng, Float32, want) .* (z_max - z_min) .+ z_min
+        inc = exp.(μ .+ Z)
+        A = (W .- inc) ./ Rg
+        X = hcat(A, Z)
+    else
+        inc_val = Float32(exp(μ))
+        A = (W .- inc_val) ./ Rg
+        X = reshape(A, :, 1)
     end
-    @assert filled == want "Sampler could not hit the w-window; widen [w_min,w_max] or raise nsamples."
 
-    X = settings.has_shocks ? hcat(A, Z) : reshape(A, :, 1)
     normalize_samples!(scaler, X)
     batch = prepare_training_batch(X)
     return batch, want
@@ -355,16 +340,15 @@ function train_consumption_network!(
     train_state = Lux.Training.TrainState(chain, ps, st, opt)
     # build loss with scaler so we can compute cash-on-hand inside the loss
     loss_function = build_loss_function(P_resid, G, S, scaler, settings, model_cfg, rng)
-    # use the strict rejection sampler to build an initial training pool large enough
-    init_nsamples =
-        min(settings.batch_choice === nothing ? 64 : settings.batch_choice, 4096)
+    # draw uniform cash-on-hand samples for the initial training batch
+    samples_per_epoch = settings.samples_per_epoch
     batch, sample_count = create_training_batch(
         G,
         S,
         scaler;
         mode = :rand,
-        nsamples = init_nsamples,
-        rng = Random.GLOBAL_RNG,
+        nsamples = samples_per_epoch,
+        rng = rng,
         P_resid = P_resid,
         settings = settings,
     )
@@ -399,7 +383,7 @@ function train_consumption_network!(
                 S,
                 scaler;
                 mode = :rand,
-                nsamples = sample_count,
+                nsamples = samples_per_epoch,
                 rng = rng,
                 P_resid = P_resid,
                 settings = settings,
