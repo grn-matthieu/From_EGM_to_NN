@@ -19,7 +19,7 @@ utility:
 
 solver:
   # run a single method name (string or symbol), a list of names, or use "all"
-  method: TimeIteration
+  method: EGM
   tol: 1.0e-4
   tol_pol: 1.0e-3
   maxit: 1000
@@ -55,7 +55,7 @@ solver:
 
 shocks:
   active: true
-  method: "rouwenhorst"   # or "tauchen"
+  method: "tauchen"
   ρ_shock: 0
   σ_shock: 0.10
   Nz: 7
