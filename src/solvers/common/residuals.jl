@@ -1,6 +1,12 @@
 module EulerResiduals
 
-using ..CommonInterp: interp_linear
+using ..CommonInterp:
+    interp_linear,
+    interp_linear!,
+    interp_pchip!,
+    InterpKind,
+    LinearInterp,
+    MonotoneCubicInterp
 using ..API
 using Zygote
 using ChainRulesCore: ignore_derivatives
@@ -8,6 +14,7 @@ using ChainRulesCore: ignore_derivatives
 export euler_resid_det, euler_resid_stoch
 export euler_resid_det!, euler_resid_stoch!
 export euler_resid_det_grid, euler_resid_stoch_grid
+export euler_resid_stoch_interp!
 
 # helpers
 @inline _T(args...) = promote_type(map(eltype, args)...)
@@ -153,6 +160,51 @@ function euler_resid_stoch!(resid::AbstractMatrix, params, a_grid, z_grid, Π, c
 end
 
 ignore_derivatives(() -> euler_resid_stoch!)
+
+"""
+    euler_resid_stoch_interp!(resid, params, a_grid, z_grid, Π, c, interp_kind)
+
+Stochastic Euler residual using a specified interpolation kind for c'(a').
+Accepts `interp_kind::InterpKind` (LinearInterp or MonotoneCubicInterp).
+"""
+function euler_resid_stoch_interp!(
+    resid::AbstractMatrix,
+    params,
+    a_grid::AbstractVector,
+    z_grid::AbstractVector,
+    Π::AbstractMatrix,
+    c::AbstractMatrix,
+    interp_kind::InterpKind,
+)
+    Na, Nz = size(c)
+    @assert size(resid) == (Na, Nz)
+    β = params.β
+    σ = params.σ
+    R = 1 + params.r
+    tmp = Vector{eltype(a_grid)}(undef, 1)
+    out = Vector{eltype(c)}(undef, 1)
+    @inbounds for j = 1:Nz
+        y = exp(z_grid[j])
+        for i = 1:Na
+            c_ij = c[i, j] <= 1e-12 ? 1e-12 : c[i, j]
+            ap = R * a_grid[i] + y - c_ij
+            Emu = 0.0
+            for jp = 1:Nz
+                if interp_kind isa LinearInterp
+                    cp = interp_linear(a_grid, c[:, jp], ap)
+                else
+                    tmp[1] = ap
+                    interp_pchip!(out, a_grid, c[:, jp], tmp)
+                    cp = out[1]
+                end
+                cp = cp <= 1e-12 ? 1e-12 : cp
+                Emu += Π[j, jp] * (cp / c_ij)^(-σ)
+            end
+            resid[i, j] = abs(1 - β * R * Emu)
+        end
+    end
+    return resid
+end
 
 
 end # module EulerResiduals
