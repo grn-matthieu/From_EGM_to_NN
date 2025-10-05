@@ -74,6 +74,8 @@ end
     @test sol1.opts.order == 1
     @test sol1.opts.fit_ok == false
     @test sol1.opts.quad_coeffs.C2 == 0.0
+    @test sol1.opts.expansion_point.ā == G[:a].min
+    @test sol1.opts.expansion_point.z̄ == 0.0
     # bounds/clamping plausibility
     @test all(sol1.a_next .>= G[:a].min) && all(sol1.a_next .<= G[:a].max)
 
@@ -111,6 +113,8 @@ end
     @test solS1.opts.quad_coeffs.C2 == 0.0 &&
           solS1.opts.quad_coeffs.D2 == 0.0 &&
           solS1.opts.quad_coeffs.E2 == 0.0
+    @test solS1.opts.expansion_point.ā == G[:a].min
+    @test solS1.opts.expansion_point.z̄ == 0.0
     @test all(solS1.a_next .>= G[:a].min) && all(solS1.a_next .<= G[:a].max)
 
     # (B) Order 2 fitting path (may or may not fit_ok=true; just assert fields/flow)
