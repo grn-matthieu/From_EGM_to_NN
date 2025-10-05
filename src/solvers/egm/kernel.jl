@@ -9,8 +9,18 @@ module EGMKernel
 using ..CommonInterp:
     interp_linear!, interp_pchip!, InterpKind, LinearInterp, MonotoneCubicInterp
 using ..EulerResiduals: euler_resid_det!, euler_resid_stoch!, euler_resid_stoch_interp!
+using ..PolicyUtils:
+    clamp_policy!,
+    compute_binding_tolerance,
+    enforce_borrowing_constraint!,
+    enforce_monotone!,
+    enforce_strict_increase!,
+    ensure_minimum!,
+    init_consumption_det,
+    relaxation_step!,
+    rmse_nonbinding,
+    sort_policy_pairs!
 using Printf
-using Statistics: mean
 
 export solve_egm_det, solve_egm_stoch
 
@@ -71,16 +81,14 @@ function solve_egm_det_impl(
     a_min = model_grids[:a].min
     a_max = model_grids[:a].max
     Na = model_grids[:a].N
-    Δa = Na > 1 ? (a_max - a_min) / (Na - 1) : (a_max - a_min)
-    bind_tol = max(DEFAULT_BINDING_TOL, 1e-6 * Δa)
+    bind_tol = compute_binding_tolerance(a_min, a_max, Na; floor = DEFAULT_BINDING_TOL)
 
     β = model_params.β
     R = 1 + model_params.r
     σ = model_params.σ
     cmin = 1e-12
 
-    resources = @. R * a_grid - a_min + model_params.y
-    c = c_init === nothing ? clamp.(0.5 .* resources, cmin, resources) : copy(c_init)
+    c = init_consumption_det(a_grid, a_min, R, model_params.y; c_init = c_init, cmin = cmin)
 
     cnew = similar(c)
     cnext = similar(c)
@@ -92,7 +100,6 @@ function solve_egm_det_impl(
     a_endo = similar(c)
     a_sorted = similar(a_endo)
     c_sorted = similar(c_endo)
-    nonbinding = falses(Na)
 
     converged = false
     iters = 0
@@ -103,39 +110,34 @@ function solve_egm_det_impl(
 
         copyto!(cold, c)
         copyto!(c_prime, cold)
-        @. c_prime = max(c_prime, cmin)
+        ensure_minimum!(c_prime, cmin)
 
         @. c_endo = model_utility.u_prime_inv(β * R * c_prime^(-σ))
         @. a_endo = (a_grid - model_params.y + c_endo) / R
 
-        @inbounds for i = 1:Na
-            if a_endo[i] < a_min
-                a_endo[i] = a_min
-                c_endo[i] = clamp(model_params.y + R * a_min - a_grid[i], cmin, Inf)
-            end
-        end
-
-        perm = sortperm(a_endo)
-        @inbounds for k = 1:Na
-            idx = perm[k]
-            a_sorted[k] = a_endo[idx]
-            c_sorted[k] = c_endo[idx]
-        end
+        enforce_borrowing_constraint!(
+            a_endo,
+            c_endo,
+            a_min,
+            model_params.y,
+            R,
+            a_grid;
+            cmin = cmin,
+        )
+        sort_policy_pairs!(a_sorted, c_sorted, a_endo, c_endo)
 
         interp_linear!(cnew, a_sorted, c_sorted, a_grid)
         cmax = @. model_params.y + R * a_grid - a_min
-        @. cnew = clamp(cnew, cmin, cmax)
+        clamp_policy!(cnew, cmin, cmax)
 
-        @. c = (1 - relax) * cold + relax * cnew
-        Δpol = maximum(abs.(c .- cold))
+        Δpol = relaxation_step!(c, cold, cnew, relax)
 
         @. a_next = clamp(model_params.y + R * a_grid - c, a_min, a_max)
         interp_linear!(cnext, a_grid, c, a_next)
-        @. cnext = max(cnext, cmin)
+        ensure_minimum!(cnext, cmin)
         euler_resid_det!(resid, model_params, c, cnext)
 
-        @. nonbinding = a_next > (a_min + bind_tol)
-        max_resid = sqrt(mean((resid[nonbinding]) .^ 2))
+        max_resid = rmse_nonbinding(resid, a_next, a_min, bind_tol)
 
         if verbose && it % 10 == 0
             @printf("[EGM det linear] it=%d rmse=%.6e Δpol=%.6e\n", it, max_resid, Δpol)
@@ -150,10 +152,9 @@ function solve_egm_det_impl(
 
     @. a_next = clamp(R * a_grid + model_params.y - c, a_min, a_max)
     interp_linear!(cnext, a_grid, c, a_next)
-    @. cnext = max(cnext, cmin)
+    ensure_minimum!(cnext, cmin)
     euler_resid_det!(resid, model_params, c, cnext)
-    @. nonbinding = a_next > (a_min + bind_tol)
-    max_resid = sqrt(mean((resid[nonbinding]) .^ 2))
+    max_resid = rmse_nonbinding(resid, a_next, a_min, bind_tol)
 
     runtime = (time_ns() - start_time) / 1e9
     opts = (;
@@ -200,16 +201,14 @@ function solve_egm_det_impl(
     a_min = model_grids[:a].min
     a_max = model_grids[:a].max
     Na = model_grids[:a].N
-    Δa = Na > 1 ? (a_max - a_min) / (Na - 1) : (a_max - a_min)
-    bind_tol = max(DEFAULT_BINDING_TOL, 1e-6 * Δa)
+    bind_tol = compute_binding_tolerance(a_min, a_max, Na; floor = DEFAULT_BINDING_TOL)
 
     β = model_params.β
     R = 1 + model_params.r
     σ = model_params.σ
     cmin = 1e-12
 
-    resources = @. R * a_grid - a_min + model_params.y
-    c = c_init === nothing ? clamp.(0.5 .* resources, cmin, resources) : copy(c_init)
+    c = init_consumption_det(a_grid, a_min, R, model_params.y; c_init = c_init, cmin = cmin)
 
     cnew = similar(c)
     cnext = similar(c)
@@ -221,8 +220,6 @@ function solve_egm_det_impl(
     a_endo = similar(c)
     a_sorted = similar(a_endo)
     c_sorted = similar(c_endo)
-    nonbinding = falses(Na)
-
     converged = false
     iters = 0
     max_resid = Inf
@@ -232,50 +229,36 @@ function solve_egm_det_impl(
 
         copyto!(cold, c)
         copyto!(c_prime, cold)
-        @. c_prime = max(c_prime, cmin)
+        ensure_minimum!(c_prime, cmin)
 
         @. c_endo = model_utility.u_prime_inv(β * R * c_prime^(-σ))
         @. a_endo = (a_grid - model_params.y + c_endo) / R
 
-        @inbounds for i = 1:Na
-            if a_endo[i] < a_min
-                a_endo[i] = a_min
-                c_endo[i] = clamp(model_params.y + R * a_min - a_grid[i], cmin, Inf)
-            end
-        end
-
-        perm = sortperm(a_endo)
-        @inbounds for k = 1:Na
-            idx = perm[k]
-            a_sorted[k] = a_endo[idx]
-            c_sorted[k] = c_endo[idx]
-        end
-
-        @inbounds for k = 2:Na
-            if a_sorted[k] <= a_sorted[k-1]
-                a_sorted[k] = a_sorted[k-1] + 1e-12
-            end
-        end
+        enforce_borrowing_constraint!(
+            a_endo,
+            c_endo,
+            a_min,
+            model_params.y,
+            R,
+            a_grid;
+            cmin = cmin,
+        )
+        sort_policy_pairs!(a_sorted, c_sorted, a_endo, c_endo)
+        enforce_strict_increase!(a_sorted)
 
         interp_pchip!(cnew, a_sorted, c_sorted, a_grid)
         cmax = @. model_params.y + R * a_grid - a_min
-        @. cnew = clamp(cnew, cmin, cmax)
-        @inbounds for i = 2:Na
-            if cnew[i] < cnew[i-1]
-                cnew[i] = cnew[i-1] + 1e-12
-            end
-        end
+        clamp_policy!(cnew, cmin, cmax)
+        enforce_monotone!(cnew)
 
-        @. c = (1 - relax) * cold + relax * cnew
-        Δpol = maximum(abs.(c .- cold))
+        Δpol = relaxation_step!(c, cold, cnew, relax)
 
         @. a_next = clamp(model_params.y + R * a_grid - c, a_min, a_max)
         interp_pchip!(cnext, a_grid, c, a_next)
-        @. cnext = max(cnext, cmin)
+        ensure_minimum!(cnext, cmin)
         euler_resid_det!(resid, model_params, c, cnext)
 
-        @. nonbinding = a_next > (a_min + bind_tol)
-        max_resid = sqrt(mean((resid[nonbinding]) .^ 2))
+        max_resid = rmse_nonbinding(resid, a_next, a_min, bind_tol)
 
         if verbose && it % 10 == 0
             @printf("[EGM det pchip] it=%d rmse=%.6e Δpol=%.6e\n", it, max_resid, Δpol)
@@ -290,10 +273,9 @@ function solve_egm_det_impl(
 
     @. a_next = clamp(R * a_grid + model_params.y - c, a_min, a_max)
     interp_pchip!(cnext, a_grid, c, a_next)
-    @. cnext = max(cnext, cmin)
+    ensure_minimum!(cnext, cmin)
     euler_resid_det!(resid, model_params, c, cnext)
-    @. nonbinding = a_next > (a_min + bind_tol)
-    max_resid = sqrt(mean((resid[nonbinding]) .^ 2))
+    max_resid = rmse_nonbinding(resid, a_next, a_min, bind_tol)
 
     runtime = (time_ns() - start_time) / 1e9
     opts = (;
@@ -379,8 +361,7 @@ function solve_egm_stoch_impl(
     a_min = model_grids[:a].min
     a_max = model_grids[:a].max
     Na = model_grids[:a].N
-    Δa = Na > 1 ? (a_max - a_min) / (Na - 1) : (a_max - a_min)
-    bind_tol = max(DEFAULT_BINDING_TOL, 1e-6 * Δa)
+    bind_tol = compute_binding_tolerance(a_min, a_max, Na; floor = DEFAULT_BINDING_TOL)
 
     z_grid = model_shocks.zgrid
     Π = model_shocks.Π
@@ -396,13 +377,12 @@ function solve_egm_stoch_impl(
     cnew = similar(c)
     a_next = similar(c)
     resid_mat = similar(c)
-    nonbinding = falses(Na, Nz)
-
     EUprime = similar(view(c, :, 1))
     c_endo = similar(EUprime)
     a_endo = similar(EUprime)
     a_sorted = similar(EUprime)
     c_sorted = similar(EUprime)
+    cmax = similar(EUprime)
 
     converged = false
     iters = 0
@@ -423,27 +403,15 @@ function solve_egm_stoch_impl(
             @. c_endo = model_utility.u_prime_inv(β * R * EUprime)
             @. a_endo = (a_grid - y + c_endo) / R
 
-            @inbounds for i = 1:Na
-                if a_endo[i] < a_min
-                    a_endo[i] = a_min
-                    c_endo[i] = clamp(y + R * a_min - a_grid[i], cmin, Inf)
-                end
-            end
-
-            perm = sortperm(a_endo)
-            @inbounds for k = 1:Na
-                idx = perm[k]
-                a_sorted[k] = a_endo[idx]
-                c_sorted[k] = c_endo[idx]
-            end
+            enforce_borrowing_constraint!(a_endo, c_endo, a_min, y, R, a_grid; cmin = cmin)
+            sort_policy_pairs!(a_sorted, c_sorted, a_endo, c_endo)
 
             interp_linear!(view(cnew, :, j), a_sorted, c_sorted, a_grid)
-            cmax = @. y + R * a_grid - a_min
-            @views @. cnew[:, j] = clamp(cnew[:, j], cmin, cmax)
+            @. cmax = y + R * a_grid - a_min
+            clamp_policy!(view(cnew, :, j), cmin, cmax)
         end
 
-        @. c = (1 - relax) * cold + relax * cnew
-        Δpol = maximum(abs.(c .- cold))
+        Δpol = relaxation_step!(c, cold, cnew, relax)
 
         for (j, z) in enumerate(z_grid)
             y = exp(z)
@@ -460,8 +428,7 @@ function solve_egm_stoch_impl(
             LinearInterp(),
         )
 
-        @. nonbinding = a_next > (a_min + bind_tol)
-        max_resid = sqrt(mean((resid_mat[nonbinding]) .^ 2))
+        max_resid = rmse_nonbinding(resid_mat, a_next, a_min, bind_tol)
 
         if verbose && it % 10 == 0
             @printf("[EGM stoch linear] it=%d rmse=%.6e Δpol=%.6e\n", it, max_resid, Δpol)
@@ -480,8 +447,7 @@ function solve_egm_stoch_impl(
     end
 
     euler_resid_stoch_interp!(resid_mat, model_params, a_grid, z_grid, Π, c, LinearInterp())
-    @. nonbinding = a_next > (a_min + bind_tol)
-    max_resid = sqrt(mean((resid_mat[nonbinding]) .^ 2))
+    max_resid = rmse_nonbinding(resid_mat, a_next, a_min, bind_tol)
 
     runtime = (time_ns() - start_time) / 1e9
     opts = (;
@@ -528,8 +494,7 @@ function solve_egm_stoch_impl(
     a_min = model_grids[:a].min
     a_max = model_grids[:a].max
     Na = model_grids[:a].N
-    Δa = Na > 1 ? (a_max - a_min) / (Na - 1) : (a_max - a_min)
-    bind_tol = max(DEFAULT_BINDING_TOL, 1e-6 * Δa)
+    bind_tol = compute_binding_tolerance(a_min, a_max, Na; floor = DEFAULT_BINDING_TOL)
 
     z_grid = model_shocks.zgrid
     Π = model_shocks.Π
@@ -545,13 +510,12 @@ function solve_egm_stoch_impl(
     cnew = similar(c)
     a_next = similar(c)
     resid_mat = similar(c)
-    nonbinding = falses(Na, Nz)
-
     EUprime = similar(view(c, :, 1))
     c_endo = similar(EUprime)
     a_endo = similar(EUprime)
     a_sorted = similar(EUprime)
     c_sorted = similar(EUprime)
+    cmax = similar(EUprime)
 
     converged = false
     iters = 0
@@ -572,42 +536,20 @@ function solve_egm_stoch_impl(
             @. c_endo = model_utility.u_prime_inv(β * R * EUprime)
             @. a_endo = (a_grid - y + c_endo) / R
 
-            @inbounds for i = 1:Na
-                if a_endo[i] < a_min
-                    a_endo[i] = a_min
-                    c_endo[i] = clamp(y + R * a_min - a_grid[i], cmin, Inf)
-                end
-            end
+            enforce_borrowing_constraint!(a_endo, c_endo, a_min, y, R, a_grid; cmin = cmin)
+            sort_policy_pairs!(a_sorted, c_sorted, a_endo, c_endo)
+            enforce_strict_increase!(a_sorted)
+            enforce_monotone!(c_sorted)
 
-            perm = sortperm(a_endo)
-            @inbounds for k = 1:Na
-                idx = perm[k]
-                a_sorted[k] = a_endo[idx]
-                c_sorted[k] = c_endo[idx]
-            end
+            column = view(cnew, :, j)
+            interp_pchip!(column, a_sorted, c_sorted, a_grid)
 
-            @inbounds for k = 2:Na
-                if a_sorted[k] <= a_sorted[k-1]
-                    a_sorted[k] = a_sorted[k-1] + 1e-12
-                end
-                if c_sorted[k] < c_sorted[k-1]
-                    c_sorted[k] = c_sorted[k-1] + 1e-12
-                end
-            end
-
-            interp_pchip!(view(cnew, :, j), a_sorted, c_sorted, a_grid)
-
-            cmax = @. y + R * a_grid - a_min
-            @views @. cnew[:, j] = clamp(cnew[:, j], cmin, cmax)
-            @inbounds for i = 2:Na
-                if cnew[i, j] < cnew[i-1, j]
-                    cnew[i, j] = cnew[i-1, j] + 1e-12
-                end
-            end
+            @. cmax = y + R * a_grid - a_min
+            clamp_policy!(column, cmin, cmax)
+            enforce_monotone!(column)
         end
 
-        @. c = (1 - relax) * cold + relax * cnew
-        Δpol = maximum(abs.(c .- cold))
+        Δpol = relaxation_step!(c, cold, cnew, relax)
 
         for (j, z) in enumerate(z_grid)
             y = exp(z)
@@ -624,8 +566,7 @@ function solve_egm_stoch_impl(
             MonotoneCubicInterp(),
         )
 
-        @. nonbinding = a_next > (a_min + bind_tol)
-        max_resid = sqrt(mean((resid_mat[nonbinding]) .^ 2))
+        max_resid = rmse_nonbinding(resid_mat, a_next, a_min, bind_tol)
 
         if verbose && it % 10 == 0
             @printf("[EGM stoch pchip] it=%d rmse=%.6e Δpol=%.6e\n", it, max_resid, Δpol)
@@ -652,8 +593,7 @@ function solve_egm_stoch_impl(
         c,
         MonotoneCubicInterp(),
     )
-    @. nonbinding = a_next > (a_min + bind_tol)
-    max_resid = sqrt(mean((resid_mat[nonbinding]) .^ 2))
+    max_resid = rmse_nonbinding(resid_mat, a_next, a_min, bind_tol)
 
     runtime = (time_ns() - start_time) / 1e9
     opts = (;

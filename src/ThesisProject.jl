@@ -29,6 +29,7 @@ include("core/model_factory.jl")
 # 4) solvers (pure kernels)
 # common solver utilities
 include("solvers/common/interp.jl")
+include("solvers/common/policy_utils.jl")
 include("solvers/common/value_fun.jl")
 include("solvers/common/chebyshev.jl")
 include("solvers/common/residuals.jl")

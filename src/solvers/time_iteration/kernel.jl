@@ -11,8 +11,15 @@ module TimeIterationKernel
 using ..CommonInterp:
     interp_linear!, interp_pchip!, InterpKind, LinearInterp, MonotoneCubicInterp
 using ..EulerResiduals: euler_resid_det!, euler_resid_stoch!, euler_resid_stoch_interp!
+using ..PolicyUtils:
+    clamp_policy!,
+    compute_binding_tolerance,
+    enforce_monotone!,
+    ensure_minimum!,
+    init_consumption_det,
+    relaxation_step!,
+    rmse_nonbinding
 using Printf
-using Statistics: mean
 
 export solve_ti_det, solve_ti_stoch
 
@@ -65,21 +72,21 @@ function solve_ti_det_impl(
     a_grid = model_grids[:a].grid
     a_min = model_grids[:a].min
     a_max = model_grids[:a].max
-    # (Na available as model_grids[:a].N if needed)
+    Na = model_grids[:a].N
 
     R = 1 + model_params.r
     β = model_params.β
     σ = model_params.σ
     cmin = 1e-12
-    bind_tol = 1e-12
+    bind_tol = compute_binding_tolerance(a_min, a_max, Na; floor = 1e-12, rel = 0.0)
 
-    resources = @. R * a_grid - a_min + model_params.y
-    c = c_init === nothing ? clamp.(0.5 .* resources, cmin, resources) : copy(c_init)
+    c = init_consumption_det(a_grid, a_min, R, model_params.y; c_init = c_init, cmin = cmin)
 
     cnext = similar(c)
     cnew = similar(c)
     a_next = similar(c)
     resid = similar(c)
+    cold = similar(c)
 
     converged = false
     iters = 0
@@ -89,31 +96,23 @@ function solve_ti_det_impl(
     for it = 1:maxit
         iters = it
         # compute implied next assets from current policy
-        @. a_next = model_params.y + R * a_grid - c
-        @. a_next = clamp(a_next, a_min, a_max)
+        @. a_next = clamp(model_params.y + R * a_grid - c, a_min, a_max)
 
         # interpolate consumption at a_next
         interp_linear!(cnext, a_grid, c, a_next)
-        @. cnext = max(cnext, cmin)
+        ensure_minimum!(cnext, cmin)
 
         # update consumption from Euler equation: c_new = (u'^{-1}(β R u'(c_next)))
         @. cnew = model_utility.u_prime_inv(β * R * cnext .^ (-σ))
         cmax = @. model_params.y + R * a_grid - a_min
-        @. cnew = clamp(cnew, cmin, cmax)
+        clamp_policy!(cnew, cmin, cmax)
 
         # policy progress: infinity norm of change between successive iterates
-        c_prev = copy(c)
-        @. c = (1 - relax) * c + relax * cnew
-        Δpol = maximum(abs.(c .- c_prev))
+        copyto!(cold, c)
+        Δpol = relaxation_step!(c, cold, cnew, relax)
 
         euler_resid_det!(resid, model_params, c, cnext)
-        # RMSE residual on non-binding points (where a_next > a_min)
-        mask = a_next .> (a_min + bind_tol)
-        if any(mask)
-            max_resid = sqrt(mean((resid[mask]) .^ 2))
-        else
-            max_resid = sqrt(mean((resid[min(2, end):end]) .^ 2))
-        end
+        max_resid = rmse_nonbinding(resid, a_next, a_min, bind_tol)
 
         if verbose && (it % 10 == 0)
             @printf("[TimeIteration] it=%d rmse=%.6e Δpol=%.6e\n", it, max_resid, Δpol)
@@ -134,17 +133,11 @@ function solve_ti_det_impl(
     end
 
     # final consistency
-    @. a_next = R * a_grid + model_params.y - c
-    @. a_next = clamp(a_next, a_min, a_max)
+    @. a_next = clamp(R * a_grid + model_params.y - c, a_min, a_max)
     interp_linear!(cnext, a_grid, c, a_next)
-    @. cnext = max(cnext, cmin)
+    ensure_minimum!(cnext, cmin)
     euler_resid_det!(resid, model_params, c, cnext)
-    mask = a_next .> (a_min + bind_tol)
-    if any(mask)
-        max_resid = sqrt(mean((resid[mask]) .^ 2))
-    else
-        max_resid = sqrt(mean((resid[min(2, end):end]) .^ 2))
-    end
+    max_resid = rmse_nonbinding(resid, a_next, a_min, bind_tol)
 
     runtime = (time_ns() - start_time) / 1e9
     opts = (;
@@ -199,15 +192,15 @@ function solve_ti_det_impl(
     β = model_params.β
     σ = model_params.σ
     cmin = 1e-12
-    bind_tol = 1e-12
+    bind_tol = compute_binding_tolerance(a_min, a_max, Na; floor = 1e-12, rel = 0.0)
 
-    resources = @. R * a_grid - a_min + model_params.y
-    c = c_init === nothing ? clamp.(0.5 .* resources, cmin, resources) : copy(c_init)
+    c = init_consumption_det(a_grid, a_min, R, model_params.y; c_init = c_init, cmin = cmin)
 
     cnext = similar(c)
     cnew = similar(c)
     a_next = similar(c)
     resid = similar(c)
+    cold = similar(c)
 
     converged = false
     iters = 0
@@ -216,35 +209,24 @@ function solve_ti_det_impl(
 
     for it = 1:maxit
         iters = it
-        @. a_next = model_params.y + R * a_grid - c
-        @. a_next = clamp(a_next, a_min, a_max)
+        @. a_next = clamp(model_params.y + R * a_grid - c, a_min, a_max)
 
         interp_pchip!(cnext, a_grid, c, a_next)
-        @. cnext = max(cnext, cmin)
+        ensure_minimum!(cnext, cmin)
 
         @. cnew = model_utility.u_prime_inv(β * R * cnext .^ (-σ))
         cmax = @. model_params.y + R * a_grid - a_min
-        @. cnew = clamp(cnew, cmin, cmax)
+        clamp_policy!(cnew, cmin, cmax)
 
         # monotone enforcement
-        @inbounds for i = 2:Na
-            if cnew[i] < cnew[i-1]
-                cnew[i] = cnew[i-1] + 1e-12
-            end
-        end
+        enforce_monotone!(cnew)
 
         # policy progress per formula Δ^{(k)}_∞ = max_{i,j} |c^{(k)} - c^{(k-1)}|
-        c_prev = copy(c)
-        @. c = (1 - relax) * c + relax * cnew
-        Δpol = maximum(abs.(c .- c_prev))
+        copyto!(cold, c)
+        Δpol = relaxation_step!(c, cold, cnew, relax)
 
         euler_resid_det!(resid, model_params, c, cnext)
-        mask = a_next .> (a_min + bind_tol)
-        if any(mask)
-            max_resid = sqrt(mean((resid[mask]) .^ 2))
-        else
-            max_resid = sqrt(mean((resid[min(2, end):end]) .^ 2))
-        end
+        max_resid = rmse_nonbinding(resid, a_next, a_min, bind_tol)
 
         if verbose && (it % 10 == 0)
             @printf(
@@ -269,17 +251,11 @@ function solve_ti_det_impl(
         end
     end
 
-    @. a_next = R * a_grid + model_params.y - c
-    @. a_next = clamp(a_next, a_min, a_max)
+    @. a_next = clamp(R * a_grid + model_params.y - c, a_min, a_max)
     interp_pchip!(cnext, a_grid, c, a_next)
-    @. cnext = max(cnext, cmin)
+    ensure_minimum!(cnext, cmin)
     euler_resid_det!(resid, model_params, c, cnext)
-    mask = a_next .> (a_min + bind_tol)
-    if any(mask)
-        max_resid = maximum(abs.(resid[mask]))
-    else
-        max_resid = maximum(abs.(resid[min(2, end):end]))
-    end
+    max_resid = rmse_nonbinding(resid, a_next, a_min, bind_tol)
 
     runtime = (time_ns() - start_time) / 1e9
     opts = (;
@@ -379,7 +355,9 @@ function solve_ti_stoch_impl(
     cnew = similar(c)
     EUprime = similar(a_grid)
     resid_mat = similar(c)
-    bind_tol = 1e-12
+    cmax = similar(a_grid)
+    bind_tol = compute_binding_tolerance(a_min, a_max, Na; floor = 1e-12, rel = 0.0)
+    cold = similar(c)
 
     converged = false
     iters = 0
@@ -388,30 +366,35 @@ function solve_ti_stoch_impl(
 
     for it = 1:maxit
         iters = it
+        copyto!(cold, c)
+
         for (j, z) in enumerate(z_grid)
             y = exp(z)
-            @. a_next[:, j] = R * a_grid + y - c[:, j]
-            @. a_next[:, j] = clamp(a_next[:, j], a_min, a_max)
+            @views begin
+                aj = view(a_next, :, j)
+                cj = view(c, :, j)
+                aj .= clamp.(R .* a_grid .+ y .- cj, a_min, a_max)
+            end
 
             fill!(EUprime, 0.0)
             for (jp, _) in enumerate(z_grid)
                 interp_linear!(cnext, a_grid, view(c, :, jp), view(a_next, :, j))
-                @. cnext = max(cnext, cmin)
+                ensure_minimum!(cnext, cmin)
                 @. EUprime += Π[j, jp] * (cnext .^ (-σ))
             end
 
-            @. cnew[:, j] = ((β * R) .* EUprime) .^ (-1 / σ)
-            cmax = @. y + R * a_grid - a_min
-            @. cnew[:, j] = clamp(cnew[:, j], cmin, cmax)
-
-            @. a_next[:, j] = R * a_grid + y - cnew[:, j]
-            @. a_next[:, j] = clamp(a_next[:, j], a_min, a_max)
+            column = view(cnew, :, j)
+            @. column = model_utility.u_prime_inv(β * R * EUprime)
+            @. cmax = y + R * a_grid - a_min
+            clamp_policy!(column, cmin, cmax)
         end
 
-        # policy progress: compute sup norm across all (a,z) between iterates
-        c_prev = copy(c)
-        @. c = (1 - relax) * c + relax * cnew
-        Δpol = maximum(abs.(c .- c_prev))
+        Δpol = relaxation_step!(c, cold, cnew, relax)
+
+        for (j, z) in enumerate(z_grid)
+            y = exp(z)
+            @views @. a_next[:, j] = clamp(R * a_grid + y - c[:, j], a_min, a_max)
+        end
 
         if verbose && (it % 10 == 0)
             @printf(
@@ -433,12 +416,7 @@ function solve_ti_stoch_impl(
             interp_kind,
         )
         # resid_mat is Na x Nz. Build mask of non-binding entries where a_next > a_min
-        mask_mat = a_next .> (a_min + bind_tol)
-        if any(mask_mat)
-            max_resid = sqrt(mean((resid_mat[mask_mat]) .^ 2))
-        else
-            max_resid = sqrt(mean((resid_mat[min(2, end):end, :]) .^ 2))
-        end
+        max_resid = rmse_nonbinding(resid_mat, a_next, a_min, bind_tol)
 
         if max_resid < tol && Δpol < tol_pol
             converged = true
@@ -453,12 +431,7 @@ function solve_ti_stoch_impl(
     end
 
     euler_resid_stoch_interp!(resid_mat, model_params, a_grid, z_grid, Π, c, interp_kind)
-    mask_mat = a_next .> (a_min + bind_tol)
-    if any(mask_mat)
-        max_resid = sqrt(mean((resid_mat[mask_mat]) .^ 2))
-    else
-        max_resid = sqrt(mean((resid_mat[min(2, end):end, :]) .^ 2))
-    end
+    max_resid = rmse_nonbinding(resid_mat, a_next, a_min, bind_tol)
 
     runtime = (time_ns() - start_time) / 1e9
     opts = (;
