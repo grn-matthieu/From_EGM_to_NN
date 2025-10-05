@@ -169,8 +169,8 @@ function solve_nn(model; opts = nothing, rng = nothing)
         P_resid,
         G,
         S,
-        model_cfg,
         train_rng,
+        model_cfg,
     )
 
     best_state = training_result.best_state

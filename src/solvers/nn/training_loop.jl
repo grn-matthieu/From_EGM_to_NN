@@ -100,8 +100,8 @@ function build_loss_function(
     S,
     scaler::FeatureScaler,
     settings::NNSolverSettings,
-    model_cfg = nothing,
     rng::AbstractRNG,
+    model_cfg = nothing,
 )
     return function (model, ps, st, data)
         X = data[1]
@@ -332,14 +332,14 @@ function train_consumption_network!(
     P_resid,
     G,
     S,
-    model_cfg = nothing,
     rng::AbstractRNG,
+    model_cfg = nothing,
 )
     ps, st = Lux.setup(rng, chain)
     opt = create_optimizer(settings)
     train_state = Lux.Training.TrainState(chain, ps, st, opt)
     # build loss with scaler so we can compute cash-on-hand inside the loss
-    loss_function = build_loss_function(P_resid, G, S, scaler, settings, model_cfg, rng)
+    loss_function = build_loss_function(P_resid, G, S, scaler, settings, rng, model_cfg)
     # draw uniform cash-on-hand samples for the initial training batch
     samples_per_epoch = settings.samples_per_epoch
     batch, sample_count = create_training_batch(

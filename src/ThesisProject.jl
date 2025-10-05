@@ -13,13 +13,13 @@ using PrecompileTools
 
 # --- Includes ---
 # 1) spine
+include("utils/Determinism.jl")
 include("core/api.jl")
 include("core/model_contract.jl")
 
 # 2) utilities
 include("utils/Config.jl")
 # include("utils/Schema.jl")
-include("utils/Determinism.jl")
 include("utils/Diagnostics.jl")
 
 # 3) shared + models + model builder

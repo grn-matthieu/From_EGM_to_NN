@@ -24,7 +24,7 @@ function build_nn_method(cfg::NamedTuple)
     solver_cfg = cfg.solver
     return NNMethod((
         name = maybe(cfg, :method, solver_cfg.method),
-        epochs = maybe(solver_cfg, :epochs, 1000),
+        epochs = maybe(solver_cfg, :epochs, 100_000),
         batch = maybe(solver_cfg, :batch, 64),
         lr = maybe(solver_cfg, :lr, 1e-4),
         verbose = maybe(solver_cfg, :verbose, false),
@@ -37,6 +37,7 @@ function build_nn_method(cfg::NamedTuple)
 
         # optional: pass shock std override for convenience
         sigma_shocks = maybe(solver_cfg, :sigma_shocks, nothing),
+        target_loss = maybe(solver_cfg, :target_loss, 1e-10),
     ))
 end
 
@@ -77,7 +78,29 @@ function solve(
         :a => (; value = sol.a_next, grid = sol.a_grid),
     )
 
-    value = compute_value_policy(p, g, S, U, policy)
+    # Only compute value if the policy arrays are grid-aligned.
+    agrid = g[:a].grid
+    Na = length(agrid)
+    has_shocks = S !== nothing
+    shapes_ok = false
+    if !has_shocks
+        shapes_ok =
+            (sol.c isa AbstractVector) &&
+            (sol.a_next isa AbstractVector) &&
+            (length(sol.c) == Na) &&
+            (length(sol.a_next) == Na)
+    else
+        Nz = size(S.Π, 1)
+        shapes_ok =
+            (sol.c isa AbstractMatrix) &&
+            (sol.a_next isa AbstractMatrix) &&
+            (size(sol.c, 1) == Na) &&
+            (size(sol.c, 2) == Nz) &&
+            (size(sol.a_next, 1) == Na) &&
+            (size(sol.a_next, 2) == Nz)
+    end
+
+    value = shapes_ok ? compute_value_policy(p, g, S, U, policy) : nothing
 
     model_id = hash_hex(canonicalize_cfg(cfg))
     diagnostics = (;
