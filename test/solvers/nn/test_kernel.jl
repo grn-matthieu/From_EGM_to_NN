@@ -1,6 +1,7 @@
 using Test
 using Random
 using ThesisProject
+using ThesisProject.Determinism: make_master_rng, make_rng
 
 
 using Lux
@@ -160,6 +161,7 @@ end
         fix.scaler;
         settings = fix.settings,
         U = fix.U,
+        rng = make_rng(10),
     )
     @test result isa EvaluationResult
     expected = NNKernel.DEFAULT_EVAL_SAMPLES
@@ -182,6 +184,7 @@ end
         fix.scaler;
         settings = fix.settings,
         U = fix.U,
+        rng = make_rng(11),
     )
     @test result isa EvaluationResult
     expected = NNKernel.DEFAULT_EVAL_SAMPLES
@@ -201,8 +204,9 @@ end
         fix.U,
         fix.scaler,
         fix.settings;
-        eval_mc_fn = (args...) -> :mc_diag,
-        eval_gh_fn = (args...) -> :gh_diag,
+        eval_mc_fn = (args...; kwargs...) -> :mc_diag,
+        eval_gh_fn = (args...; kwargs...) -> :gh_diag,
+        rng = make_rng(12),
     )
     @test mc === nothing
     @test gh === nothing
@@ -210,10 +214,10 @@ end
     fix_s = make_fixture(shocks = true)
     @eval NNKernel begin
         const P_common = (σ = 2.0, β = 0.96, r = 0.01, y = 0.0, ρ = 0.9, σ_shocks = 0.1)
-        function eval_euler_residuals_mc(::Any...)
+        function eval_euler_residuals_mc(::Any...; kwargs...)
             return :mc_diag
         end
-        function eval_euler_residuals_gh(::Any...)
+        function eval_euler_residuals_gh(::Any...; kwargs...)
             return :gh_diag
         end
     end
@@ -228,8 +232,9 @@ end
         fix_s.U,
         fix_s.scaler,
         fix_s.settings;
-        eval_mc_fn = (args...) -> :mc_diag,
-        eval_gh_fn = (args...) -> :gh_diag,
+        eval_mc_fn = (args...; kwargs...) -> :mc_diag,
+        eval_gh_fn = (args...; kwargs...) -> :gh_diag,
+        rng = make_rng(13),
     )
     @test mc_s == :mc_diag
     @test gh_s == :gh_diag
@@ -285,15 +290,16 @@ end
             best_state = (model = :trained_model, parameters = :θ, states = :σ)
             return TrainingResult(best_state, 0.05, 3, 4, 2)
         end
-        function evaluate_solution(::Any, ::Any, ::Any, ::Any, ::Any, G, ::Any, ::Any)
+        function evaluate_solution(::Any...; kwargs...)
+            G = kwargs[:G]
             Na = length(G[:a].grid)
             return EvaluationResult(fill(0.9, Na), fill(0.1, Na), fill(0.0, Na), 0.01)
         end
-        function maybe_dense_diagnostics(::Any...)
+        function maybe_dense_diagnostics(::Any...; kwargs...)
             return :mc_stub, :gh_stub
         end
         # Patch solve_nn to return all expected fields for the test
-        function solve_nn(::Any; opts = nothing)
+        function solve_nn(::Any; opts = nothing, rng = nothing)
             return (
                 a_grid = [0.0, 0.5, 1.0],
                 c = [0.9, 0.9, 0.9],
@@ -310,14 +316,19 @@ end
         end
     end
 
-    sol_det = solve_nn(dummy_det; opts = (epochs = 2, target_loss = 0.1))
+    sol_det = solve_nn(
+        dummy_det;
+        opts = (epochs = 2, target_loss = 0.1),
+        rng = make_master_rng(0),
+    )
     @test sol_det.converged === true
     @test sol_det.iters == 3
     @test sol_det.opts.epochs == 2
     @test sol_det.eval_mc == :mc_stub
     @test sol_det.eval_gh == :gh_stub
 
-    sol_st = solve_nn(dummy_st; opts = (epochs = 2, target_loss = 0.1))
+    sol_st =
+        solve_nn(dummy_st; opts = (epochs = 2, target_loss = 0.1), rng = make_master_rng(1))
     @test sol_st.converged === true
     @test sol_st.iters == 3
     @test sol_st.opts.epochs == 2

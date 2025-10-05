@@ -76,6 +76,12 @@ function cfg_patch(cfg::_ConfigLike, updates::Pair...)
             error("Unsupported config path type $(typeof(path))")
         end
     end
+    if cfg isa NamedTuple && isdefined(Main, :ThesisProject)
+        try
+            cfg = ThesisProject.UtilsConfig.ensure_master_rng(cfg)
+        catch
+        end
+    end
     return cfg
 end
 

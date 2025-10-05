@@ -101,7 +101,7 @@ function build_loss_function(
     scaler::FeatureScaler,
     settings::NNSolverSettings,
     model_cfg = nothing,
-    rng = Random.GLOBAL_RNG,
+    rng::AbstractRNG,
 )
     return function (model, ps, st, data)
         X = data[1]
@@ -249,7 +249,7 @@ function create_training_batch(
     scaler::FeatureScaler;
     mode = :rand,
     nsamples::Int = 4096,
-    rng = Random.GLOBAL_RNG,
+    rng::AbstractRNG,
     P_resid = nothing,
     settings::Union{NNSolverSettings,Nothing} = nothing,
 )
@@ -333,9 +333,9 @@ function train_consumption_network!(
     G,
     S,
     model_cfg = nothing,
-    rng = Random.GLOBAL_RNG,
+    rng::AbstractRNG,
 )
-    ps, st = Lux.setup(Random.GLOBAL_RNG, chain)
+    ps, st = Lux.setup(rng, chain)
     opt = create_optimizer(settings)
     train_state = Lux.Training.TrainState(chain, ps, st, opt)
     # build loss with scaler so we can compute cash-on-hand inside the loss
@@ -374,7 +374,6 @@ function train_consumption_network!(
     batches_per_epoch = cld(total_samples, batch_size)
     best_state = train_state
     best_loss = Inf
-    rng = Random.default_rng()
     stall_epochs = 0
     for epoch = 1:settings.epochs
         if settings.resample_interval > 0 && epoch % settings.resample_interval == 0

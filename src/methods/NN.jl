@@ -10,7 +10,7 @@ using Printf
 import ..API: solve
 using ..NNKernel: solve_nn
 using ..ValueFunction: compute_value_policy
-using ..Determinism: canonicalize_cfg, hash_hex
+using ..Determinism: canonicalize_cfg, derive_rng, hash_hex, promote_master_rng
 using ..UtilsConfig: maybe
 
 export NNMethod, build_nn_method
@@ -39,14 +39,26 @@ function build_nn_method(cfg::NamedTuple)
     ))
 end
 
-function solve(model::AbstractModel, method::NNMethod, cfg::NamedTuple;)::Solution
+function solve(
+    model::AbstractModel,
+    method::NNMethod,
+    cfg::NamedTuple;
+    rng = nothing,
+)::Solution
     p = get_params(model)
     g = get_grids(model)
     S = get_shocks(model)
     U = get_utility(model)
 
+    cfg_master =
+        hasproperty(cfg, :random) && hasproperty(cfg.random, :master_rng) ?
+        promote_master_rng(cfg.random.master_rng) : nothing
+    master = rng === nothing ? cfg_master : promote_master_rng(rng)
+    master === nothing &&
+        error("No master RNG available; pass `rng` or ensure cfg.random.seed is set")
+
     # Call the NN kernel to solve the model and return the solution struct
-    sol = solve_nn(model; opts = method.opts)
+    sol = solve_nn(model; opts = method.opts, rng = derive_rng(master, :nn_kernel))
 
     ee = sol.resid
     ee_vec = ee isa AbstractMatrix ? vec(maximum(ee, dims = 2)) : ee

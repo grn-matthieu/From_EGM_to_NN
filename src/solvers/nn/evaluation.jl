@@ -105,7 +105,7 @@ function evaluate_deterministic(
     scaler,
     settings;
     nsamples::Int = DEFAULT_EVAL_SAMPLES,
-    rng = Random.default_rng(),
+    rng::AbstractRNG,
 )
     batch, _ = create_training_batch(
         G,
@@ -153,7 +153,7 @@ function evaluate_stochastic(
     settings,
     U;
     nsamples::Int = DEFAULT_EVAL_SAMPLES,
-    rng = Random.default_rng(),
+    rng::AbstractRNG,
 )
     batch, _ = create_training_batch(
         G,
@@ -214,7 +214,7 @@ function evaluate_solution(
     settings::Union{NNSolverSettings,Nothing} = nothing,
     U = nothing,
     nsamples::Int = DEFAULT_EVAL_SAMPLES,
-    rng = Random.default_rng(),
+    rng::AbstractRNG,
 )
     local_settings =
         settings === nothing ? solver_settings(nothing; has_shocks = scaler.has_shocks) :
@@ -260,7 +260,7 @@ function eval_euler_residuals_mc(
     scaler,
     settings;
     N = 8192,
-    rng = Random.GLOBAL_RNG,
+    rng::AbstractRNG,
     G = nothing,
     S = nothing,
     P = nothing,
@@ -362,7 +362,7 @@ function eval_euler_residuals_gh(
     scaler,
     settings;
     N = 4096,
-    rng = Random.GLOBAL_RNG,
+    rng::AbstractRNG,
     G = nothing,
     S = nothing,
     P = nothing,

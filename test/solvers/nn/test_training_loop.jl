@@ -1,5 +1,6 @@
 # test/methods/test_nn_training_utils.jl
 using ThesisProject
+using ThesisProject.Determinism: make_rng
 using LinearAlgebra: I
 using Random
 
@@ -115,7 +116,7 @@ end
     a = 0.0:0.5:2.0
     G = make_G(a)
 
-    batch, n = NN.create_training_batch(G, nothing, scaler; mode = :full)
+    batch, n = NN.create_training_batch(G, nothing, scaler; mode = :full, rng = make_rng(0))
     @test size(batch, 1) == 1                      # features = (a,)
     @test size(batch, 2) == length(a)              # samples
     @test n == length(a)
@@ -125,7 +126,7 @@ end
     S = make_S(z)
     scaler = NN.FeatureScaler(0.0f0, 1.0f0, 0.0f0, 1.0f0, true)
 
-    batch2, n2 = NN.create_training_batch(G, S, scaler; mode = :full)
+    batch2, n2 = NN.create_training_batch(G, S, scaler; mode = :full, rng = make_rng(1))
     @test size(batch2, 1) == 2                     # features = (a, z)
     @test size(batch2, 2) == length(a) * length(z) # samples
     @test n2 == length(a) * length(z)
@@ -189,7 +190,8 @@ end
     # Deterministic: new signature includes scaler and settings
     scaler = NN.FeatureScaler(G, nothing)
     settings = NN.solver_settings((; objective = :euler, hid1 = 4, hid2 = 4))
-    loss_det = NN.build_loss_function(P_resid, G, nothing, scaler, settings)
+    loss_det =
+        NN.build_loss_function(P_resid, G, nothing, scaler, settings, nothing, make_rng(2))
     model = (X, ps, st) -> vec(X)
     ps = nothing
     st = nothing
@@ -206,7 +208,8 @@ end
     scaler_s = NN.FeatureScaler(G, S)
     settings_s =
         NN.solver_settings((; objective = :euler, hid1 = 4, hid2 = 4); has_shocks = true)
-    loss_st = NN.build_loss_function(P_resid, G, S, scaler_s, settings_s)
+    loss_st =
+        NN.build_loss_function(P_resid, G, S, scaler_s, settings_s, nothing, make_rng(3))
 
     # Model should output (Na, Nz) consumption matrix (or NamedTuple with :Φ)
     Na, Nz = length(a), length(z)
@@ -260,7 +263,7 @@ end
         G,
         nothing,
         nothing,
-        Random.GLOBAL_RNG,
+        make_rng(4),
     )
     @test tr.epochs_run ≤ 1
     @test tr.batch_size ≥ 1
@@ -301,7 +304,7 @@ end
         G,  # Na
         S,
         nothing,
-        Random.GLOBAL_RNG,
+        make_rng(5),
     )
     @test tr2.batch_size ≥ 1
     @test tr2.batches_per_epoch ≥ 1

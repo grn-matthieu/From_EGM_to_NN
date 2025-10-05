@@ -18,7 +18,7 @@ import Pkg
 Pkg.activate(normpath(joinpath(@__DIR__, "..", "..")); io = devnull)
 
 using ThesisProject
-using ThesisProject.Determinism: make_rng
+using ThesisProject.Determinism: make_master_rng
 using Statistics: mean
 
 include(joinpath(@__DIR__, "..", "utils", "config_helpers.jl"))
@@ -62,7 +62,7 @@ function solve_all(cfg_base::NamedTuple)
         cfg_local = merge_config(cfg_local, (; method = m))
         model = ThesisProject.build_model(cfg_local)
         method = ThesisProject.build_method(cfg_local)
-        sols[m] = ThesisProject.solve(model, method, cfg_local; rng = make_rng(0))
+        sols[m] = ThesisProject.solve(model, method, cfg_local; rng = make_master_rng(0))
     end
     return sols
 end

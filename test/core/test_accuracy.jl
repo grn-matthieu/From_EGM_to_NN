@@ -1,7 +1,7 @@
 using Test
 using ThesisProject
 using ThesisProject.EulerResiduals: euler_resid_det_grid
-using ThesisProject.Determinism: make_rng
+using ThesisProject.Determinism: make_master_rng
 
 @testset "Euler error grids" begin
     cfg_base = deepcopy(SMOKE_CFG)
@@ -11,7 +11,7 @@ using ThesisProject.Determinism: make_rng
     cfg_egm = cfg_without(cfg_egm, :shocks)
     model_egm = build_model(cfg_egm)
     method_egm = build_method(cfg_patch(cfg_egm, (:solver, :method) => "EGM"))
-    sol_egm = solve(model_egm, method_egm, cfg_egm; rng = make_rng(0))
+    sol_egm = solve(model_egm, method_egm, cfg_egm; rng = make_master_rng(0))
     p_egm = get_params(model_egm)
     g_egm = get_grids(model_egm)
     sol_egm_c = cfg_get(sol_egm.policy, :c)
@@ -30,7 +30,7 @@ using ThesisProject.Determinism: make_rng
     cfg_proj = cfg_without(cfg_proj, :shocks)
     model_proj = build_model(cfg_proj)
     method_proj = build_method(cfg_patch(cfg_proj, (:solver, :method) => "Projection"))
-    sol_proj = solve(model_proj, method_proj, cfg_proj; rng = make_rng(0))
+    sol_proj = solve(model_proj, method_proj, cfg_proj; rng = make_master_rng(0))
     p_proj = get_params(model_proj)
     g_proj = get_grids(model_proj)
     sol_proj_c = cfg_get(sol_proj.policy, :c)
@@ -44,7 +44,7 @@ using ThesisProject.Determinism: make_rng
     cfg_pert = cfg_without(cfg_pert, :shocks)
     model_pert = build_model(cfg_pert)
     method_pert = build_method(cfg_patch(cfg_pert, (:solver, :method) => "Perturbation"))
-    sol_pert = solve(model_pert, method_pert, cfg_pert; rng = make_rng(0))
+    sol_pert = solve(model_pert, method_pert, cfg_pert; rng = make_master_rng(0))
     p_pert = get_params(model_pert)
     g_pert = get_grids(model_pert)
     sol_pert_c = cfg_get(sol_pert.policy, :c)

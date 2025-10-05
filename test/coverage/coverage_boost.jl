@@ -2,6 +2,7 @@ using Test
 using Random
 using Lux
 using ThesisProject
+using ThesisProject.Determinism: make_rng
 
 using ThesisProject.NNTrain:
     curriculum,
@@ -62,7 +63,7 @@ using ThesisProject.NNPretrain: fit_to_EGM!
 
     # _loss_and_state simple model: create params/state via Lux.setup
     model = Lux.Dense(1 => 1)
-    ps, st = Lux.setup(Random.GLOBAL_RNG, model)
+    ps, st = Lux.setup(make_rng(0), model)
     x = rand(Float32, 1, 8)
     y = rand(Float32, 1, 8)
     loss, st2 = _loss_and_state(model, ps, st, x, y)

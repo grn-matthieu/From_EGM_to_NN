@@ -18,7 +18,7 @@ using ThesisProject
     Core.eval(
         ThesisProject.NNKernel,
         quote
-            function solve_nn(m; opts = nothing)
+            function solve_nn(m; opts = nothing, rng = nothing)
                 a_grid = get_grids(m).a.grid
                 c = clamp.(0.5 .* (1 .+ a_grid), 1e-12, Inf)
                 a_next = a_grid

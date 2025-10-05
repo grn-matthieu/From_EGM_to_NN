@@ -2,6 +2,7 @@ using Test
 using ThesisProject
 using Lux
 using Random
+using ThesisProject.Determinism: make_rng
 
 const NNTrain = ThesisProject.NNTrain
 const NNInit = ThesisProject.NNInit
@@ -83,7 +84,7 @@ end
 @testset "NNTrain feasibility on random draws" begin
     cfg = deepcopy(SMOKE_CFG)
     state = NNInit.init_state(cfg)
-    rng = Random.default_rng()
+    rng = make_rng(0)
     for _ = 1:5
         x = rand(rng, Float32, 1, 16)
         y = rand(rng, Float32, 1, 16)

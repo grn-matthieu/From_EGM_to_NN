@@ -11,6 +11,7 @@ using ..API: get_grids, get_params, get_shocks, get_utility
 using ..CommonInterp: InterpKind, LinearInterp
 using ..DataNN: generate_dataset
 using ..EulerResiduals: euler_resid_det_grid, euler_resid_stoch_grid
+using ..Determinism: derive_rng, promote_master_rng
 using Lux
 using Optimisers
 using Random
@@ -64,6 +65,7 @@ function maybe_dense_diagnostics(
     G = nothing,
     S = nothing,
     P = nothing,
+    rng = nothing,
 )
     if !settings.has_shocks
         return nothing, nothing
@@ -82,8 +84,19 @@ function maybe_dense_diagnostics(
     mc_diag = nothing
     gh_diag = nothing
     try
-        mc_diag =
-            fmc(model, params, states, P_resid, U, scaler, settings; G = G, S = S, P = P)
+        mc_diag = fmc(
+            model,
+            params,
+            states,
+            P_resid,
+            U,
+            scaler,
+            settings;
+            G = G,
+            S = S,
+            P = P,
+            rng = rng,
+        )
     catch err
         if err isa MethodError
             mc_diag = fmc(model, params, states, P_resid, U, scaler, settings)
@@ -93,8 +106,19 @@ function maybe_dense_diagnostics(
     end
 
     try
-        gh_diag =
-            fgh(model, params, states, P_resid, U, scaler, settings; G = G, S = S, P = P)
+        gh_diag = fgh(
+            model,
+            params,
+            states,
+            P_resid,
+            U,
+            scaler,
+            settings;
+            G = G,
+            S = S,
+            P = P,
+            rng = rng,
+        )
     catch err
         if err isa MethodError
             gh_diag = fgh(model, params, states, P_resid, U, scaler, settings)
@@ -117,7 +141,13 @@ function build_options_summary(settings, training_result, runtime)
     )
 end
 
-function solve_nn(model; opts = nothing)
+function solve_nn(model; opts = nothing, rng = nothing)
+    rng === nothing && error("solve_nn requires a `rng` keyword argument")
+    master = promote_master_rng(rng)
+    train_rng = derive_rng(master, :train)
+    eval_rng = derive_rng(master, :evaluation)
+    diag_rng = derive_rng(master, :diagnostics)
+
     P = get_params(model)
     G = get_grids(model)
     S = get_shocks(model)
@@ -132,16 +162,35 @@ function solve_nn(model; opts = nothing)
     P_resid = scalar_params(P)
     model_cfg = build_model_config(P, U, scaler, P_resid, settings)
 
-    rng = Random.default_rng()
-    training_result =
-        train_consumption_network!(chain, settings, scaler, P_resid, G, S, model_cfg, rng)
+    training_result = train_consumption_network!(
+        chain,
+        settings,
+        scaler,
+        P_resid,
+        G,
+        S,
+        model_cfg,
+        train_rng,
+    )
 
     best_state = training_result.best_state
     trained_model = select_model(chain, best_state)
     params = state_parameters(best_state)
     states = state_states(best_state)
 
-    evaluation = evaluate_solution(trained_model, params, states, P_resid, P, G, S, scaler)
+    evaluation = evaluate_solution(
+        trained_model,
+        params,
+        states,
+        P_resid,
+        P,
+        G,
+        S,
+        scaler;
+        settings = settings,
+        U = U,
+        rng = eval_rng,
+    )
 
     runtime = (time_ns() - start_time) / 1e9
     opts_summary = build_options_summary(settings, training_result, runtime)
@@ -158,6 +207,7 @@ function solve_nn(model; opts = nothing)
         G = G,
         S = S,
         P = P,
+        rng = diag_rng,
     )
 
     return (;

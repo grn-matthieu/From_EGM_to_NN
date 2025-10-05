@@ -15,7 +15,7 @@ using LinearAlgebra
 using Printf
 using SparseArrays
 using ThesisProject
-using ThesisProject.Determinism: make_rng
+using ThesisProject.Determinism: make_master_rng
 
 include(joinpath(@__DIR__, "..", "utils", "config_helpers.jl"))
 using .ScriptConfigHelpers
@@ -41,7 +41,7 @@ function verify_deterministic(cfg_path; seed = 0)
 
     model = ThesisProject.build_model(cfg)
     method = ThesisProject.build_method(cfg)
-    sol = ThesisProject.solve(model, method, cfg; rng = make_rng(seed))
+    sol = ThesisProject.solve(model, method, cfg; rng = make_master_rng(seed))
 
     ana = ThesisProject.steady_state_analytic(model)
     pol = ThesisProject.steady_state_from_policy(sol)
@@ -149,7 +149,7 @@ function verify_stochastic(cfg_path; seed = 0)
 
     model = ThesisProject.build_model(cfg)
     method = ThesisProject.build_method(cfg)
-    sol = ThesisProject.solve(model, method, cfg; rng = make_rng(seed))
+    sol = ThesisProject.solve(model, method, cfg; rng = make_master_rng(seed))
 
     Πss, mom = stationary_distribution(sol)
     @printf("Stochastic stationary moments: E[a]=%.6f, E[c]=%.6f\n", mom.Ea, mom.Ec)

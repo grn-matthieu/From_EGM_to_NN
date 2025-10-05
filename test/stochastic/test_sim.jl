@@ -10,8 +10,8 @@ using Statistics
     N = 12
     T = 6
 
-    rng1 = ThesisProject.Determinism.make_rng(1234)
-    rng2 = ThesisProject.Determinism.make_rng(1234)
+    rng1 = ThesisProject.Determinism.make_master_rng(1234)
+    rng2 = ThesisProject.Determinism.make_master_rng(1234)
 
     out1 = nothing # We try two identical RNGs to test reproducibility
     out2 = nothing
@@ -57,7 +57,7 @@ using Statistics
     @test shocks ≈ shocks2
 
     # reproducibility when reusing the same RNG instance
-    rng_shared = ThesisProject.Determinism.make_rng(2024)
+    rng_shared = ThesisProject.Determinism.make_master_rng(2024)
     out_shared1 =
         ThesisProject.simulate_panel(model, method, cfg; N = N, T = T, rng = rng_shared)
     out_shared2 =
@@ -73,7 +73,7 @@ using Statistics
                 cfg_patch(cfg_get(cfg, :random), :seed => cfg_get(cfg, :random, :seed) + 1)
             cfg_patch(cfg, :random => random_cfg)
         end
-    rng_diff = ThesisProject.Determinism.make_rng(1234)
+    rng_diff = ThesisProject.Determinism.make_master_rng(1234)
     out_diff =
         ThesisProject.simulate_panel(model, method, cfg2; N = N, T = T, rng = rng_diff)
     shocks_diff = getkey(out_diff, :shocks)
@@ -84,18 +84,10 @@ using Statistics
     # missing cfg.random.seed should still be reproducible with identical RNGs
     cfg_noseed =
         cfg_patch(cfg, :random => cfg_patch(cfg_get(cfg, :random), :seed => nothing))
-    rng_a = ThesisProject.Determinism.make_rng(42)
-    rng_b = ThesisProject.Determinism.make_rng(42)
-    out_a =
-        ThesisProject.simulate_panel(model, method, cfg_noseed; N = N, T = T, rng = rng_a)
-    out_b =
-        ThesisProject.simulate_panel(model, method, cfg_noseed; N = N, T = T, rng = rng_b)
-    shocks_a = getkey(out_a, :shocks)
-    shocks_b = getkey(out_b, :shocks)
-    seeds_a = getkey(out_a, :seeds)
-    seeds_b = getkey(out_b, :seeds)
-    @test seeds_a == seeds_b
-    @test shocks_a ≈ shocks_b
+    @test_throws ErrorException ThesisProject.UtilsConfig.ensure_master_rng(
+        cfg_noseed;
+        require = true,
+    )
 
     # diagnostics basic checks (allow missing keys but prefer presence)
     @test isa(diag, Dict) || isa(diag, NamedTuple)
@@ -116,8 +108,8 @@ end
     N = 12
     T = 6
 
-    rng1 = ThesisProject.Determinism.make_rng(1234)
-    rng2 = ThesisProject.Determinism.make_rng(1234)
+    rng1 = ThesisProject.Determinism.make_master_rng(1234)
+    rng2 = ThesisProject.Determinism.make_master_rng(1234)
 
     out1 = ThesisProject.simulate_panel(model, method, cfg; N = N, T = T, rng = rng1)
     out2 = ThesisProject.simulate_panel(model, method, cfg; N = N, T = T, rng = rng2)

@@ -4,19 +4,27 @@ export generate_dataset
 using Random
 
 """
-    generate_dataset(G, S; mode=:full, nsamples::Int=0, rng=Random.default_rng())
+    generate_dataset(G, S; mode=:full, nsamples::Int=0, rng=nothing)
 
 Returns inputs X with rows = samples and columns = features.
 Deterministic: features = (a,)
 Stochastic:   features = (a, z)
 The second return is `nothing` for compatibility.
 """
-function generate_dataset(G, S; mode = :full, nsamples::Int = 0, rng = Random.default_rng())
+function generate_dataset(
+    G,
+    S;
+    mode = :full,
+    nsamples::Int = 0,
+    rng::Union{Nothing,AbstractRNG} = nothing,
+)
     a = Float32.(G[:a].grid)
     if isnothing(S)
         if mode == :full
             X = reshape(a, :, 1)                    # Na×1
         else
+            rng === nothing &&
+                error("generate_dataset requires `rng` when sampling deterministic grids")
             amin, amax = extrema(a)
             n = nsamples > 0 ? nsamples : length(a)
             X = rand(rng, Float32, n, 1) .* (amax - amin) .+ amin
@@ -29,6 +37,8 @@ function generate_dataset(G, S; mode = :full, nsamples::Int = 0, rng = Random.de
             A = repeat(a, inner = Nz)                 # length Na*Nz
             Z = repeat(z, outer = Na)
         else
+            rng === nothing &&
+                error("generate_dataset requires `rng` when sampling stochastic grids")
             amin, amax = extrema(a)
             zmin, zmax = minimum(z), maximum(z)
             n = nsamples > 0 ? nsamples : Na * Nz

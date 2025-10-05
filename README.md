@@ -113,7 +113,9 @@ Because `NamedTuple`s are immutable, create experiment-specific overrides with `
 
 ## Reproducibility
 
-- Deterministic seeds are derived via `utils/Determinism.make_rng` without mutating Julia’s global RNG.
+- Deterministic seeds originate from the config-provided master RNG via
+  `utils/Determinism.make_master_rng`/`derive_rng`, avoiding any mutation of Julia’s
+  global RNG state.
 - Each `scripts/experiments/*.jl` entry accepts `--config path/to/config.yaml` and writes outputs under `outputs/` (ignored by git).
 - The CI smoke test (`scripts/ci/smoke.jl`) runs the fast configs used in regression testing.
 - A lightweight precompile workload is provided so that `using ThesisProject` warms essential code paths.

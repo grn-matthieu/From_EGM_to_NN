@@ -9,7 +9,7 @@ module MakeFiguresSimple
 import Pkg
 Pkg.activate(normpath(joinpath(@__DIR__, "..", "..")); io = devnull)
 using ThesisProject
-using ThesisProject.Determinism: make_rng
+using ThesisProject.Determinism: make_master_rng
 try
     @eval using Plots
 catch err
@@ -27,7 +27,7 @@ function run_one(cfg_path::AbstractString, stem::AbstractString; plot_kwargs...)
     cfg = ThesisProject.load_config(cfg_path)
     model = ThesisProject.build_model(cfg)
     method = ThesisProject.build_method(cfg)
-    sol = ThesisProject.solve(model, method, cfg; rng = make_rng(0))
+    sol = ThesisProject.solve(model, method, cfg; rng = make_master_rng(0))
     if isdefined(MakeFiguresSimple, :Plots)
         plt_pol = ThesisProject.plot_policy(sol; vars = [:c, :a], plot_kwargs...)
         savefig(plt_pol, joinpath(OUTDIR, "policy_$(stem).png"))

@@ -2,8 +2,9 @@ module UtilsConfig
 
 import ..API: load_config, validate_config
 using YAML
+using ..Determinism: MasterRNG, make_master_rng, master_seed
 
-export maybe
+export maybe, ensure_master_rng
 
 # --- helpers ---
 yaml_to_namedtuple(x) = x
@@ -13,8 +14,35 @@ function yaml_to_namedtuple(x::AbstractDict)
 end
 yaml_to_namedtuple(x::AbstractVector) = [yaml_to_namedtuple(v) for v in x]
 
+function ensure_master_rng(cfg::NamedTuple; require::Bool = false)
+    if !hasproperty(cfg, :random)
+        require && error("missing random section")
+        return cfg
+    end
+
+    random_raw = getproperty(cfg, :random)
+    random_cfg =
+        random_raw isa NamedTuple ? random_raw : yaml_to_namedtuple(Dict(random_raw))
+
+    if !hasproperty(random_cfg, :seed) || random_cfg.seed === nothing
+        require && error("missing random.seed")
+        return merge(cfg, (random = random_cfg,))
+    end
+
+    seed_uint = UInt64(random_cfg.seed)
+    existing_master =
+        hasproperty(random_cfg, :master_rng) && random_cfg.master_rng isa MasterRNG ?
+        random_cfg.master_rng : nothing
+    master =
+        existing_master !== nothing && master_seed(existing_master) == seed_uint ?
+        existing_master : make_master_rng(seed_uint)
+    random_enriched = merge(random_cfg, (seed = seed_uint, master_rng = master))
+    return merge(cfg, (random = random_enriched,))
+end
+
 function load_config(path::AbstractString)
     config = yaml_to_namedtuple(YAML.load_file(path))
+    config = ensure_master_rng(config; require = true)
     validate_config(config)
     return config
 end
@@ -224,17 +252,15 @@ function validate_config(cfg::NamedTuple)
         end
     end
 
-    # Random seed
-    if hasproperty(cfg, :random)
-        r_raw = cfg.random
-        rcfg = r_raw isa AbstractDict ? yaml_to_namedtuple(Dict(r_raw)) : r_raw
-        if rcfg isa NamedTuple && hasproperty(rcfg, :seed)
-            try
-                _ = UInt64(rcfg.seed)
-            catch
-                error("random.seed not integer")
-            end
-        end
+    # Random seed (required)
+    hasproperty(cfg, :random) || error("missing random section")
+    r_raw = cfg.random
+    rcfg = r_raw isa AbstractDict ? yaml_to_namedtuple(Dict(r_raw)) : r_raw
+    hasproperty(rcfg, :seed) || error("missing random.seed")
+    try
+        _ = UInt64(rcfg.seed)
+    catch
+        error("random.seed not integer")
     end
 
     true

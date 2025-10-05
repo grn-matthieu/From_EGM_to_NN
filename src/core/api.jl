@@ -77,6 +77,8 @@ end
 # Supported method names (keeps the order deterministic when using :all)
 const SUPPORTED_METHODS = (:TimeIteration, :EGM, :Projection, :Perturbation, :NN)
 
+using ..Determinism: derive_rng, promote_master_rng
+
 """
     solve(model::AbstractModel, cfg::NamedTuple)
 
@@ -106,6 +108,14 @@ function solve(model::AbstractModel, cfg::NamedTuple; rng = nothing)
     end
 
     solutions = Vector{Solution}(undef, length(methods))
+
+    cfg_master =
+        hasproperty(cfg, :random) && hasproperty(cfg.random, :master_rng) ?
+        promote_master_rng(cfg.random.master_rng) : nothing
+    master = rng === nothing ? cfg_master : promote_master_rng(rng)
+    master === nothing &&
+        error("No master RNG available; pass `rng` or ensure config.random.seed is set.")
+
     for (i, mname) in enumerate(methods)
         # create a cfg copy with solver.method set to the single method name
         solver_nt = merge(cfg.solver, (method = mname,))
@@ -115,7 +125,8 @@ function solve(model::AbstractModel, cfg::NamedTuple; rng = nothing)
         method_m = build_method(cfg_m)
         @info "Starting solver $(mname)..."
         try
-            sol = solve(model, method_m, cfg_m)
+            local_rng = derive_rng(master, string(mname))
+            sol = solve(model, method_m, cfg_m; rng = local_rng)
             solutions[i] = sol
             # try to extract some diagnostics for the finish message
             converged =
