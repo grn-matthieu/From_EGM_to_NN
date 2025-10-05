@@ -14,6 +14,8 @@ using LinearAlgebra
 
 export solve_perturbation_det, solve_perturbation_stoch
 
+const DEFAULT_BINDING_TOL = 1e-10
+
 """
 Gauss–Newton for small nonlinear least squares over coefficients θ using AD Jacobian.
 Returns (θ_new, ok::Bool, norm_r).
@@ -113,6 +115,8 @@ function solve_perturbation_det(
     a_min = g[:a].min
     a_max = g[:a].max
     Na = g[:a].N
+    Δa = Na > 1 ? (a_max - a_min) / (Na - 1) : (a_max - a_min)
+    bind_tol = max(DEFAULT_BINDING_TOL, 1e-6 * Δa)
     R = 1 + p.r
     ȳ = p.y
 
@@ -162,10 +166,15 @@ function solve_perturbation_det(
     resid = euler_resid_det_grid(p, a_grid, c)
     iters = 1
     converged = true
-    # prune boundaries when assessing accuracy
-    lo = Na > 2 ? 2 : 1
-    hi = Na > 2 ? Na - 1 : Na
-    max_resid = maximum(view(resid, lo:hi))
+    # RMSE on non-binding points (where a' > a_min + tol)
+    nb_mask = a_next .> (a_min + bind_tol)
+    max_resid = if any(nb_mask)
+        sqrt(mean((resid[nb_mask]) .^ 2))
+    else
+        # fallback: ignore first asset grid point
+        lo = Na > 2 ? 2 : 1
+        sqrt(mean((view(resid, lo:Na)) .^ 2))
+    end
     opts = (;
         maxit = iters,
         runtime = (time_ns() - t0) / 1e9,
@@ -178,6 +187,7 @@ function solve_perturbation_det(
         order = order,
         fit_ok = fit_ok,
         quad_coeffs = (C2 = C2,),
+        resid_metric = :rmse,
     )
     return (
         a_grid = a_grid,
@@ -187,6 +197,7 @@ function solve_perturbation_det(
         iters = iters,
         converged = converged,
         max_resid = max_resid,
+        rmse = max_resid,
         model_params = p,
         opts = opts,
     )
@@ -215,6 +226,8 @@ function solve_perturbation_stoch(
     a_min = g[:a].min
     a_max = g[:a].max
     Na = g[:a].N
+    Δa = Na > 1 ? (a_max - a_min) / (Na - 1) : (a_max - a_min)
+    bind_tol = max(DEFAULT_BINDING_TOL, 1e-6 * Δa)
     z_grid = S.zgrid
     Π = S.Π
     Nz = length(z_grid)
@@ -307,10 +320,14 @@ function solve_perturbation_stoch(
     resid = euler_resid_stoch_grid(p, a_grid, z_grid, Π, c)
     iters = 1
     converged = true
-    # prune boundary asset points when computing maximum residual
-    lo = Na > 2 ? 2 : 1
-    hi = Na > 2 ? Na - 1 : Na
-    max_resid = maximum(view(resid, lo:hi, :))
+    # RMSE on non-binding entries
+    nb_mask = a_next .> (a_min + bind_tol)
+    max_resid = if any(nb_mask)
+        sqrt(mean((resid[nb_mask]) .^ 2))
+    else
+        lo = Na > 2 ? 2 : 1
+        sqrt(mean((view(resid, lo:Na, :)) .^ 2))
+    end
     opts = (;
         maxit = iters,
         runtime = (time_ns() - t0) / 1e9,
@@ -323,15 +340,18 @@ function solve_perturbation_stoch(
         order = order,
         fit_ok = fit_ok,
         quad_coeffs = (C2 = C2, D2 = D2, E2 = E2),
+        resid_metric = :rmse,
     )
     return (
         a_grid = a_grid,
+        z_grid = z_grid,
         c = c,
         a_next = a_next,
         resid = resid,
         iters = iters,
         converged = converged,
         max_resid = max_resid,
+        rmse = max_resid,
         model_params = p,
         opts = opts,
     )
