@@ -274,7 +274,6 @@ function main()
     cfg_path_candidates = (
         joinpath(ROOT, "config", "smoke_cfg_stoch.yaml"),
         joinpath(ROOT, "config", "smoke_cfg_det.yaml"),
-        joinpath(ROOT, "config", "simple_baseline.yaml"),
     )
     base_cfg = nothing
     for p in cfg_path_candidates
@@ -289,9 +288,7 @@ function main()
         end
     end
     if base_cfg === nothing
-        error(
-            "Could not find a usable config (looked for smoke configs and simple_baseline)",
-        )
+        error("Could not find a usable config (looked for smoke configs)")
     end
 
     # Run Time Iteration first for comparison, then other methods

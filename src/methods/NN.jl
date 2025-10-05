@@ -75,12 +75,12 @@ function solve(
     ee_mat = ee isa AbstractMatrix ? ee : nothing
     ee_mean = ee_mat === nothing ? mean_abs_error(ee_vec) : mean_abs_error(ee_mat)
     delta_pol = hasproperty(sol, :delta_pol) ? sol.delta_pol : missing
-    agrid = ThesisProject.get_grids(model)[:a].grid
+    agrid = g.a.grid
 
     policy = Dict{Symbol,Any}(
         :c => (;
             value = sol.c,
-            grid = sol.agrid,
+            grid = agrid,
             euler_errors = ee_vec,
             euler_errors_mat = ee_mat,
         ),
@@ -88,7 +88,6 @@ function solve(
     )
 
     # Only compute value if the policy arrays are grid-aligned.
-    agrid = g[:a].grid
     Na = length(agrid)
     has_shocks = S !== nothing
     shapes_ok = false
