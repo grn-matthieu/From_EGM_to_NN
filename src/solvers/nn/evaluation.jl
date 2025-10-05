@@ -8,6 +8,9 @@ common diagnostic bundles.
 
 using Random
 
+# Local sigmoid function to avoid NNlib dependency
+@inline sigmoid(x) = 1 / (1 + exp(-x))
+
 struct EvaluationResult
     c::Any
     a_next::Any
@@ -21,12 +24,12 @@ const DEFAULT_EVAL_SAMPLES = 8192
 const EVAL_MIN_CONSUMPTION = 1.0f-3
 
 @inline function denormalize_features(scaler::FeatureScaler, batch)
-    a = ((batch[1, :] .+ 1.0f0) ./ 2.0f0) .* scaler.a_range .+ scaler.a_min
+    w = ((batch[1, :] .+ 1.0f0) ./ 2.0f0) .* scaler.w_range .+ scaler.w_min
     if scaler.has_shocks && size(batch, 1) >= 2
         z = ((batch[2, :] .+ 1.0f0) ./ 2.0f0) .* scaler.z_range .+ scaler.z_min
-        return Float32.(a), Float32.(z)
+        return Float32.(w), Float32.(z)
     else
-        return Float32.(a), nothing
+        return Float32.(w), nothing
     end
 end
 
@@ -78,12 +81,11 @@ Map the network's Φ output to consumption by multiplying it with cash-on-hand
 `w` and clamping it away from zero. Works transparently with vectors or
 matrices.
 """
-function phi_to_consumption(Φ, w; min_c = CONSUMPTION_FLOOR)
+function phi_to_consumption(Φ, w; min_c = 0.0)  # min_c unused for now
     Φ_row = ensure_row(Φ)
     w_row = reshape(w, 1, :)
-    consumption = Φ_row .* w_row
-    T = eltype(consumption)
-    return clamp.(consumption, T(min_c), T(Inf))
+    s = sigmoid.(Φ_row)              # s ∈ (0,1)
+    return s .* w_row                # 0 < c < w  ⇒  a′ = w − c ≥ 0
 end
 
 """Compute next-period assets given consumption on the asset grid."""
@@ -117,28 +119,26 @@ function evaluate_deterministic(
         P_resid = P_resid,
         settings = settings,
     )
-    a0, _ = denormalize_features(scaler, batch)
-    z0 = fill(0.0f0, length(a0))
+    w0, _ = denormalize_features(scaler, batch)
+    z0 = fill(0.0f0, length(w0))
 
     prediction = run_model(model, params, states, batch)
-    w0 = cash_on_hand(a0, z0, P_resid, false)
     c0 = extract_consumption(prediction, w0)
 
-    a1 = w0 .- c0
-    X1 = reshape(a1, 1, :)
+    w1 = w0 .- c0
+    X1 = reshape(w1, 1, :)
     NX1 = normalize_feature_batch(scaler, X1)
     prediction1 = run_model(model, params, states, NX1)
-    w1 = cash_on_hand(a1, z0, P_resid, false)
     c1 = extract_consumption(prediction1, w1)
 
     residuals = euler_resid_det(P_resid, c0, c1)
 
     c_out = Float32.(c0)
-    a_out = Float32.(a1)
+    w_out = Float32.(w1)
     resid_out = Float32.(residuals)
     max_resid = maximum(abs.(residuals))
 
-    return EvaluationResult(c_out, a_out, resid_out, max_resid)
+    return EvaluationResult(c_out, w_out, resid_out, max_resid)
 end
 
 function evaluate_stochastic(
@@ -165,24 +165,22 @@ function evaluate_stochastic(
         P_resid = P_resid,
         settings = settings,
     )
-    a0, z0 = denormalize_features(scaler, batch)
+    w0, z0 = denormalize_features(scaler, batch)
 
     prediction = run_model(model, params, states, batch)
-    w0 = cash_on_hand(a0, z0, P_resid, true)
     c0 = extract_consumption(prediction, w0)
 
     sigma_eps =
         settings.sigma_shocks === nothing ? Float32(P.σ_shocks) :
         Float32(settings.sigma_shocks)
     rho = Float32(P.ρ)
-    eps = randn(rng, Float32, length(a0))
+    eps = randn(rng, Float32, length(w0))
     z1 = @. rho * z0 + sigma_eps * eps
 
-    a1 = w0 .- c0
-    X1 = vcat(reshape(a1, 1, :), reshape(z1, 1, :))
+    w1 = w0 .- c0
+    X1 = vcat(reshape(w1, 1, :), reshape(z1, 1, :))
     NX1 = normalize_feature_batch(scaler, X1)
     prediction1 = run_model(model, params, states, NX1)
-    w1 = cash_on_hand(a1, z1, P_resid, true)
     c1 = extract_consumption(prediction1, w1)
 
     uprime = get_uprime(U, P_resid)
@@ -195,11 +193,11 @@ function evaluate_stochastic(
     residuals = abs.(1 .- ratio)
 
     c_out = Float32.(c0)
-    a_out = Float32.(a1)
+    w_out = Float32.(w1)
     resid_out = Float32.(residuals)
     max_resid = maximum(residuals)
 
-    return EvaluationResult(c_out, a_out, resid_out, Float64(max_resid))
+    return EvaluationResult(c_out, w_out, resid_out, max_resid)
 end
 
 function evaluate_solution(

@@ -211,9 +211,9 @@ function solve_nn(model; opts = nothing, rng = nothing)
     )
 
     return (;
-        a_grid = G[:a].grid,
+        w_grid = G[:w].grid,
         c = evaluation.c,
-        a_next = evaluation.a_next,
+        w_next = evaluation.a_next, # now w_next instead of a_next
         resid = evaluation.resid,
         iters = training_result.epochs_run,
         converged = converged,

@@ -255,9 +255,8 @@ function create_training_batch(
 )
     want =
         nsamples > 0 ? nsamples :
-        (isnothing(S) ? length(G[:a].grid) : length(G[:a].grid) * length(S.zgrid))
+        (isnothing(S) ? length(G[:w].grid) : length(G[:w].grid) * length(S.zgrid))
 
-    # deterministic full grid path unchanged
     if mode == :full
         X, _ = generate_dataset(G, S; mode = :full)
         normalize_samples!(scaler, X)
@@ -266,10 +265,6 @@ function create_training_batch(
 
     @assert P_resid !== nothing && settings !== nothing
     @assert want > 0 "create_training_batch requires a positive sample count"
-    Rg = 1.0f0 + Float32(P_resid.r)
-    μ = Float32(P_resid.y)
-    z_min = scaler.z_min
-    z_max = scaler.z_min + scaler.z_range
     w_lo = settings.w_min
     w_hi = settings.w_max
     @assert w_hi > w_lo "Require w_max > w_min for uniform cash-on-hand sampling"
@@ -277,14 +272,12 @@ function create_training_batch(
     W = rand(rng, Float32, want) .* (w_hi - w_lo) .+ w_lo
 
     if settings.has_shocks
+        z_min = scaler.z_min
+        z_max = scaler.z_min + scaler.z_range
         Z = rand(rng, Float32, want) .* (z_max - z_min) .+ z_min
-        inc = exp.(μ .+ Z)
-        A = (W .- inc) ./ Rg
-        X = hcat(A, Z)
+        X = hcat(W, Z)
     else
-        inc_val = Float32(exp(μ))
-        A = (W .- inc_val) ./ Rg
-        X = reshape(A, :, 1)
+        X = reshape(W, :, 1)
     end
 
     normalize_samples!(scaler, X)
