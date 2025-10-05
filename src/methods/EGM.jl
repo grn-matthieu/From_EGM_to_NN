@@ -14,6 +14,7 @@ using ..Determinism: canonicalize_cfg, hash_hex
 using ..CommonInterp: LinearInterp, MonotoneCubicInterp
 using ..CommonValidators: is_nondec, is_positive, respects_amin
 using ..UtilsConfig: maybe
+using ..UtilsDiagnostics: mean_abs_error
 
 export EGMMethod
 
@@ -157,6 +158,8 @@ function solve(
     ee = sol.resid
     ee_vec = ee isa AbstractMatrix ? vec(maximum(ee, dims = 2)) : ee # vector of max errors per asset grid point
     ee_mat = ee isa AbstractMatrix ? ee : nothing
+    ee_mean = ee_mat === nothing ? mean_abs_error(ee_vec) : mean_abs_error(ee_mat)
+    delta_pol = hasproperty(sol, :delta_pol) ? sol.delta_pol : missing
     policy = Dict{Symbol,Any}(
         :c => (;
             value = sol.c,
@@ -181,6 +184,8 @@ function solve(
         :verbose => sol.opts.verbose,
         :interp_kind => string(sol.opts.interp_kind),
         :julia_version => string(VERSION),
+        :delta_pol => delta_pol,
+        :mean_ee => ee_mean,
     )
 
     # Validation: monotonicity and positivity
@@ -233,6 +238,9 @@ function solve(
         method = method.opts.name,
         seed = sol.opts.seed,
         runtime = sol.opts.runtime,
+        iterations = sol.iters,
+        mean_ee = ee_mean,
+        delta_pol = delta_pol,
     )
 
     return Solution(

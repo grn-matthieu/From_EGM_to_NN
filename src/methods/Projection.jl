@@ -10,6 +10,7 @@ using ..ProjectionKernel: solve_projection_det, solve_projection_stoch
 using ..ValueFunction: compute_value_policy
 using ..Determinism: canonicalize_cfg, hash_hex
 using ..UtilsConfig: maybe
+using ..UtilsDiagnostics: mean_abs_error
 export ProjectionMethod
 
 struct ProjectionMethod <: AbstractMethod
@@ -72,6 +73,8 @@ function solve(
     ee = sol.resid
     ee_vec = ee isa AbstractMatrix ? vec(maximum(ee, dims = 2)) : ee
     ee_mat = ee isa AbstractMatrix ? ee : nothing
+    ee_mean = ee_mat === nothing ? mean_abs_error(ee_vec) : mean_abs_error(ee_mat)
+    delta_pol = hasproperty(sol, :delta_pol) ? sol.delta_pol : missing
 
     policy = Dict{Symbol,Any}(
         :c => (;
@@ -91,6 +94,9 @@ function solve(
         method = method.opts.name,
         seed = sol.opts.seed,
         runtime = sol.opts.runtime,
+        iterations = sol.iters,
+        mean_ee = ee_mean,
+        delta_pol = delta_pol,
     )
 
     metadata = Dict{Symbol,Any}(
@@ -101,7 +107,8 @@ function solve(
         :tol => get(sol.opts, :tol, missing),
         :order => get(sol.opts, :order, missing),
         :tol_pol => hasproperty(sol.opts, :tol_pol) ? sol.opts.tol_pol : missing,
-        :delta_pol => hasproperty(sol, :delta_pol) ? sol.delta_pol : missing,
+        :delta_pol => delta_pol,
+        :mean_ee => ee_mean,
         :julia_version => string(VERSION),
     )
 

@@ -90,6 +90,22 @@ function coerce_numeric(arr::AbstractArray)
     return data
 end
 
+function maybe_get(data, key::Symbol, default = missing)
+    if data === nothing
+        return default
+    elseif data isa NamedTuple
+        return haskey(data, key) ? getproperty(data, key) : default
+    elseif data isa AbstractDict
+        return get(data, key, default)
+    else
+        try
+            return getproperty(data, key)
+        catch
+            return default
+        end
+    end
+end
+
 function solve_once(cfg)
     model = ThesisProject.build_model(cfg)
     method = ThesisProject.build_method(cfg)
@@ -236,7 +252,12 @@ function open_write(path::AbstractString, header::Vector{<:AbstractString}, rows
     open(path, "w") do io
         println(io, join(header, ","))
         for row in rows
-            strrow = map(x -> x === nothing ? "" : sprint(print, x), row)
+            strrow = map(row) do x
+                if x === nothing || x === missing
+                    return ""
+                end
+                sprint(print, x)
+            end
             println(io, join(strrow, ","))
         end
     end
@@ -291,9 +312,11 @@ function main()
         "ee_max",
         "ee_median",
         "binding_share",
+        "mean_ee",
+        "delta_pol",
     ]
 
-    rows = Vector{NTuple{15,Any}}()
+    rows = Vector{NTuple{17,Any}}()
 
     for m in methods
         cfg = merge_section(base_cfg, :solver, Dict{Symbol,Any}(:method => m))
@@ -324,18 +347,19 @@ function main()
             end
 
             # Use safe getters because not all methods populate the same metadata
-            run_id = get(diag, :model_id, missing)
+            run_id = maybe_get(diag, :model_id, get(meta, :model_id, missing))
             iters = get(meta, :iters, missing)
             converged = get(meta, :converged, missing)
             max_end_resid = get(meta, :max_resid, missing)
             tol = get(meta, :tol, missing)
             tol_pol = get(meta, :tol_pol, missing)
             interp_kind = get(meta, :interp_kind, missing)
+            mean_ee = maybe_get(diag, :mean_ee, get(meta, :mean_ee, missing))
+            delta_pol = maybe_get(diag, :delta_pol, get(meta, :delta_pol, missing))
             # Projection-specific convergence: require both residual and policy tolerances and avoid hitting the iteration cap.
             computed_converged = converged
             if m == "Projection"
                 raw_converged = converged === missing ? true : Bool(converged)
-                delta_pol = get(meta, :delta_pol, missing)
                 polnorm = missing
                 if delta_pol !== missing
                     if isa(delta_pol, Number)
@@ -395,6 +419,8 @@ function main()
                     ee.ee_max,
                     ee.ee_median,
                     binding.share,
+                    mean_ee,
+                    delta_pol,
                 ),
             )
         catch err
@@ -423,6 +449,8 @@ function main()
                     missing,
                     missing,
                     false,
+                    missing,
+                    missing,
                     missing,
                     missing,
                     missing,

@@ -104,6 +104,7 @@ function solve_egm_det_impl(
     converged = false
     iters = 0
     max_resid = Inf
+    Δpol = Inf
 
     for it = 1:maxit
         iters = it
@@ -180,6 +181,7 @@ function solve_egm_det_impl(
         rmse = max_resid,
         model_params,
         opts,
+        delta_pol = Δpol,
     )
 end
 
@@ -223,6 +225,7 @@ function solve_egm_det_impl(
     converged = false
     iters = 0
     max_resid = Inf
+    Δpol = Inf
 
     for it = 1:maxit
         iters = it
@@ -301,6 +304,7 @@ function solve_egm_det_impl(
         rmse = max_resid,
         model_params,
         opts,
+        delta_pol = Δpol,
     )
 end
 
@@ -387,6 +391,7 @@ function solve_egm_stoch_impl(
     converged = false
     iters = 0
     max_resid = Inf
+    Δpol = Inf
 
     for it = 1:maxit
         iters = it
@@ -472,6 +477,7 @@ function solve_egm_stoch_impl(
         max_resid,
         model_params,
         opts,
+        delta_pol = Δpol,
     )
 end
 
@@ -520,6 +526,7 @@ function solve_egm_stoch_impl(
     converged = false
     iters = 0
     max_resid = Inf
+    Δpol = Inf
 
     for it = 1:maxit
         iters = it
@@ -620,6 +627,7 @@ function solve_egm_stoch_impl(
         rmse = max_resid,
         model_params,
         opts,
+        delta_pol = Δpol,
     )
 end
 

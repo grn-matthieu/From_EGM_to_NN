@@ -92,6 +92,7 @@ function solve_ti_det_impl(
     iters = 0
     max_resid = Inf
     best_resid = Inf
+    Δpol = Inf
 
     for it = 1:maxit
         iters = it
@@ -163,6 +164,7 @@ function solve_ti_det_impl(
         rmse = max_resid,
         model_params,
         opts,
+        delta_pol = Δpol,
     )
 end
 
@@ -206,6 +208,7 @@ function solve_ti_det_impl(
     iters = 0
     max_resid = Inf
     best_resid = Inf
+    Δpol = Inf
 
     for it = 1:maxit
         iters = it
@@ -281,6 +284,7 @@ function solve_ti_det_impl(
         rmse = max_resid,
         model_params,
         opts,
+        delta_pol = Δpol,
     )
 end
 
@@ -363,6 +367,7 @@ function solve_ti_stoch_impl(
     iters = 0
     max_resid = Inf
     best_resid = Inf
+    Δpol = Inf
 
     for it = 1:maxit
         iters = it
@@ -458,6 +463,7 @@ function solve_ti_stoch_impl(
         rmse = max_resid,
         model_params,
         opts,
+        delta_pol = Δpol,
     )
 end
 

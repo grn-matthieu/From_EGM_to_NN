@@ -14,6 +14,7 @@ using ..ValueFunction: compute_value_policy
 using ..Determinism: canonicalize_cfg, hash_hex
 using ..CommonValidators: is_nondec, is_positive, respects_amin
 using ..UtilsConfig: maybe
+using ..UtilsDiagnostics: mean_abs_error
 
 export PerturbationMethod, build_perturbation_method
 
@@ -81,6 +82,8 @@ function solve(
     ee = sol.resid
     ee_vec = ee isa AbstractMatrix ? vec(maximum(ee, dims = 2)) : ee
     ee_mat = ee isa AbstractMatrix ? ee : nothing
+    ee_mean = ee_mat === nothing ? mean_abs_error(ee_vec) : mean_abs_error(ee_mat)
+    delta_pol = 0.0
 
     policy = Dict{Symbol,Any}(
         :c => (;
@@ -100,6 +103,9 @@ function solve(
         method = method.opts.name,
         seed = sol.opts.seed,
         runtime = sol.opts.runtime,
+        iterations = sol.iters,
+        mean_ee = ee_mean,
+        delta_pol = delta_pol,
     )
 
     metadata = Dict{Symbol,Any}(
@@ -107,6 +113,8 @@ function solve(
         :max_it => sol.opts.maxit,
         :converged => sol.converged,
         :max_resid => sol.max_resid,
+        :mean_ee => ee_mean,
+        :delta_pol => delta_pol,
         :julia_version => string(VERSION),
         :a_bar => method.opts.a_bar,
         :order => get(method.opts, :order, 1),

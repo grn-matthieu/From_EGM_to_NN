@@ -12,6 +12,7 @@ using ..NNKernel: solve_nn
 using ..ValueFunction: compute_value_policy
 using ..Determinism: canonicalize_cfg, derive_rng, hash_hex, promote_master_rng
 using ..UtilsConfig: maybe
+using ..UtilsDiagnostics: mean_abs_error
 
 export NNMethod, build_nn_method
 
@@ -63,6 +64,8 @@ function solve(
     ee = sol.resid
     ee_vec = ee isa AbstractMatrix ? vec(maximum(ee, dims = 2)) : ee
     ee_mat = ee isa AbstractMatrix ? ee : nothing
+    ee_mean = ee_mat === nothing ? mean_abs_error(ee_vec) : mean_abs_error(ee_mat)
+    delta_pol = hasproperty(sol, :delta_pol) ? sol.delta_pol : missing
 
     policy = Dict{Symbol,Any}(
         :c => (;
@@ -77,8 +80,14 @@ function solve(
     value = compute_value_policy(p, g, S, U, policy)
 
     model_id = hash_hex(canonicalize_cfg(cfg))
-    diagnostics =
-        (; model_id = model_id, method = method.opts.name, runtime = sol.opts.runtime)
+    diagnostics = (;
+        model_id = model_id,
+        method = method.opts.name,
+        runtime = sol.opts.runtime,
+        iterations = sol.iters,
+        mean_ee = ee_mean,
+        delta_pol = delta_pol,
+    )
 
     metadata = Dict{Symbol,Any}(
         :iters => sol.iters,
@@ -86,6 +95,8 @@ function solve(
         :converged => sol.converged,
         :max_resid => sol.max_resid,
         :tol => nothing,
+        :delta_pol => delta_pol,
+        :mean_ee => ee_mean,
         :julia_version => string(VERSION),
     )
 
