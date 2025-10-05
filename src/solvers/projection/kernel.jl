@@ -11,33 +11,15 @@ using ..ProjectionCoefficients: solve_coefficients
 using ..EulerResiduals:
     euler_resid_det, euler_resid_stoch, euler_resid_det_grid, euler_resid_stoch_grid
 using ..CommonInterp: interp_pchip!
+using ..PolicyUtils:
+    clamp_policy!, compute_binding_tolerance, init_consumption_det, rmse_nonbinding
+using ..CommonValidators: is_nondec
 
 export solve_projection_det, solve_projection_stoch
 
 const Β_SYM = Symbol(Char(0x03B2))
 const PI_TRANSITION_SYM = Symbol(Char(0x03A0))
 const DEFAULT_BINDING_TOL = 1e-10
-
-# -----------------------------------------------------------------------------
-# Utilities
-# -----------------------------------------------------------------------------
-
-@inline function is_nondec(x::AbstractVector{<:Real}; tol::Real = 1e-12)
-    @inbounds for i = 1:(length(x)-1)
-        x[i+1] < x[i] - tol && return false
-    end
-    return true
-end
-
-@inline function is_nondec(x::AbstractMatrix{<:Real}; tol::Real = 1e-12)
-    nrow, ncol = size(x)
-    @inbounds for j = 1:ncol
-        for i = 1:(nrow-1)
-            x[i+1, j] < x[i, j] - tol && return false
-        end
-    end
-    return true
-end
 
 # -----------------------------------------------------------------------------
 # Deterministic solver
@@ -61,8 +43,7 @@ function solve_projection_det(
     Na = model_grids[:a].N
     a_grid = chebyshev_nodes(Na, a_min, a_max)
     a_out = model_grids[:a].grid
-    Δa = Na > 1 ? (a_max - a_min) / (Na - 1) : (a_max - a_min)
-    bind_tol = max(DEFAULT_BINDING_TOL, 1e-6 * Δa)
+    bind_tol = compute_binding_tolerance(a_min, a_max, Na; floor = DEFAULT_BINDING_TOL)
     β = getproperty(model_params, Β_SYM)
     income = model_params.y
     R = 1 + model_params.r
@@ -92,7 +73,7 @@ function solve_projection_det(
 
     for order in candidate_orders
         B = B_cache[:, 1:(order+1)]
-        c = clamp.(0.5 .* available_grid, cmin, available_grid)
+        c = init_consumption_det(a_grid, a_min, R, income; cmin = cmin)
         coeffs = solve_coefficients(B, c; λ = λ)
         a_next = similar(c)
         c_next = similar(c)
@@ -106,11 +87,8 @@ function solve_projection_det(
             @. a_next = clamp(R * a_grid + income - c, a_min, a_max)
             Bnext = chebyshev_basis(a_next, order, a_min, a_max)
             c_next .= Bnext * coeffs
-            @. c_new = clamp(
-                model_utility.u_prime_inv(β * R * model_utility.u_prime(c_next)),
-                cmin,
-                available_grid,
-            )
+            c_new .= model_utility.u_prime_inv(β * R * model_utility.u_prime(c_next))
+            clamp_policy!(c_new, cmin, available_grid)
             coeffs = solve_coefficients(B, c_new; λ = λ)
             delta = maximum(abs.(c_new .- c))
             last_delta = delta
@@ -126,12 +104,7 @@ function solve_projection_det(
         c_val = B_val * coeffs
         resid_val = euler_resid_det_grid(model_params, a_val, c_val)
         a_next_val = clamp.(R .* a_val .+ income .- c_val, a_min, a_max)
-        nb_mask_val = a_next_val .> (a_min + bind_tol)
-        max_resid_val = if any(nb_mask_val)
-            sqrt(mean((resid_val[nb_mask_val]) .^ 2))
-        else
-            sqrt(mean((resid_val[min(2, end):end]) .^ 2))
-        end
+        max_resid_val = rmse_nonbinding(resid_val, a_next_val, a_min, bind_tol)
 
         if max_resid_val < best_val_resid
             best_val_resid = max_resid_val
@@ -139,12 +112,7 @@ function solve_projection_det(
             best_c = copy(c)
             best_a_next = copy(a_next)
             best_resid = euler_resid_det_grid(model_params, a_grid, c)
-            nb_mask_best = best_a_next .> (a_min + bind_tol)
-            best_max_resid = if any(nb_mask_best)
-                sqrt(mean((best_resid[nb_mask_best]) .^ 2))
-            else
-                sqrt(mean((best_resid[min(2, end):end]) .^ 2))
-            end
+            best_max_resid = rmse_nonbinding(best_resid, best_a_next, a_min, bind_tol)
             best_iters = iters
             best_converged = converged
             best_order = order
@@ -159,12 +127,7 @@ function solve_projection_det(
     end
     a_next_out = clamp.(R .* a_out .+ income .- c_out, a_min, a_max)
     resid_out = euler_resid_det_grid(model_params, a_out, c_out)
-    nb_mask_out = a_next_out .> (a_min + bind_tol)
-    max_resid_out = if any(nb_mask_out)
-        sqrt(mean((resid_out[nb_mask_out]) .^ 2))
-    else
-        sqrt(mean((resid_out[min(2, end):end]) .^ 2))
-    end
+    max_resid_out = rmse_nonbinding(resid_out, a_next_out, a_min, bind_tol)
 
     runtime = (time_ns() - start_time) / 1e9
     # include policy tolerance in opts
@@ -218,8 +181,7 @@ function solve_projection_stoch(
     a_grid = chebyshev_nodes(Na, a_min, a_max)
     a_out = model_grids[:a].grid
     a_val = chebyshev_nodes(Nval, a_min, a_max)
-    Δa = Na > 1 ? (a_max - a_min) / (Na - 1) : (a_max - a_min)
-    bind_tol = max(DEFAULT_BINDING_TOL, 1e-6 * Δa)
+    bind_tol = compute_binding_tolerance(a_min, a_max, Na; floor = DEFAULT_BINDING_TOL)
 
     z_grid = model_shocks.zgrid
     transition = getproperty(model_shocks, PI_TRANSITION_SYM)
@@ -248,13 +210,17 @@ function solve_projection_stoch(
 
     cmin = 1e-12
 
+    available = similar(a_grid)
+
     for order in candidate_orders
         B = B_cache[:, 1:(order+1)]
         c = Matrix{Float64}(undef, Na, Nz)
         for j = 1:Nz
             income = exp(z_grid[j])
-            available = income .+ R .* a_grid .- a_min
-            @views @. c[:, j] = clamp(0.5 * available, cmin, available)
+            @. available = income + R * a_grid - a_min
+            col = view(c, :, j)
+            @. col = 0.5 * available
+            clamp_policy!(col, cmin, available)
         end
 
         coeffs = solve_coefficients(B, c; λ = λ)
@@ -277,12 +243,10 @@ function solve_projection_stoch(
                     tmp .= Bnext * view(coeffs, :, jp)
                     @. expected_marginal += transition[j, jp] * model_utility.u_prime(tmp)
                 end
-                available = income .+ R .* a_grid .- a_min
-                @views @. c_new[:, j] = clamp(
-                    model_utility.u_prime_inv(β * R * expected_marginal),
-                    cmin,
-                    available,
-                )
+                @. available = income + R * a_grid - a_min
+                view_cnew = view(c_new, :, j)
+                view_cnew .= model_utility.u_prime_inv(β * R * expected_marginal)
+                clamp_policy!(view_cnew, cmin, available)
             end
 
             coeffs = solve_coefficients(B, c_new; λ = λ)
@@ -290,12 +254,7 @@ function solve_projection_stoch(
             last_delta = delta
             c .= c_new
             resid_mat = euler_resid_stoch_grid(model_params, a_grid, z_grid, transition, c)
-            nb_mask = a_next .> (a_min + bind_tol)
-            max_resid = if any(nb_mask)
-                sqrt(mean((resid_mat[nb_mask]) .^ 2))
-            else
-                sqrt(mean((resid_mat[min(2, end):end, :]) .^ 2))
-            end
+            max_resid = rmse_nonbinding(resid_mat, a_next, a_min, bind_tol)
             # use tol_pol for policy iteration delta and tol for residual
             if delta < tol_pol && max_resid < tol
                 converged = true
@@ -317,12 +276,7 @@ function solve_projection_stoch(
             @views @. a_next_val[:, j] =
                 clamp(R * a_val + income - c_val[:, j], a_min, a_max)
         end
-        nb_mask_val = a_next_val .> (a_min + bind_tol)
-        max_resid_val = if any(nb_mask_val)
-            sqrt(mean((resid_val[nb_mask_val]) .^ 2))
-        else
-            sqrt(mean((resid_val[min(2, end):end, :]) .^ 2))
-        end
+        max_resid_val = rmse_nonbinding(resid_val, a_next_val, a_min, bind_tol)
 
         if max_resid_val < best_val_resid
             best_val_resid = max_resid_val
@@ -330,12 +284,7 @@ function solve_projection_stoch(
             best_c = copy(c)
             best_a_next = copy(a_next)
             best_resid = euler_resid_stoch_grid(model_params, a_grid, z_grid, transition, c)
-            nb_mask_best = best_a_next .> (a_min + bind_tol)
-            best_max_resid = if any(nb_mask_best)
-                sqrt(mean((best_resid[nb_mask_best]) .^ 2))
-            else
-                sqrt(mean((best_resid[min(2, end):end, :]) .^ 2))
-            end
+            best_max_resid = rmse_nonbinding(best_resid, best_a_next, a_min, bind_tol)
             best_iters = iters
             best_converged = converged
             best_order = order
@@ -358,12 +307,7 @@ function solve_projection_stoch(
     end
 
     resid_out = euler_resid_stoch_grid(model_params, a_out, z_grid, transition, c_out)
-    nb_mask_out = a_next_out .> (a_min + bind_tol)
-    max_resid_out = if any(nb_mask_out)
-        sqrt(mean((resid_out[nb_mask_out]) .^ 2))
-    else
-        sqrt(mean((resid_out[min(2, end):end, :]) .^ 2))
-    end
+    max_resid_out = rmse_nonbinding(resid_out, a_next_out, a_min, bind_tol)
 
     runtime = (time_ns() - start_time) / 1e9
     opts = (;

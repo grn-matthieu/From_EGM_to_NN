@@ -9,6 +9,7 @@ module PerturbationKernel
 using ..EulerResiduals:
     euler_resid_det, euler_resid_stoch, euler_resid_det_grid, euler_resid_stoch_grid
 using ..CommonInterp: InterpKind, LinearInterp
+using ..PolicyUtils: clamp_policy!, compute_binding_tolerance, rmse_nonbinding
 using ForwardDiff
 using LinearAlgebra
 
@@ -115,8 +116,7 @@ function solve_perturbation_det(
     a_min = g[:a].min
     a_max = g[:a].max
     Na = g[:a].N
-    Δa = Na > 1 ? (a_max - a_min) / (Na - 1) : (a_max - a_min)
-    bind_tol = max(DEFAULT_BINDING_TOL, 1e-6 * Δa)
+    bind_tol = compute_binding_tolerance(a_min, a_max, Na; floor = DEFAULT_BINDING_TOL)
     R = 1 + p.r
     ȳ = p.y
 
@@ -159,7 +159,7 @@ function solve_perturbation_det(
     c = @. c̄ + Fa * (a_grid - ā) + 0.5 * C2 * (a_grid - ā)^2
     cmin = 1e-12
     cmax = @. ȳ + R * a_grid - a_min
-    @. c = clamp(c, cmin, cmax)
+    clamp_policy!(c, cmin, cmax)
     a_next = @. R * a_grid + ȳ - c
     @. a_next = clamp(a_next, a_min, a_max)
 
@@ -167,14 +167,7 @@ function solve_perturbation_det(
     iters = 1
     converged = true
     # RMSE on non-binding points (where a' > a_min + tol)
-    nb_mask = a_next .> (a_min + bind_tol)
-    max_resid = if any(nb_mask)
-        sqrt(mean((resid[nb_mask]) .^ 2))
-    else
-        # fallback: ignore first asset grid point
-        lo = Na > 2 ? 2 : 1
-        sqrt(mean((view(resid, lo:Na)) .^ 2))
-    end
+    max_resid = rmse_nonbinding(resid, a_next, a_min, bind_tol)
     opts = (;
         maxit = iters,
         runtime = (time_ns() - t0) / 1e9,
@@ -226,8 +219,7 @@ function solve_perturbation_stoch(
     a_min = g[:a].min
     a_max = g[:a].max
     Na = g[:a].N
-    Δa = Na > 1 ? (a_max - a_min) / (Na - 1) : (a_max - a_min)
-    bind_tol = max(DEFAULT_BINDING_TOL, 1e-6 * Δa)
+    bind_tol = compute_binding_tolerance(a_min, a_max, Na; floor = DEFAULT_BINDING_TOL)
     z_grid = S.zgrid
     Π = S.Π
     Nz = length(z_grid)
@@ -305,29 +297,26 @@ function solve_perturbation_stoch(
     c = Array{Float64}(undef, Na, Nz)
     a_next = similar(c)
     cmin = 1e-12
+    available = similar(a_grid)
     @inbounds for j = 1:Nz
         z = z_grid[j]
+        col = view(c, :, j)
         for i = 1:Na
             ai = a_grid[i]
             da = ai - ā
-            cij = c̄ + Fa * da + Fz * z + 0.5 * (C2 * da^2 + 2D2 * da * z + E2 * z^2)
-            cij = clamp(cij, cmin, exp(z) + R * ai - a_min)
-            c[i, j] = cij
-            a_next[i, j] = clamp(R * ai + exp(z) - cij, a_min, a_max)
+            col[i] = c̄ + Fa * da + Fz * z + 0.5 * (C2 * da^2 + 2D2 * da * z + E2 * z^2)
+            available[i] = exp(z) + R * ai - a_min
         end
+        clamp_policy!(col, cmin, available)
+        a_col = view(a_next, :, j)
+        @. a_col = clamp(R * a_grid + exp(z) - col, a_min, a_max)
     end
 
     resid = euler_resid_stoch_grid(p, a_grid, z_grid, Π, c)
     iters = 1
     converged = true
     # RMSE on non-binding entries
-    nb_mask = a_next .> (a_min + bind_tol)
-    max_resid = if any(nb_mask)
-        sqrt(mean((resid[nb_mask]) .^ 2))
-    else
-        lo = Na > 2 ? 2 : 1
-        sqrt(mean((view(resid, lo:Na, :)) .^ 2))
-    end
+    max_resid = rmse_nonbinding(resid, a_next, a_min, bind_tol)
     opts = (;
         maxit = iters,
         runtime = (time_ns() - t0) / 1e9,
