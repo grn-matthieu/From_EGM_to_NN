@@ -71,10 +71,13 @@ include("../../../src/solvers/nn/mixed_precision.jl")
     @test stoch_loss(resid2) == Float32(sum(abs2, resid2))
 
     # -- det_forward_inputs
-    Xf, a_f32b = det_forward_inputs(G)
-    @test size(Xf) == (1, 3)
-    @test Xf[1, :] == a_f32b
-    @test a_f32b == Float32[0, 1, 2]
+    P = (r = 0.02, y = log(2.0))
+    Xf, w_f32 = det_forward_inputs(G, P)
+    @test size(Xf) == (2, 3)
+    y_expected = fill(Float32(exp(P.y)), 3)
+    @test Xf[1, :] == y_expected
+    @test Xf[2, :] == w_f32
+    @test isapprox(w_f32, Float32[2.0, 3.02, 4.04]; atol = 1e-6, rtol = 1e-6)
 
     # -- convert_to_grid_eltype
     grid = [0.0, 1.0, 2.0]           # Float64 grid

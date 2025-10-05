@@ -79,10 +79,15 @@ end
 """Map stochastic residuals to a `Float32` loss value."""
 stoch_loss(resid) = float32_loss(sum(abs2, resid))
 
-"""Return the `Float32` batch used for deterministic forward passes."""
-function det_forward_inputs(G)
+"""Return the `(y, w)` feature grid (and cash-on-hand) for deterministic passes."""
+function det_forward_inputs(G, P)
     a_grid_f32 = float32_vector(G[:a].grid)
-    return reshape(a_grid_f32, 1, :), a_grid_f32
+    Rg = 1.0f0 + Float32(P.r)
+    y_val = Float32(exp(P.y))
+    y_grid = fill(y_val, length(a_grid_f32))
+    w_grid = @. Rg * a_grid_f32 + y_grid
+    X = vcat(reshape(y_grid, 1, :), reshape(w_grid, 1, :))
+    return X, w_grid
 end
 
 """

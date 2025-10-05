@@ -145,7 +145,6 @@ function solve_nn(model; opts = nothing, rng = nothing)
     rng === nothing && error("solve_nn requires a `rng` keyword argument")
     master = promote_master_rng(rng)
     train_rng = derive_rng(master, :train)
-    eval_rng = derive_rng(master, :evaluation)
     diag_rng = derive_rng(master, :diagnostics)
 
     P = get_params(model)
@@ -154,8 +153,9 @@ function solve_nn(model; opts = nothing, rng = nothing)
     U = get_utility(model)
 
     start_time = time_ns()
-    scaler = FeatureScaler(G, S)
-    settings = solver_settings(opts; has_shocks = scaler.has_shocks)
+    has_shocks = !isnothing(S)
+    settings = solver_settings(opts; has_shocks = has_shocks)
+    scaler = FeatureScaler(P, G, S, settings)
 
     chain = build_dual_head_network(input_dimension(S), settings.hidden_sizes)
 
@@ -189,7 +189,6 @@ function solve_nn(model; opts = nothing, rng = nothing)
         scaler;
         settings = settings,
         U = U,
-        rng = eval_rng,
     )
 
     runtime = (time_ns() - start_time) / 1e9
@@ -210,10 +209,12 @@ function solve_nn(model; opts = nothing, rng = nothing)
         rng = diag_rng,
     )
 
+    _, w_grid = det_forward_inputs(G, P_resid)
+
     return (;
-        w_grid = G[:w].grid,
+        w_grid = w_grid,
         c = evaluation.c,
-        w_next = evaluation.a_next, # now w_next instead of a_next
+        a_next = evaluation.a_next,
         resid = evaluation.resid,
         iters = training_result.epochs_run,
         converged = converged,
@@ -239,14 +240,20 @@ function loss_euler_fb_aio!(chain, ps, st, batch, model_cfg, rng)
     T = eltype(batch)
     C_MIN = T(1e-3)
 
-    a0 = ((batch[1, :] .+ one(T)) ./ T(2)) .* T(scaler.a_range) .+ T(scaler.a_min)
-    z0 =
-        settings.has_shocks ?
-        ((batch[2, :] .+ one(T)) ./ T(2)) .* T(scaler.z_range) .+ T(scaler.z_min) :
-        fill(zero(T), size(a0))
+    Rg = one(T) + T(P.r)
+    μ = T(P_resid.y)
+    if size(batch, 1) == 2
+        y0 = ((batch[1, :] .+ one(T)) ./ T(2)) .* T(scaler.y_range) .+ T(scaler.y_min)
+        w0 = ((batch[2, :] .+ one(T)) ./ T(2)) .* T(scaler.w_range) .+ T(scaler.w_min)
+    elseif size(batch, 1) == 1
+        w0 = ((batch[1, :] .+ one(T)) ./ T(2)) .* T(scaler.w_range) .+ T(scaler.w_min)
+        y0 = fill(exp(μ), size(w0))
+    else
+        throw(ArgumentError("Expected 1 or 2 feature rows, got $(size(batch, 1))"))
+    end
+    z0 = log.(y0) .- μ
 
     out, st1 = Lux.apply(chain, batch, ps, st)
-    w0 = T.(cash_on_hand(a0, z0, P_resid, settings.has_shocks))
     c0 = vec(phi_to_consumption(out[:Φ], w0; min_c = C_MIN))
     h = T.(vec(ensure_row(out[:h])))
     a_term = @. one(T) - c0 / w0
@@ -260,11 +267,15 @@ function loss_euler_fb_aio!(chain, ps, st, batch, model_cfg, rng)
     z1 = @. ρ * z0 + σ_shocks * ε1
     z2 = @. ρ * z0 + σ_shocks * ε2
 
+    y1 = exp.(μ .+ z1)
+    y2 = exp.(μ .+ z2)
     a1 = @. w0 - c0
     a2 = a1
+    w1 = @. Rg * a1 + y1
+    w2 = @. Rg * a2 + y2
 
-    X1 = vcat(reshape(a1, 1, :), reshape(z1, 1, :))
-    X2 = vcat(reshape(a2, 1, :), reshape(z2, 1, :))
+    X1 = vcat(reshape(y1, 1, :), reshape(w1, 1, :))
+    X2 = vcat(reshape(y2, 1, :), reshape(w2, 1, :))
 
     NX1 = normalize_feature_batch(scaler, X1)
     NX2 = normalize_feature_batch(scaler, X2)
@@ -272,13 +283,10 @@ function loss_euler_fb_aio!(chain, ps, st, batch, model_cfg, rng)
     out1, _ = Lux.apply(chain, NX1, ps, st1)
     out2, _ = Lux.apply(chain, NX2, ps, st1)
 
-    w1 = T.(cash_on_hand(a1, z1, P_resid, settings.has_shocks))
-    w2 = T.(cash_on_hand(a2, z2, P_resid, settings.has_shocks))
     c1 = vec(phi_to_consumption(out1[:Φ], w1; min_c = C_MIN))
     c2 = vec(phi_to_consumption(out2[:Φ], w2; min_c = C_MIN))
 
     β = T(P.β)
-    Rg = one(T) + T(P.r)
     q1 = @. β * Rg * uprime(c1) / uprime(c0)
     q2 = @. β * Rg * uprime(c2) / uprime(c0)
 

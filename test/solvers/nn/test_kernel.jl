@@ -28,7 +28,7 @@ using ThesisProject.NNKernel:
     evaluate_solution,
     loss_euler_fb_aio!,
     maybe_dense_diagnostics,
-    next_assets,
+    next_assets_from_cash,
     phi_to_consumption,
     scalar_params,
     solve_nn
@@ -57,7 +57,6 @@ make_S() = (zgrid = Float32[-0.5, 0.5], Π = Float32[0.8 0.2; 0.3 0.7])
 function make_fixture(; shocks::Bool)
     G = make_G()
     S = shocks ? make_S() : nothing
-    scaler = FeatureScaler(G, S)
     settings = NNKernel.solver_settings(
         (;
             epochs = 1,
@@ -77,6 +76,7 @@ function make_fixture(; shocks::Bool)
         );
         has_shocks = shocks,
     )
+    scaler = FeatureScaler(P_common, G, S, settings)
     chain = build_dual_head_network(NNKernel.input_dimension(S), settings.hidden_sizes)
     rng = MersenneTwister(1234)
     ps, st = Lux.setup(rng, chain)
@@ -128,10 +128,8 @@ end
     @test size(c) == (1, 3)
     @test all(c .>= 0)
     c_vec = vec(permutedims(c))
-
-    fix = make_fixture(shocks = false)
-    a_next = next_assets(fix.P, fix.G, c_vec)
-    @test length(a_next) == length(fix.G[:a].grid)
+    a_next = next_assets_from_cash(w, c_vec)
+    @test length(a_next) == length(w)
     @test all(isfinite.(a_next))
 end
 
@@ -161,7 +159,6 @@ end
         fix.scaler;
         settings = fix.settings,
         U = fix.U,
-        rng = make_rng(10),
     )
     @test result isa EvaluationResult
     expected = NNKernel.DEFAULT_EVAL_SAMPLES
@@ -184,7 +181,6 @@ end
         fix.scaler;
         settings = fix.settings,
         U = fix.U,
-        rng = make_rng(11),
     )
     @test result isa EvaluationResult
     expected = NNKernel.DEFAULT_EVAL_SAMPLES

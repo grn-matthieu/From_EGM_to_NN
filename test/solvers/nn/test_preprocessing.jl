@@ -19,46 +19,60 @@ using ThesisProject.NNKernel:
 end
 
 @testset "FeatureScaler construction and normalization" begin
-    G = Dict(:a => (grid = [0.0, 1.0, 2.0],))
+    G = Dict(:a => (grid = [0.0, 1.0, 2.0], min = 0.0, max = 2.0))
+    P = (r = 0.02, y = log(1.2))
 
-    # case 1: no shocks
-    sc1 = FeatureScaler(G, nothing)
-    @test sc1.a_min == 0.0f0
-    @test sc1.a_range == 2.0f0
+    settings_det = solver_settings(nothing; has_shocks = false)
+    sc1 = FeatureScaler(P, G, nothing, settings_det)
     @test sc1.has_shocks == false
+    @test sc1.w_min == settings_det.w_min
+    @test sc1.w_range > 0
+    @test isapprox(sc1.y_min, Float32(exp(P.y)); atol = 1e-6)
 
-    X = Float32[0.0 2.0; 1.0 1.0]  # 2 samples, col1 = a
+    X = Float32[
+        exp(P.y) settings_det.w_min
+        exp(P.y) settings_det.w_max
+    ]
     normalize_samples!(sc1, X)
-    @test all(-1.0f0 .<= X[:, 1] .<= 1.0f0)   # only col1 normalized
-    @test X[:, 2] == [2.0f0, 1.0f0]       # col2 unchanged
+    @test all(abs.(X[:, 1]) .≤ 1.0f0)
+    @test X[:, 2] ≈ Float32[-1.0, 1.0] atol = 1e-5
 
-    Xb = Float32[0.0, 2.0] |> x -> reshape(x, 1, :)
+    Xb = Float32[
+        exp(P.y) exp(P.y)
+        settings_det.w_min settings_det.w_max
+    ]
     normalize_feature_batch!(sc1, Xb)
-    @test all(-1.0f0 .<= Xb[1, :] .<= 1.0f0)
+    @test all(abs.(Xb[1, :]) .≤ 1.0f0)
+    @test Xb[2, :] ≈ Float32[-1.0, 1.0] atol = 1e-5
 
-    # case 2: with shocks
-    S = (zgrid = [-1.0f0, 1.0f0],)
-    sc2 = FeatureScaler(G, S)
+    settings_sto = solver_settings(nothing; has_shocks = true)
+    S = (zgrid = Float32.([-0.2, 0.0, 0.2]),)
+    sc2 = FeatureScaler(P, G, S, settings_sto)
     @test sc2.has_shocks == true
-    @test sc2.z_min == -1.0f0
-    @test sc2.z_range == 2.0f0
+    @test sc2.y_range > 0
 
-    X2 = Float32[0.0 -1.0; 2.0 1.0]  # col1 = a, col2 = z
+    y_vals = exp.(Float32(P.y) .+ S.zgrid[1:2])
+    X2 = Float32[
+        y_vals[1] settings_sto.w_min
+        y_vals[2] settings_sto.w_max
+    ]
     normalize_samples!(sc2, X2)
-    @test all(-1.0f0 .<= X2[:, 1] .<= 1.0f0)  # both normalized
-    @test all(-1.0f0 .<= X2[:, 2] .<= 1.0f0)
+    @test all(abs.(X2) .≤ 1.0f0)
 
-    X2b = Float32[0.0 2.0; -1.0 1.0]  # batch version (rows = features, cols = samples)
+    X2b = Float32[
+        y_vals[1] y_vals[2]
+        settings_sto.w_min settings_sto.w_max
+    ]
     normalize_feature_batch!(sc2, X2b)
-    @test all(-1.0f0 .<= X2b[1, :] .<= 1.0f0)
-    @test all(-1.0f0 .<= X2b[2, :] .<= 1.0f0)
+    @test all(abs.(X2b) .≤ 1.0f0)
 
-    # non-mutating helper mirrors the in-place behaviour and supports shockless grids
-    X2c = Float32[0.0 2.0; -1.0 1.0]
+    X2c = Float32[
+        y_vals[1] y_vals[2]
+        settings_sto.w_min settings_sto.w_max
+    ]
     X2c_norm = normalize_feature_batch(sc2, X2c)
     @test size(X2c_norm) == size(X2c)
-    @test all(-1.0f0 .<= X2c_norm[1, :] .<= 1.0f0)
-    @test all(-1.0f0 .<= X2c_norm[2, :] .<= 1.0f0)
+    @test all(abs.(X2c_norm) .≤ 1.0f0)
 end
 
 
@@ -94,6 +108,6 @@ end
 end
 
 @testset "input_dimension" begin
-    @test input_dimension(nothing) == 1
+    @test input_dimension(nothing) == 2
     @test input_dimension((zgrid = [1.0],)) == 2
 end

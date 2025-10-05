@@ -83,17 +83,6 @@ end
 
 huber_loss(x, δ) = abs(x) ≤ δ ? 0.5f0 * x * x : δ * (abs(x) - 0.5f0 * δ)
 
-@inline function cash_on_hand(a, z, P, has_shocks::Bool)
-    R = 1.0f0 + Float32(P.r)
-    μ = Float32(P.y)                # log-mean income level
-    if has_shocks
-        inc = @. exp(μ + z)
-    else
-        inc = exp(μ)
-    end
-    return @. R * a + inc
-end
-
 function build_loss_function(
     P_resid,
     G,
@@ -105,6 +94,9 @@ function build_loss_function(
 )
     return function (model, ps, st, data)
         X = data[1]
+        T = eltype(X)
+        Rg = one(T) + T(P_resid.r)
+        μ = T(P_resid.y)
 
         # If caller selected the FB AiO objective, delegate to the custom loss
         if settings.objective == :euler_fb_aio
@@ -133,15 +125,15 @@ function build_loss_function(
             Φ = prediction.Φ
             h_raw = prediction.h
 
-            # Recover original (unnormalized) a and z from normalized input X
-            a = ((X[1, :] .+ 1.0f0) ./ 2.0f0) .* scaler.a_range .+ scaler.a_min
-            if scaler.has_shocks
-                z = ((X[2, :] .+ 1.0f0) ./ 2.0f0) .* scaler.z_range .+ scaler.z_min
+            if size(X, 1) == 2
+                y = ((X[1, :] .+ one(T)) ./ T(2)) .* T(scaler.y_range) .+ T(scaler.y_min)
+                w = ((X[2, :] .+ one(T)) ./ T(2)) .* T(scaler.w_range) .+ T(scaler.w_min)
+            elseif size(X, 1) == 1
+                w = ((X[1, :] .+ one(T)) ./ T(2)) .* T(scaler.w_range) .+ T(scaler.w_min)
+                y = fill(exp(μ), size(w))
             else
-                z = zeros(eltype(a), size(a))
+                throw(ArgumentError("Expected 1 or 2 feature rows, got $(size(X, 1))"))
             end
-
-            w = cash_on_hand(a, z, P_resid, scaler.has_shocks)
 
             # Align shapes: Φ and h may be 1×N (row) or N×1 (column)
             if ndims(Φ) == 2 && size(Φ, 1) == 1
@@ -162,12 +154,33 @@ function build_loss_function(
             c_pred = Φ_row .* reshape(w, 1, :)
             # avoid u'(0) by clamping consumption away from zero
             c_pred = clamp.(c_pred, eps(eltype(X)), Inf)
+            c_vec = vec(c_pred)
         elseif prediction isa Tuple
             c_pred, st_out = prediction
             c_pred = clamp.(c_pred, eps(eltype(X)), Inf)
+            if size(X, 1) == 2
+                y = ((X[1, :] .+ one(T)) ./ T(2)) .* T(scaler.y_range) .+ T(scaler.y_min)
+                w = ((X[2, :] .+ one(T)) ./ T(2)) .* T(scaler.w_range) .+ T(scaler.w_min)
+            elseif size(X, 1) == 1
+                w = ((X[1, :] .+ one(T)) ./ T(2)) .* T(scaler.w_range) .+ T(scaler.w_min)
+                y = fill(exp(μ), size(w))
+            else
+                throw(ArgumentError("Expected 1 or 2 feature rows, got $(size(X, 1))"))
+            end
+            c_vec = vec(c_pred)
         else
             c_pred = prediction
             c_pred = clamp.(c_pred, eps(eltype(X)), Inf)
+            if size(X, 1) == 2
+                y = ((X[1, :] .+ one(T)) ./ T(2)) .* T(scaler.y_range) .+ T(scaler.y_min)
+                w = ((X[2, :] .+ one(T)) ./ T(2)) .* T(scaler.w_range) .+ T(scaler.w_min)
+            elseif size(X, 1) == 1
+                w = ((X[1, :] .+ one(T)) ./ T(2)) .* T(scaler.w_range) .+ T(scaler.w_min)
+                y = fill(exp(μ), size(w))
+            else
+                throw(ArgumentError("Expected 1 or 2 feature rows, got $(size(X, 1))"))
+            end
+            c_vec = vec(c_pred)
         end
 
         if isnothing(S)
@@ -183,34 +196,9 @@ function build_loss_function(
 
         # Build diagnostics NamedTuple for minibatch (phi, h, a, z, w, c)
         if prediction isa NamedTuple
-            diag = (;
-                phi = Φ_row,
-                h = h_row,
-                a = a,
-                z = settings.has_shocks ? z : nothing,
-                w = w,
-                c = c_pred,
-            )
+            diag = (; phi = Φ_row, h = h_row, y = y, w = w, c = c_vec, a = w .- c_vec)
         else
-            # fallback diagnostics when model returned c directly
-            # compute a,z,w for diagnostics
-            a = ((X[1, :] .+ 1.0f0) ./ 2.0f0) .* scaler.a_range .+ scaler.a_min
-            if scaler.has_shocks
-                z = ((X[2, :] .+ 1.0f0) ./ 2.0f0) .* scaler.z_range .+ scaler.z_min
-            else
-                z = nothing
-            end
-            w =
-                scaler.has_shocks ? cash_on_hand(a, z, P_resid, scaler.has_shocks) :
-                cash_on_hand(a, 0.0f0, P_resid, false)
-            diag = (;
-                phi = nothing,
-                h = nothing,
-                a = a,
-                z = settings.has_shocks ? z : nothing,
-                w = w,
-                c = c_pred,
-            )
+            diag = (; phi = nothing, h = nothing, y = y, w = w, c = c_vec, a = w .- c_vec)
         end
 
         return loss, st_out, diag
@@ -255,10 +243,11 @@ function create_training_batch(
 )
     want =
         nsamples > 0 ? nsamples :
-        (isnothing(S) ? length(G[:w].grid) : length(G[:w].grid) * length(S.zgrid))
+        (isnothing(S) ? length(G[:a].grid) : length(G[:a].grid) * length(S.zgrid))
 
     if mode == :full
-        X, _ = generate_dataset(G, S; mode = :full)
+        @assert P_resid !== nothing
+        X, _ = generate_dataset(G, S, P_resid; mode = :full)
         normalize_samples!(scaler, X)
         return prepare_training_batch(X), size(X, 1)
     end
@@ -267,19 +256,45 @@ function create_training_batch(
     @assert want > 0 "create_training_batch requires a positive sample count"
     w_lo = settings.w_min
     w_hi = settings.w_max
-    @assert w_hi > w_lo "Require w_max > w_min for uniform cash-on-hand sampling"
+    @assert w_hi > w_lo "Require w_max > w_min for cash-on-hand sampling"
 
-    W = rand(rng, Float32, want) .* (w_hi - w_lo) .+ w_lo
-
-    if settings.has_shocks
-        z_min = scaler.z_min
-        z_max = scaler.z_min + scaler.z_range
-        Z = rand(rng, Float32, want) .* (z_max - z_min) .+ z_min
-        X = hcat(W, Z)
+    Rg = 1.0f0 + Float32(P_resid.r)
+    μ = Float32(P_resid.y)
+    a_min = Float32(G[:a].min)
+    a_max = Float32(G[:a].max)
+    if settings.has_shocks && !isnothing(S)
+        z_min = Float32(minimum(S.zgrid))
+        z_max = Float32(maximum(S.zgrid))
     else
-        X = reshape(W, :, 1)
+        z_min = 0.0f0
+        z_max = 0.0f0
     end
 
+    Y = Vector{Float32}(undef, want)
+    W = Vector{Float32}(undef, want)
+    filled = 0
+    tries = 0
+    max_tries = 1000
+    while filled < want && tries < max_tries
+        m = max(want - filled, 4096)
+        a_draw = rand(rng, Float32, m) .* (a_max - a_min) .+ a_min
+        z_draw = rand(rng, Float32, m) .* (z_max - z_min) .+ z_min
+        y_draw = @. exp(μ + z_draw)
+        w_draw = @. Rg * a_draw + y_draw
+        keep = (w_draw .>= w_lo) .& (w_draw .<= w_hi)
+        k = count(keep)
+        if k > 0
+            idx = findall(keep)
+            take = min(k, want - filled)
+            Y[filled+1:filled+take] .= y_draw[idx[1:take]]
+            W[filled+1:filled+take] .= w_draw[idx[1:take]]
+            filled += take
+        end
+        tries += 1
+    end
+    @assert filled == want "Sampler could not hit the w-window; widen [w_min, w_max] or increase nsamples"
+
+    X = hcat(Y, W)
     normalize_samples!(scaler, X)
     batch = prepare_training_batch(X)
     return batch, want
