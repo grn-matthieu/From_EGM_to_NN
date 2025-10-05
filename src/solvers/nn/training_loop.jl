@@ -425,7 +425,7 @@ function train_consumption_network!(
         else
             stall_epochs += 1
         end
-        if settings.verbose && (epoch % 10 == 0 || epoch == settings.epochs)
+        if settings.verbose && (epoch % 100 == 0 || epoch == settings.epochs)
             @printf "Epoch: %3d \t Loss: %.5g \t GradNorm: %.5g\n" epoch average_loss gradient_norm
         end
         # periodic validation logging every 100 epochs

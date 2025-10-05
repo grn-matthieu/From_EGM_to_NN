@@ -19,11 +19,11 @@ utility:
 
 solver:
   # run a single method name (string or symbol), a list of names, or use "all"
-  method: EGM
+  method: NN
   tol: 1.0e-4
   tol_pol: 1.0e-3
   maxit: 1000
-  verbose: false
+  verbose: true
   interp_kind: linear
   orders: [5]
   Nval: 50
@@ -34,10 +34,9 @@ solver:
     Nval: 50
   # TimeIteration/EGM stability knobs
   relax: 0.5
-  patience: 2000
   warm_start: default
   # NN method options (used only when method includes NN)
-  epochs: 100000
+  epochs: 1000
   batch: 64
   lr: 1e-3
   objective: euler_fb_aio
