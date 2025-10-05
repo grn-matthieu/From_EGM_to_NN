@@ -6,7 +6,7 @@ the consumption-saving model.
 """
 module ProjectionKernel
 
-using ..Chebyshev: chebyshev_basis, chebyshev_nodes
+using ..Chebyshev: chebyshev_basis, gauss_lobatto_nodes
 using ..ProjectionCoefficients: solve_coefficients
 using ..EulerResiduals:
     euler_resid_det, euler_resid_stoch, euler_resid_det_grid, euler_resid_stoch_grid
@@ -20,6 +20,23 @@ export solve_projection_det, solve_projection_stoch
 const Β_SYM = Symbol(Char(0x03B2))
 const PI_TRANSITION_SYM = Symbol(Char(0x03A0))
 const DEFAULT_BINDING_TOL = 1e-10
+const MAX_CHEBYSHEV_DEGREE = 15
+const MAX_COLLOCATION_POINTS = MAX_CHEBYSHEV_DEGREE + 1
+
+@inline function clamp_orders(orders::AbstractVector{Int}, max_order::Int)
+    return clamp.(orders, 0, max_order)
+end
+
+@inline function gauss_lobatto_or_midpoint(N::Int, a_min::Real, a_max::Real)
+    if N <= 0
+        return Float64[]
+    elseif N == 1
+        midpoint = (a_min + a_max) / 2
+        return fill(midpoint, 1)
+    else
+        return gauss_lobatto_nodes(N, a_min, a_max)
+    end
+end
 
 # -----------------------------------------------------------------------------
 # Deterministic solver
@@ -40,18 +57,18 @@ function solve_projection_det(
 
     a_min = model_grids[:a].min
     a_max = model_grids[:a].max
-    Na = model_grids[:a].N
-    a_grid = chebyshev_nodes(Na, a_min, a_max)
+    Na = clamp(model_grids[:a].N, 2, MAX_COLLOCATION_POINTS)
+    a_grid = gauss_lobatto_nodes(Na, a_min, a_max)
     a_out = model_grids[:a].grid
     bind_tol = compute_binding_tolerance(a_min, a_max, Na; floor = DEFAULT_BINDING_TOL)
     β = getproperty(model_params, Β_SYM)
     income = model_params.y
     R = 1 + model_params.r
 
-    candidate_orders = isempty(orders) ? Int[Na-1] : orders
+    candidate_orders = isempty(orders) ? Int[Na-1] : clamp_orders(orders, Na - 1)
     max_order = maximum(candidate_orders)
 
-    a_val = chebyshev_nodes(Nval, a_min, a_max)
+    a_val = gauss_lobatto_or_midpoint(Nval, a_min, a_max)
     B_cache = chebyshev_basis(a_grid, max_order, a_min, a_max)
     B_val_cache = chebyshev_basis(a_val, max_order, a_min, a_max)
     B_out_cache = chebyshev_basis(a_out, max_order, a_min, a_max)
@@ -177,10 +194,10 @@ function solve_projection_stoch(
 
     a_min = model_grids[:a].min
     a_max = model_grids[:a].max
-    Na = model_grids[:a].N
-    a_grid = chebyshev_nodes(Na, a_min, a_max)
+    Na = clamp(model_grids[:a].N, 2, MAX_COLLOCATION_POINTS)
+    a_grid = gauss_lobatto_nodes(Na, a_min, a_max)
     a_out = model_grids[:a].grid
-    a_val = chebyshev_nodes(Nval, a_min, a_max)
+    a_val = gauss_lobatto_or_midpoint(Nval, a_min, a_max)
     bind_tol = compute_binding_tolerance(a_min, a_max, Na; floor = DEFAULT_BINDING_TOL)
 
     z_grid = model_shocks.zgrid
@@ -190,7 +207,7 @@ function solve_projection_stoch(
     β = getproperty(model_params, Β_SYM)
     R = 1 + model_params.r
 
-    candidate_orders = isempty(orders) ? Int[Na-1] : orders
+    candidate_orders = isempty(orders) ? Int[Na-1] : clamp_orders(orders, Na - 1)
     max_order = maximum(candidate_orders)
 
     B_cache = chebyshev_basis(a_grid, max_order, a_min, a_max)
