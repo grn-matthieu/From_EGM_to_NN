@@ -60,8 +60,8 @@ function get_uprime(U, P_resid)
     if U !== nothing && hasproperty(U, :u_prime)
         return U.u_prime
     else
-        sigma = Float64(P_resid.σ)
-        return c -> fallback_uprime(c, sigma)
+        σ = Float64(P_resid.σ)
+        return c -> max.(c, 1e-8) .^ (-σ)
     end
 end
 

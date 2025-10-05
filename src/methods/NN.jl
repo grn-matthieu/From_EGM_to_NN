@@ -75,15 +75,16 @@ function solve(
     ee_mat = ee isa AbstractMatrix ? ee : nothing
     ee_mean = ee_mat === nothing ? mean_abs_error(ee_vec) : mean_abs_error(ee_mat)
     delta_pol = hasproperty(sol, :delta_pol) ? sol.delta_pol : missing
+    agrid = ThesisProject.get_grids(model)[:a].grid
 
     policy = Dict{Symbol,Any}(
         :c => (;
             value = sol.c,
-            grid = sol.w_grid,
+            grid = sol.agrid,
             euler_errors = ee_vec,
             euler_errors_mat = ee_mat,
         ),
-        :a => (; value = sol.a_next, grid = sol.w_grid),
+        :a => (; value = sol.a_next, grid = agrid),
     )
 
     # Only compute value if the policy arrays are grid-aligned.
