@@ -11,6 +11,8 @@ using Random
 using ThesisProject
 using ThesisProject.CommonInterp: interp_linear!, interp_pchip!
 using Statistics: median
+import ThesisProject.NNKernel: eval_euler_residuals_gh
+
 
 include(joinpath(@__DIR__, "utils", "config_helpers.jl"))
 using .ScriptConfigHelpers
@@ -322,6 +324,44 @@ function main()
         cfg = merge_section(base_cfg, :solver, Dict{Symbol,Any}(:method => m))
         try
             sol, runtime = solve_with_runtime(cfg)
+            if m == "NN"
+                try
+                    pol = sol.policy  # Dict{Symbol,Any}
+
+                    if haskey(pol, :c)
+                        # 1) Injecter euler_errors depuis sol.resid si absent
+                        if !hasproperty(pol[:c], :euler_errors)
+                            resid =
+                                hasproperty(sol, :resid) ? getfield(sol, :resid) : nothing
+                            if resid !== nothing
+                                ee_vec =
+                                    resid isa AbstractMatrix ?
+                                    vec(maximum(resid, dims = 2)) : resid
+                                ee_mat = resid isa AbstractMatrix ? resid : nothing
+                                pol[:c] = merge(
+                                    pol[:c],
+                                    (; euler_errors = ee_vec, euler_errors_mat = ee_mat),
+                                )
+                            end
+                        end
+
+                        # 2) Forcer la grille sur w_grid si disponible
+                        wgrid =
+                            hasproperty(sol, :w_grid) ? getfield(sol, :w_grid) :
+                            (hasproperty(pol[:c], :grid) ? pol[:c].grid : nothing)
+
+                        if wgrid !== nothing
+                            pol[:c] = merge(pol[:c], (; grid = wgrid))
+                            if haskey(pol, :a)
+                                pol[:a] = merge(pol[:a], (; grid = wgrid))
+                            end
+                        end
+                    end
+                    # rien à assigner à sol.policy si Solution est immuable, on a muté `pol` en place
+                catch err
+                    @warn "NN postprocess failed" err
+                end
+            end
 
             meta = sol.metadata
             diag = sol.diagnostics

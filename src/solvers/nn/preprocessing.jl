@@ -13,30 +13,25 @@ struct FeatureScaler
     has_shocks::Bool
 end
 
-FeatureScaler(
-    w_min::Float32,
-    w_range::Float32,
-    y_min::Float32,
-    y_range::Float32,
-    has_shocks::Bool,
-) = FeatureScaler(w_min, w_range, y_min, y_range, has_shocks)
-
 function FeatureScaler(P, G, S, settings)
+    # y
+    μ = Float32(P.y)
+    if isnothing(S)
+        y_min = Float32(exp(μ))
+        y_range = 1.0f0                 # évite /0 en déterministe
+    else
+        zmin = Float32(minimum(S.zgrid))
+        zmax = Float32(maximum(S.zgrid))
+        y_min = Float32(exp(μ + zmin))
+        y_max = Float32(exp(μ + zmax))
+        y_range = max(y_max - y_min, 1.0f-6)
+    end
+    # w
     w_min = Float32(settings.w_min)
     w_max = Float32(settings.w_max)
-    w_range = max(w_max - w_min, eps(Float32))
-    μ = Float32(P.y)
-    if settings.has_shocks && !isnothing(S)
-        z = Float32.(S.zgrid)
-        y_vals = exp.(μ .+ z)
-        y_min, y_max = extrema(y_vals)
-    else
-        y_val = Float32(exp(μ))
-        y_min = y_val
-        y_max = y_val
-    end
-    y_range = max(y_max - y_min, eps(Float32))
-    return FeatureScaler(w_min, w_range, y_min, y_range, settings.has_shocks)
+    w_range = max(w_max - w_min, 1.0f-6)
+
+    return FeatureScaler(w_min, w_range, y_min, y_range, !isnothing(S))
 end
 
 function normalize_samples!(scaler::FeatureScaler, X)

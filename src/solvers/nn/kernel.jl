@@ -25,17 +25,19 @@ include("evaluation.jl")
 
 export solve_nn
 
-const H_ALPHA = 5.0f0
+const H_ALPHA = 1.0f0
 
 """Construct the dual-head Lux model used by the solver."""
 function build_dual_head_network(input_dim::Int, hidden::NTuple{2,Int})
     H1, H2 = hidden
-    trunk = Chain(Dense(input_dim, H1, leakyrelu), Dense(H1, H2, leakyrelu), Dense(H2, 2))
+    final = Dense(H2, 2)
+    trunk = Chain(Dense(input_dim, H1, leakyrelu), Dense(H1, H2, leakyrelu), final)
     # The post-processing function expects a 2×N matrix and splits it into Φ and h
     function postprocess(x)
         φ_pre = x[1:1, :]
         h_pre = x[2:2, :]
-        return (; Φ = sigmoid.(φ_pre), h = exp.(H_ALPHA .* tanh.(h_pre)))
+        # paper: Φ = sigmoid(·) and h = exp(·)
+        return (; Φ = sigmoid.(φ_pre), h = exp.(h_pre))
     end
     return Chain(trunk, postprocess)
 end

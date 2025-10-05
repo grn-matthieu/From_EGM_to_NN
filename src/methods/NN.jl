@@ -24,10 +24,18 @@ function build_nn_method(cfg::NamedTuple)
     solver_cfg = cfg.solver
     return NNMethod((
         name = maybe(cfg, :method, solver_cfg.method),
-        epochs = maybe(solver_cfg, :epochs, 100_000),
+        # Paper defaults: 50_000 epochs, ADAM lr = 1e-3, batch = 64
+        epochs = maybe(solver_cfg, :epochs, 50_000),
         batch = maybe(solver_cfg, :batch, 64),
-        lr = maybe(solver_cfg, :lr, 1e-4),
+        lr = maybe(solver_cfg, :lr, 1e-3),
         verbose = maybe(solver_cfg, :verbose, false),
+
+        # Architecture: hidden sizes (paper compares 8x8, 16x16, ...)
+        hid1 = maybe(solver_cfg, :hid1, 8),
+        hid2 = maybe(solver_cfg, :hid2, 8),
+
+        # samples per epoch: paper draws 64 random grid points per epoch
+        samples_per_epoch = maybe(solver_cfg, :samples_per_epoch, 64),
 
         # new: loss selector + stability knobs
         objective = maybe(solver_cfg, :objective, :euler_fb_aio),
@@ -71,11 +79,11 @@ function solve(
     policy = Dict{Symbol,Any}(
         :c => (;
             value = sol.c,
-            grid = sol.a_grid,
+            grid = sol.w_grid,
             euler_errors = ee_vec,
             euler_errors_mat = ee_mat,
         ),
-        :a => (; value = sol.a_next, grid = sol.a_grid),
+        :a => (; value = sol.a_next, grid = sol.w_grid),
     )
 
     # Only compute value if the policy arrays are grid-aligned.
