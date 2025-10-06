@@ -43,6 +43,7 @@ solver:
   lr: 1e-3
   samples_per_epoch: 64
   objective: euler_fb_aio
+  use_cuda: true
   v_h: 2.0
   w_min: 0.1
   w_max: 4.0

@@ -46,6 +46,10 @@ function build_nn_method(cfg::NamedTuple)
         # optional: pass shock std override for convenience
         sigma_shocks = maybe(solver_cfg, :sigma_shocks, nothing),
         target_loss = maybe(solver_cfg, :target_loss, 1e-10),
+
+        # device selection: allow config to explicitly request CUDA
+        # pass-through so NNKernel.solver_settings can honor it
+        use_cuda = maybe(solver_cfg, :use_cuda, nothing),
     ))
 end
 
@@ -115,6 +119,7 @@ function solve(
         model_id = model_id,
         method = method.opts.name,
         runtime = sol.opts.runtime,
+        device = get(sol.opts, :device, :cpu),
         iterations = sol.iters,
         mean_ee = ee_mean,
         delta_pol = delta_pol,

@@ -77,7 +77,7 @@ end
 # Supported method names (keeps the order deterministic when using :all)
 const SUPPORTED_METHODS = (:TimeIteration, :EGM, :Projection, :Perturbation, :NN)
 
-using ..Determinism: derive_rng, promote_master_rng
+using ..Determinism: derive_rng, promote_master_rng, MasterRNG, make_master_rng
 
 """
     solve(model::AbstractModel, cfg::NamedTuple)
@@ -155,6 +155,77 @@ function solve(model::AbstractModel, cfg::NamedTuple; rng = nothing)
     end
 
     return solutions
+end
+
+"""
+    solve(cfg::NamedTuple; rng=nothing)
+
+Convenience overload: given a validated configuration NamedTuple, build the
+model and run the requested solver(s). If `rng` is not provided, uses
+`cfg.random.master_rng` when available (requires `cfg.random.seed`).
+Returns either a single `Solution` or a vector of `Solution`s depending on
+`cfg.solver.method` (same semantics as `solve(model, cfg)`).
+"""
+function solve(cfg::NamedTuple; rng = nothing)
+    # validate basic structure; this method doesn't enforce random.seed but
+    # will honor `rng` when passed, or enrich from cfg.random.seed when present
+    validate_config(cfg)
+
+    # Enrich cfg with a MasterRNG if a seed is available and a master isn't
+    local_cfg = cfg
+    if hasproperty(cfg, :random)
+        r = cfg.random
+        has_master = hasproperty(r, :master_rng) && r.master_rng isa MasterRNG
+        if !has_master && hasproperty(r, :seed) && r.seed !== nothing
+            master = make_master_rng(r.seed)
+            # normalize seed to UInt64 for consistency with loader
+            seed_uint = UInt64(r.seed)
+            r2 = merge(r, (seed = seed_uint, master_rng = master))
+            local_cfg = merge(cfg, (random = r2,))
+        end
+    end
+
+    # Decide if a single method is requested to return a single Solution
+    requested = local_cfg.solver.method
+    single = false
+    if requested === :all || requested == "all"
+        single = false
+    elseif requested isa AbstractVector
+        single = length(requested) == 1
+    else
+        single = true
+    end
+
+    model = build_model(local_cfg)
+    if single
+        # Normalize the single method symbol and call the per-method solve
+        mname =
+            requested isa AbstractVector ?
+            (requested[1] isa Symbol ? requested[1] : Symbol(requested[1])) :
+            (requested isa Symbol ? requested : Symbol(requested))
+        solver_nt = merge(local_cfg.solver, (method = mname,))
+        cfg_m = merge(local_cfg, (solver = solver_nt,))
+        method_m = build_method(cfg_m)
+        local_master =
+            rng === nothing &&
+            hasproperty(local_cfg, :random) &&
+            hasproperty(local_cfg.random, :master_rng) ? local_cfg.random.master_rng : rng
+        return solve(model, method_m, cfg_m; rng = local_master)
+    else
+        return solve(model, local_cfg; rng = rng)
+    end
+end
+
+"""
+    solve(cfg_path::AbstractString; rng=nothing)
+
+Convenience overload: load a config file from disk, build the model, and run
+the requested solver(s). Returns one or more `Solution`s following the same
+semantics as `solve(model, cfg)`.
+"""
+function solve(cfg_path::AbstractString; rng = nothing)
+    cfg = load_config(cfg_path)
+    return solve(cfg; rng = rng)
 end
 
 end # module API

@@ -1,3 +1,8 @@
+import CUDA
+import Adapt
+import Zygote
+import Adapt
+
 struct NNSolverSettings
     epochs::Int
     batch_choice::Union{Nothing,Int}
@@ -14,6 +19,7 @@ struct NNSolverSettings
     w_max::Float32
     samples_per_epoch::Int
     sigma_shocks::Union{Nothing,Float64}
+    use_cuda::Bool
 end
 
 struct TrainingResult
@@ -24,8 +30,88 @@ struct TrainingResult
     batches_per_epoch::Int
 end
 
+maybe_to_device(x::Nothing, ::NNSolverSettings) = nothing
+maybe_to_device(x, settings::NNSolverSettings) =
+    settings.use_cuda ? Adapt.adapt(CUDA.CuArray, x) : x
+
+maybe_to_host(x::Nothing, ::NNSolverSettings) = nothing
+maybe_to_host(x, settings::NNSolverSettings) = settings.use_cuda ? Adapt.adapt(Array, x) : x
+
+function maybe_to_host(state::Lux.Training.TrainState, settings::NNSolverSettings)
+    mdl = hasproperty(state, :model) ? getfield(state, :model) : nothing
+    ps = state_parameters(state)
+    st = state_states(state)
+    return (
+        model = mdl,
+        parameters = maybe_to_host(ps, settings),
+        states = maybe_to_host(st, settings),
+    )
+end
+
+function randn_like(rng, ref::CUDA.AbstractGPUArray)
+    return CUDA.randn(eltype(ref), size(ref)...)
+end
+function randn_like(rng, ref)
+    out = similar(ref)
+    randn!(rng, out)
+    return out
+end
+Zygote.@nograd randn_like
+
+function fill_like(value, ref)
+    if ref isa CUDA.AbstractGPUArray
+        out = similar(ref)
+        fill!(out, value)
+        return out
+    else
+        return fill(value, size(ref))
+    end
+end
+
 get_option(opts, key::Symbol, default) =
     opts === nothing ? default : (hasproperty(opts, key) ? getfield(opts, key) : default)
+
+const CUDA_OBJECTIVE = :euler_fb_aio
+
+maybe_objective_cuda(objective, default) = objective == CUDA_OBJECTIVE ? default : false
+
+function detect_cuda_preference(objective, opts)
+    requested = get_option(opts, :use_cuda, nothing)
+    device_pref = get_option(opts, :device, nothing)
+    gpu_available = try
+        CUDA.functional()
+    catch
+        false
+    end
+
+    default_use_cuda = maybe_objective_cuda(objective, gpu_available)
+
+    use_cuda =
+        requested !== nothing ? Bool(requested) :
+        device_pref === nothing ? default_use_cuda :
+        begin
+            dev_sym = Symbol(device_pref)
+            if dev_sym === :auto
+                default_use_cuda
+            elseif dev_sym === :cuda
+                true
+            elseif dev_sym === :cpu
+                false
+            else
+                throw(ArgumentError("Unknown device preference: $(device_pref)"))
+            end
+        end
+
+    if use_cuda && !gpu_available
+        @warn "CUDA requested but no functional GPU detected. Falling back to CPU." use_cuda =
+            false
+    end
+    if use_cuda && objective != CUDA_OBJECTIVE
+        @warn "CUDA acceleration currently supported only for objective :$(CUDA_OBJECTIVE); got :$(objective). Falling back to CPU." use_cuda =
+            false
+    end
+    return use_cuda
+end
 
 function solver_settings(opts; has_shocks::Bool = false)
     epochs = max(Int(get_option(opts, :epochs, 1000)), 0)
@@ -46,6 +132,7 @@ function solver_settings(opts; has_shocks::Bool = false)
     w_max = Float32(get_option(opts, :w_max, 4.0))
     samples_per_epoch = max(Int(get_option(opts, :samples_per_epoch, 64)), 1)
     sigma_shocks = get_option(opts, :sigma_shocks, nothing)
+    use_cuda = detect_cuda_preference(objective, opts)
 
     return NNSolverSettings(
         epochs,
@@ -63,6 +150,7 @@ function solver_settings(opts; has_shocks::Bool = false)
         w_max,
         samples_per_epoch,
         sigma_shocks,
+        use_cuda,
     )
 end
 
@@ -211,7 +299,9 @@ function flatten_sum_squares(x)
     elseif x isa Number
         return float(x)^2
     elseif x isa AbstractArray
-        return sum(abs2, Float64.(x))
+        # Avoid unnecessary host transfers: compute reductions on-device when possible.
+        s = sum(abs2, x)
+        return Float64(s)
     elseif x isa NamedTuple || x isa Tuple || x isa Vector || x isa Dict
         s = 0.0
         for v in x
@@ -344,6 +434,8 @@ function train_consumption_network!(
     model_cfg = nothing,
 )
     ps, st = Lux.setup(rng, chain)
+    ps = maybe_to_device(ps, settings)
+    st = maybe_to_device(st, settings)
     opt = create_optimizer(settings)
     train_state = Lux.Training.TrainState(chain, ps, st, opt)
     # build loss with scaler so we can compute cash-on-hand inside the loss
@@ -360,6 +452,7 @@ function train_consumption_network!(
         P_resid = P_resid,
         settings = settings,
     )
+    batch = maybe_to_device(batch, settings)
     # create a fixed validation batch for periodic diagnostics (held out)
     val_nsamples = min(4096, sample_count)
     val_batch, _ = create_training_batch(
@@ -372,6 +465,7 @@ function train_consumption_network!(
         P_resid = P_resid,
         settings = settings,
     )
+    val_batch = maybe_to_device(val_batch, settings)
     total_samples = size(batch, 2)
     batch_size = compute_batch_size(total_samples, settings.batch_choice)
     # For stochastic problems we require predictions on the full grid
@@ -395,6 +489,7 @@ function train_consumption_network!(
                 P_resid = P_resid,
                 settings = settings,
             )
+            batch = maybe_to_device(batch, settings)
             total_samples = size(batch, 2)
             batch_size = compute_batch_size(total_samples, settings.batch_choice)
             # same rule: force full-batch when stochastic
@@ -409,7 +504,7 @@ function train_consumption_network!(
         gradient_norm = NaN
         for start = 1:batch_size:total_samples
             stop = min(start + batch_size - 1, total_samples)
-            data = (view(shuffled, :, start:stop),)
+            data = (shuffled[:, start:stop],)
             ginfo, loss, _, train_state = Lux.Training.single_train_step!(
                 Lux.AutoZygote(),
                 loss_function,
@@ -417,7 +512,8 @@ function train_consumption_network!(
                 train_state,
             )
             nb = size(data[1], 2)
-            epoch_loss += Float64(loss) * nb
+            loss_value = loss isa Number ? loss : Array(loss)[]
+            epoch_loss += Float64(loss_value) * nb
             seen += nb
             try
                 gradient_norm = sqrt(flatten_sum_squares(ginfo))
@@ -474,8 +570,9 @@ function train_consumption_network!(
             end
         end
         if best_loss ≤ settings.target_loss && stall_epochs ≥ settings.patience
+            stored_state = maybe_to_host(best_state, settings)
             return TrainingResult(
-                best_state,
+                stored_state,
                 best_loss,
                 epoch,
                 batch_size,
@@ -483,8 +580,9 @@ function train_consumption_network!(
             )
         end
     end
+    stored_state = maybe_to_host(best_state, settings)
     return TrainingResult(
-        best_state,
+        stored_state,
         best_loss,
         settings.epochs,
         batch_size,

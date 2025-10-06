@@ -140,6 +140,7 @@ function build_options_summary(settings, training_result, runtime)
         runtime = runtime,
         verbose = settings.verbose,
         batches_per_epoch = training_result.batches_per_epoch,
+        device = settings.use_cuda ? :cuda : :cpu,
     )
 end
 
@@ -177,8 +178,8 @@ function solve_nn(model; opts = nothing, rng = nothing)
 
     best_state = training_result.best_state
     trained_model = select_model(chain, best_state)
-    params = state_parameters(best_state)
-    states = state_states(best_state)
+    params = maybe_to_host(state_parameters(best_state), settings)
+    states = maybe_to_host(state_states(best_state), settings)
 
     evaluation = evaluate_solution(
         trained_model,
@@ -249,7 +250,7 @@ function loss_euler_fb_aio!(chain, ps, st, batch, model_cfg, rng)
         w0 = ((batch[2, :] .+ one(T)) ./ T(2)) .* T(scaler.w_range) .+ T(scaler.w_min)
     elseif size(batch, 1) == 1
         w0 = ((batch[1, :] .+ one(T)) ./ T(2)) .* T(scaler.w_range) .+ T(scaler.w_min)
-        y0 = fill(exp(μ), size(w0))
+        y0 = fill_like(exp(μ), w0)
     else
         throw(ArgumentError("Expected 1 or 2 feature rows, got $(size(batch, 1))"))
     end
@@ -264,8 +265,8 @@ function loss_euler_fb_aio!(chain, ps, st, batch, model_cfg, rng)
     σ_shocks =
         hasproperty(model_cfg, :sigma_shocks) && model_cfg.sigma_shocks !== nothing ?
         T(model_cfg.sigma_shocks) : T(P.σ_shocks)
-    ε1 = randn!(rng, similar(z0))
-    ε2 = randn!(rng, similar(z0))
+    ε1 = randn_like(rng, z0)
+    ε2 = randn_like(rng, z0)
     z1 = @. ρ * z0 + σ_shocks * ε1
     z2 = @. ρ * z0 + σ_shocks * ε2
 
