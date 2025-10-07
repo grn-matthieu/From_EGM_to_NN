@@ -23,7 +23,7 @@ solver:
   tol: 1.0e-4
   tol_pol: 1.0e-3
   maxit: 1000
-  verbose: true
+  verbose: false
   interp_kind: linear
   orders: [5]
   Nval: 50
@@ -36,12 +36,12 @@ solver:
   relax: 0.5
   warm_start: default
   # NN method options (used only when method includes NN)
-  epochs: 5000
-  hid1: 8
-  hid2: 8
-  batch: 64
+  epochs: 10000
+  hid1: 64
+  hid2: 64
+  batch: 2048
   lr: 1e-3
-  samples_per_epoch: 64
+  samples_per_epoch: 2048
   objective: euler_fb_aio
   use_cuda: true
   v_h: 2.0

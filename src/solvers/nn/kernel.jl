@@ -178,8 +178,11 @@ function solve_nn(model; opts = nothing, rng = nothing)
 
     best_state = training_result.best_state
     trained_model = select_model(chain, best_state)
-    params = maybe_to_host(state_parameters(best_state), settings)
-    states = maybe_to_host(state_states(best_state), settings)
+    params =
+        settings.use_cuda ? fmap(cu, state_parameters(best_state)) :
+        state_parameters(best_state)
+    states =
+        settings.use_cuda ? fmap(cu, state_states(best_state)) : state_states(best_state)
 
     evaluation = evaluate_solution(
         trained_model,
@@ -255,7 +258,6 @@ function loss_euler_fb_aio!(chain, ps, st, batch, model_cfg, rng)
         throw(ArgumentError("Expected 1 or 2 feature rows, got $(size(batch, 1))"))
     end
     z0 = log.(y0) .- μ
-
     out, st1 = Lux.apply(chain, batch, ps, st)
     c0 = vec(phi_to_consumption(out[:Φ], w0; min_c = C_MIN))
     h = T.(vec(ensure_row(out[:h])))
@@ -280,11 +282,10 @@ function loss_euler_fb_aio!(chain, ps, st, batch, model_cfg, rng)
     X1 = vcat(reshape(y1, 1, :), reshape(w1, 1, :))
     X2 = vcat(reshape(y2, 1, :), reshape(w2, 1, :))
 
-    NX1 = normalize_feature_batch(scaler, X1)
-    NX2 = normalize_feature_batch(scaler, X2)
-
-    out1, _ = Lux.apply(chain, NX1, ps, st1)
-    out2, _ = Lux.apply(chain, NX2, ps, st1)
+    normalize_feature_batch!(scaler, X1)
+    normalize_feature_batch!(scaler, X2)
+    out1, st1 = Lux.apply(chain, X1, ps, st1)
+    out2, st2 = Lux.apply(chain, X2, ps, st1)
 
     c1 = vec(phi_to_consumption(out1[:Φ], w1; min_c = C_MIN))
     c2 = vec(phi_to_consumption(out2[:Φ], w2; min_c = C_MIN))

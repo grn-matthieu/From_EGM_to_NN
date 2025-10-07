@@ -2,6 +2,7 @@ import CUDA
 import Adapt
 import Zygote
 import Adapt
+using Lux: fmap
 
 struct NNSolverSettings
     epochs::Int
@@ -334,12 +335,11 @@ function create_training_batch(
     want =
         nsamples > 0 ? nsamples :
         (isnothing(S) ? length(G[:a].grid) : length(G[:a].grid) * length(S.zgrid))
-
     if mode == :full
         @assert P_resid !== nothing
         X, _ = generate_dataset(G, S, P_resid; mode = :full)
         normalize_samples!(scaler, X)
-        return prepare_training_batch(X), size(X, 1)
+        return prepare_training_batch(X, Val(settings.use_cuda)), size(X, 1)
     end
 
     @assert P_resid !== nothing && settings !== nothing
@@ -386,7 +386,7 @@ function create_training_batch(
 
     X = hcat(Y, W)
     normalize_samples!(scaler, X)
-    batch = prepare_training_batch(X)
+    batch = prepare_training_batch(X, Val(settings.use_cuda))
     return batch, want
 end
 
@@ -434,8 +434,13 @@ function train_consumption_network!(
     model_cfg = nothing,
 )
     ps, st = Lux.setup(rng, chain)
-    ps = maybe_to_device(ps, settings)
-    st = maybe_to_device(st, settings)
+    if settings.use_cuda
+        ps = fmap(cu, ps)
+        st = fmap(cu, st)
+    else
+        ps = fmap(identity, ps)
+        st = fmap(identity, st)
+    end
     opt = create_optimizer(settings)
     train_state = Lux.Training.TrainState(chain, ps, st, opt)
     # build loss with scaler so we can compute cash-on-hand inside the loss
@@ -452,7 +457,6 @@ function train_consumption_network!(
         P_resid = P_resid,
         settings = settings,
     )
-    batch = maybe_to_device(batch, settings)
     # create a fixed validation batch for periodic diagnostics (held out)
     val_nsamples = min(4096, sample_count)
     val_batch, _ = create_training_batch(
@@ -465,9 +469,12 @@ function train_consumption_network!(
         P_resid = P_resid,
         settings = settings,
     )
-    val_batch = maybe_to_device(val_batch, settings)
     total_samples = size(batch, 2)
     batch_size = compute_batch_size(total_samples, settings.batch_choice)
+    if settings.use_cuda
+        batch_size = total_samples        # 100% batch
+        batches_per_epoch = 1
+    end
     # For stochastic problems we require predictions on the full grid
     # (Na * Nz) so force full-batch training when shocks are present.
     if !isnothing(S) && batch_size < total_samples
@@ -498,7 +505,7 @@ function train_consumption_network!(
             end
             batches_per_epoch = cld(total_samples, batch_size)
         end
-        shuffled = batch[:, randperm(rng, total_samples)]
+        shuffled = settings.use_cuda ? batch : batch[:, randperm(rng, total_samples)]
         epoch_loss = 0.0
         seen = 0
         gradient_norm = NaN
@@ -512,13 +519,17 @@ function train_consumption_network!(
                 train_state,
             )
             nb = size(data[1], 2)
-            loss_value = loss isa Number ? loss : Array(loss)[]
+            @assert loss isa Number
+            loss_value = Float64(loss)
             epoch_loss += Float64(loss_value) * nb
             seen += nb
-            try
-                gradient_norm = sqrt(flatten_sum_squares(ginfo))
-            catch
-                gradient_norm = NaN
+            if !settings.use_cuda
+                try
+                    # on CPU we can compute gradient norm exactly
+                    gradient_norm = sqrt(flatten_sum_squares(ginfo))
+                catch
+                    gradient_norm = NaN
+                end
             end
         end
         average_loss = epoch_loss / max(seen, 1)

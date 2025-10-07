@@ -5,6 +5,8 @@ Centralises every conversion to `Float32` (and back) so that the main kernel
 remains focused on the training logic.
 """
 
+using CUDA: cu
+
 # -- Generic helpers ---------------------------------------------------------
 
 float32_vector(x) = Vector{Float32}(collect(x))
@@ -12,7 +14,8 @@ float32_matrix(x) = Array{Float32}(collect(x))
 float32_loss(x) = Float32(x)
 
 """Prepare the input batch for Lux by ensuring `Float32` features."""
-prepare_training_batch(X) = Array{Float32}(permutedims(X))
+prepare_training_batch(X, ::Val{false}) = Array{Float32}(permutedims(X))
+prepare_training_batch(X, ::Val{true}) = cu(permutedims(X))  # X est déjà Float32
 
 # Recursively extract the consumption prediction from various model output
 # shapes. Models (or Lux) sometimes return `(y, state)` tuples and our new

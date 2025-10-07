@@ -48,7 +48,7 @@ struct DummyUtility
     u_prime::Function
 end
 
-const P_common = (σ = 2.0, β = 0.96, r = 0.01, y = 0.0, ρ = 0.9, σ_shocks = 0.1)
+const P_common = (σ = 2.0, β = 0.96, r = 0.01, y = 0.0, ρ = 0.9, σ_shock = 0.1)
 const U_common = DummyUtility(x -> x .^ Float32(-P_common.σ))
 
 make_G() = GDict(Dict(:a => (grid = Float32[0.0, 0.5, 1.0], min = 0.0f0, max = 1.0f0)))
@@ -72,7 +72,7 @@ function make_fixture(; shocks::Bool)
             v_h = 0.6,
             w_min = 0.05f0,
             w_max = 5.0f0,
-            sigma_shocks = shocks ? P_common.σ_shocks : nothing,
+            sigma_shocks = shocks ? P_common.σ_shock : nothing,
         );
         has_shocks = shocks,
     )
@@ -209,7 +209,7 @@ end
 
     fix_s = make_fixture(shocks = true)
     @eval NNKernel begin
-        const P_common = (σ = 2.0, β = 0.96, r = 0.01, y = 0.0, ρ = 0.9, σ_shocks = 0.1)
+        const P_common = (σ = 2.0, β = 0.96, r = 0.01, y = 0.0, ρ = 0.9, σ_shock = 0.1)
         function eval_euler_residuals_mc(::Any...; kwargs...)
             return :mc_diag
         end

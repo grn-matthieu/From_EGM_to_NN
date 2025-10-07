@@ -12,6 +12,20 @@ function compute_value_policy(p, g, S, U, policy; tol::Real = 1e-8, maxit::Int =
     apol = policy[:a].value
     β = p.β
 
+    # Ensure policy arrays live on host memory for value evaluation. If the
+    # policy was produced on the GPU (CuArray), copy it back to the CPU. This
+    # avoids scalar-indexing errors when interpolation routines iterate over
+    # query points.
+    try
+        cpol = Array(cpol)
+    catch
+        # If conversion fails, leave as-is
+    end
+    try
+        apol = Array(apol)
+    catch
+    end
+
     # Deterministic
     if cpol isa AbstractVector && apol isa AbstractVector
         V = zeros(Na)

@@ -58,10 +58,10 @@ function build_cs_model(cfg::NamedTuple)
 
     # Augment params with shock-specific scalars expected by some solvers (NN)
     if shocks !== nothing
-        # copy ρ_shock and σ_shock into params as ρ and σ_shocks for backward compatibility
+        # copy ρ_shock and σ_shock into params as ρ and σ_shock for backward compatibility
         ρ = maybe(shocks_cfg, :ρ_shock, 0.0)
-        σ_shocks = maybe(shocks_cfg, :σ_shock, 0.0)
-        params = merge(params, (ρ = ρ, σ_shocks = σ_shocks))
+        σ_shock = maybe(shocks_cfg, :σ_shock, 0.0)
+        params = merge(params, (ρ = ρ, σ_shock = σ_shock))
     end
 
     # Utility closure (CRRA)

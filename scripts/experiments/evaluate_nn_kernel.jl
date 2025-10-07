@@ -71,8 +71,7 @@ a1 = @. w0 - c0
 μ = Float32(P_resid.y)
 z0 = log.(y0) .- μ
 ρ = Float32(P.ρ)
-σϵ =
-    settings.sigma_shocks === nothing ? Float32(P.σ_shocks) : Float32(settings.sigma_shocks)
+σϵ = settings.sigma_shocks === nothing ? Float32(P.σ_shock) : Float32(settings.sigma_shocks)
 β = Float32(P.β)
 R = 1.0f0 + Float32(P.r)
 ε = randn(derive_rng(master, :mc), Float32, ns)

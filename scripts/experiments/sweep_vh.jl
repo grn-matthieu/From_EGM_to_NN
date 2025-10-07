@@ -119,7 +119,7 @@ function run_sweep(;
         z0 = log.(y0) .- μ
         ρ = Float32(P.ρ)
         σϵ =
-            settings.sigma_shocks === nothing ? Float32(P.σ_shocks) :
+            settings.sigma_shocks === nothing ? Float32(P.σ_shock) :
             Float32(settings.sigma_shocks)
         β = Float32(P.β)
         Rg = 1.0f0 + Float32(P.r)

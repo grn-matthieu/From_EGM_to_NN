@@ -7,6 +7,7 @@ common diagnostic bundles.
 """
 
 using Random
+using Lux: fmap
 
 # Local sigmoid function to avoid NNlib dependency
 @inline sigmoid(x) = 1 / (1 + exp(-x))
@@ -123,7 +124,7 @@ end
 function evaluate_stochastic(model, params, states, P_resid, P, G, S, scaler, settings, U)
     X_eval, _ = generate_dataset(G, S, P_resid; mode = :full)
     normalize_samples!(scaler, X_eval)
-    batch = prepare_training_batch(X_eval)
+    batch = prepare_training_batch(X_eval, Val(settings.use_cuda))
     prediction = run_model(model, params, states, batch)
 
     a_f32 = float32_vector(G[:a].grid)
@@ -135,7 +136,7 @@ function evaluate_stochastic(model, params, states, P_resid, P, G, S, scaler, se
     μ = Float32(P_resid.y)
     Rg = 1.0f0 + Float32(P_resid.r)
     Y = exp.(μ .+ Z)
-    W = @. Rg * A + Y
+    W = settings.use_cuda ? fmap(cu, Rg * A + Y) : Rg * A + Y
 
     if prediction isa NamedTuple
         c_row = phi_to_consumption(prediction[:Φ], W)
@@ -224,6 +225,12 @@ function eval_euler_residuals_mc(
     y0 = ((batch[1, :] .+ 1.0f0) ./ 2.0f0) .* scaler.y_range .+ scaler.y_min
     w0 = ((batch[2, :] .+ 1.0f0) ./ 2.0f0) .* scaler.w_range .+ scaler.w_min
 
+    # Ensure y0/w0 live on the same device as model outputs when using CUDA
+    if settings.use_cuda
+        y0 = cu(y0)
+        w0 = cu(w0)
+    end
+
     out, _ = Lux.apply(model, batch, ps, st)
     c0 = vec(phi_to_consumption(out[:Φ], w0; min_c = 1.0f-3))
     h = vec(ensure_row(out[:h]))
@@ -232,39 +239,57 @@ function eval_euler_residuals_mc(
     z0 = log.(y0) .- μ
     ρ = Float32(P.ρ)
     σϵ =
-        settings.sigma_shocks === nothing ? Float32(P.σ_shocks) :
+        settings.sigma_shocks === nothing ? Float32(P.σ_shock) :
         Float32(settings.sigma_shocks)
     β = Float32(P.β)
     Rg = 1.0f0 + Float32(P.r)
 
     ε = randn(rng, Float32, N)
+    if settings.use_cuda
+        ε = cu(ε)
+    end
     z1 = @. ρ * z0 + σϵ * ε
     y1 = exp.(μ .+ z1)
     a1 = @. w0 - c0
     w1 = @. Rg * a1 + y1
 
     X1 = vcat(reshape(y1, 1, :), reshape(w1, 1, :))
-    NX1 = normalize_feature_batch(scaler, X1)
-    out1, _ = Lux.apply(model, NX1, ps, st)
+    normalize_feature_batch!(scaler, X1)
+    out1, _ = Lux.apply(model, X1, ps, st)
     c1 = vec(phi_to_consumption(out1[:Φ], w1; min_c = 1.0f-3))
 
     uprime = U.u_prime
     ratio = @. β * Rg * uprime(c1) / uprime(c0)
     resid = abs.(1.0f0 .- ratio)
 
-    sr = sort(vec(resid))
+    # Move diagnostics to CPU for aggregation (sorting, quantiles) and return
+    if settings.use_cuda
+        resid_cpu = Array(resid)
+        w_cpu = Array(w0)
+        y_cpu = Array(y0)
+        c_cpu = Array(c0)
+        h_cpu = Array(h)
+    else
+        resid_cpu = resid
+        w_cpu = w0
+        y_cpu = y0
+        c_cpu = c0
+        h_cpu = h
+    end
+
+    sr = sort(vec(resid_cpu))
     n = length(sr)
     p50 = sr[clamp(Int(round(0.5 * n)), 1, n)]
     p95 = sr[clamp(Int(ceil(0.95 * n)), 1, n)]
 
-    stats = (mean = mean(resid), p50 = p50, p95 = p95, max = maximum(resid))
+    stats = (mean = mean(resid_cpu), p50 = p50, p95 = p95, max = maximum(resid_cpu))
     return (
-        abs_resid = Float32.(resid),
-        w = Float32.(w0),
-        y = Float32.(y0),
-        c = Float32.(c0),
+        abs_resid = Float32.(resid_cpu),
+        w = Float32.(w_cpu),
+        y = Float32.(y_cpu),
+        c = Float32.(c_cpu),
         stats = stats,
-        h = Float32.(h),
+        h = Float32.(h_cpu),
     )
 end
 
@@ -327,6 +352,10 @@ function eval_euler_residuals_gh(
     )
     y0 = ((batch[1, :] .+ 1.0f0) ./ 2.0f0) .* scaler.y_range .+ scaler.y_min
     w0 = ((batch[2, :] .+ 1.0f0) ./ 2.0f0) .* scaler.w_range .+ scaler.w_min
+    if settings.use_cuda
+        y0 = cu(y0)
+        w0 = cu(w0)
+    end
     out, _ = Lux.apply(model, batch, ps, st)
     c0 = vec(phi_to_consumption(out[:Φ], w0; min_c = 1.0f-3))
 
@@ -334,13 +363,14 @@ function eval_euler_residuals_gh(
     z0 = log.(y0) .- μ
     ρ = Float32(P.ρ)
     σϵ =
-        settings.sigma_shocks === nothing ? Float32(P.σ_shocks) :
+        settings.sigma_shocks === nothing ? Float32(P.σ_shock) :
         Float32(settings.sigma_shocks)
     β = Float32(P.β)
     Rg = 1.0f0 + Float32(P.r)
     uprime = U.u_prime
 
-    EUprime = zeros(Float32, length(w0))
+    EUprime =
+        settings.use_cuda ? cu(zeros(Float32, length(w0))) : zeros(Float32, length(w0))
     @inbounds for k in eachindex(GH10_X)
         εk = GH10_X[k]
         wk = GH10_W[k] / sqrt(pi)
@@ -349,25 +379,38 @@ function eval_euler_residuals_gh(
         a1 = @. w0 - c0
         w1 = @. Rg * a1 + y1
         X1 = vcat(reshape(y1, 1, :), reshape(w1, 1, :))
-        NX1 = normalize_feature_batch(scaler, X1)
-        out1, _ = Lux.apply(model, NX1, ps, st)
+        normalize_feature_batch!(scaler, X1)
+        out1, _ = Lux.apply(model, X1, ps, st)
         c1 = vec(phi_to_consumption(out1[:Φ], w1; min_c = 1.0f-3))
         EUprime .+= wk .* uprime(c1)
     end
-
     ratio = @. β * Rg * EUprime / uprime(c0)
     resid = abs.(1.0f0 .- ratio)
+
+    # Move back to CPU for aggregation and returning results
+    if settings.use_cuda
+        resid_cpu = Array(resid)
+        w_cpu = Array(w0)
+        y_cpu = Array(y0)
+        c_cpu = Array(c0)
+    else
+        resid_cpu = resid
+        w_cpu = w0
+        y_cpu = y0
+        c_cpu = c0
+    end
+
     stats = (
-        mean = mean(resid),
-        p50 = quantile(resid, 0.5),
-        p95 = quantile(resid, 0.95),
-        max = maximum(resid),
+        mean = mean(resid_cpu),
+        p50 = quantile(resid_cpu, 0.5),
+        p95 = quantile(resid_cpu, 0.95),
+        max = maximum(resid_cpu),
     )
     return (
-        abs_resid = Float32.(resid),
-        w = Float32.(w0),
-        y = Float32.(y0),
-        c = Float32.(c0),
+        abs_resid = Float32.(resid_cpu),
+        w = Float32.(w_cpu),
+        y = Float32.(y_cpu),
+        c = Float32.(c_cpu),
         stats = stats,
     )
 end

@@ -1,3 +1,5 @@
+import ChainRulesCore: @non_differentiable
+using CUDA: cu, CuArray, CUDA
 struct ScalarParams
     σ::Float64
     β::Float64
@@ -49,13 +51,14 @@ function normalize_samples!(scaler::FeatureScaler, X)
     return X
 end
 
-function normalize_feature_batch!(scaler::FeatureScaler, X)
+# explicit CPU in-place version
+function normalize_feature_batch!(sc::FeatureScaler, X::AbstractMatrix{<:AbstractFloat})
     nrows = size(X, 1)
     if nrows == 2
-        @. X[1, :] = 2.0f0 * (X[1, :] - scaler.y_min) / scaler.y_range - 1.0f0
-        @. X[2, :] = 2.0f0 * (X[2, :] - scaler.w_min) / scaler.w_range - 1.0f0
+        @. X[1, :] = 2.0f0 * (X[1, :] - sc.y_min) / sc.y_range - 1.0f0
+        @. X[2, :] = 2.0f0 * (X[2, :] - sc.w_min) / sc.w_range - 1.0f0
     elseif nrows == 1
-        @. X[1, :] = 2.0f0 * (X[1, :] - scaler.w_min) / scaler.w_range - 1.0f0
+        @. X[1, :] = 2.0f0 * (X[1, :] - sc.w_min) / sc.w_range - 1.0f0
     else
         throw(
             ArgumentError(
@@ -65,6 +68,30 @@ function normalize_feature_batch!(scaler::FeatureScaler, X)
     end
     return X
 end
+
+# GPU in-place version without views nor scalar indexing
+function normalize_feature_batch!(
+    sc::FeatureScaler,
+    X::CUDA.CuArray{T,2},
+) where {T<:AbstractFloat}
+    nrows = size(X, 1)
+    if nrows == 2
+        mins = reshape(cu(T.([sc.y_min, sc.w_min])), 2, 1)
+        ranges = reshape(cu(T.([sc.y_range, sc.w_range])), 2, 1)
+        @. X = 2.0f0 * (X - mins) / ranges - 1.0f0
+    elseif nrows == 1
+        @. X = 2.0f0 * (X - T(sc.w_min)) / T(sc.w_range) - 1.0f0
+    else
+        throw(
+            ArgumentError(
+                "normalize_feature_batch! expects 1 or 2 feature rows, got $nrows",
+            ),
+        )
+    end
+    return X
+end
+
+@non_differentiable normalize_feature_batch!(::FeatureScaler, ::Any)
 
 function normalize_feature_batch(s::FeatureScaler, X::AbstractMatrix)
     nrows = size(X, 1)

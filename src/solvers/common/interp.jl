@@ -50,8 +50,11 @@ function interp_linear!(
 )
     @assert length(x) == length(y)
     n = length(x)
-    @inbounds for k in eachindex(xq)
-        out[k] = _interp_linear_scalar(xq[k], x, y, n)
+    # Materialize query points to host memory before iterating to avoid
+    # scalar indexing of GPU arrays (which is disallowed).
+    xq_local = collect(xq)
+    @inbounds for k in eachindex(xq_local)
+        out[k] = _interp_linear_scalar(xq_local[k], x, y, n)
     end
     return out
 end
@@ -125,7 +128,8 @@ function interp_pchip!(
     end
 
     @inbounds for k in eachindex(xq)
-        u = xq[k]
+        # collect query points to avoid scalar indexing on GPU arrays
+        u = collect(xq)[k]
         if u <= x[1]
             out[k] = y[1]
             continue
