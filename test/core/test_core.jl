@@ -19,7 +19,7 @@
     det_cfg = cfg_patch(
         det_cfg,
         (:grids, :Na) => 50,
-        ((:solver, :Nval)) => 50,
+        ((:solver, :projection, :Nval)) => 50,
         ((:solver, :tol)) => 1e-6,
         ((:solver, :tol_pol)) => 1e-6,
         ((:solver, :maxit)) => 2000,

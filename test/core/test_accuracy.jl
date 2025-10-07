@@ -23,8 +23,8 @@ using ThesisProject.Determinism: make_master_rng
     cfg_proj = cfg_patch(
         cfg_base,
         (:solver, :method) => "Projection",
-        (:solver, :orders) => [5],
-        (:solver, :Nval) => 41,
+        (:solver, :projection, :orders) => [5],
+        (:solver, :projection, :Nval) => 41,
         (:grids, :Na) => 20,
     )
     cfg_proj = cfg_without(cfg_proj, :shocks)

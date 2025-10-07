@@ -5,7 +5,7 @@ using Test
     cfgd = cfg_patch(
         SMOKE_CFG,
         (:grids, :Na) => 40,
-        (:solver, :interp_kind) => :pchip,
+        (:solver, :egm, :interp_kind) => :pchip,
         (:solver, :warm_start) => :steady_state,
     )
     model = build_model(cfgd)

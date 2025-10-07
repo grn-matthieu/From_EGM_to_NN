@@ -29,22 +29,19 @@ Construct an `EGMMethod` using solver options contained in the NamedTuple `cfg`.
 """
 function build_egm_method(cfg::NamedTuple)
     solver_cfg = cfg.solver
-    ik = maybe(solver_cfg, :interp_kind, :linear)
-    ik = ik isa Symbol ? ik : Symbol(ik)
-    try
-        _ = solver_cfg.patience
-        @warn "cfg.solver.patience is ignored by EGM; use maxit/tol/tol_pol instead"
-    catch
-        # missing field — nothing to warn about
-    end
+    egm_cfg = solver_cfg.egm
+    ik_raw = egm_cfg.interp_kind
+    ik_sym = Symbol(lowercase(string(ik_raw)))
+    warm_start = Symbol(lowercase(string(solver_cfg.warm_start)))
     return EGMMethod((
         name = maybe(cfg, :method, solver_cfg.method),
-        tol = maybe(solver_cfg, :tol, 1e-6),
-        tol_pol = maybe(solver_cfg, :tol_pol, 1e-6),
-        maxit = maybe(solver_cfg, :maxit, 1000),
-        interp_kind = ik,
-        verbose = maybe(solver_cfg, :verbose, false),
-        warm_start = maybe(solver_cfg, :warm_start, :default),
+        tol = solver_cfg.tol,
+        tol_pol = solver_cfg.tol_pol,
+        maxit = solver_cfg.maxit,
+        interp_kind = ik_sym,
+        verbose = solver_cfg.verbose,
+        warm_start = warm_start,
+        relax = solver_cfg.relax,
     ))
 end
 
@@ -138,6 +135,7 @@ function solve(
             tol_pol = method.opts.tol_pol,
             maxit = method.opts.maxit,
             interp_kind = interp,
+            relax = method.opts.relax,
             verbose = method.opts.verbose,
             c_init = c_init,
         ) :
@@ -150,6 +148,7 @@ function solve(
             tol_pol = method.opts.tol_pol,
             maxit = method.opts.maxit,
             interp_kind = interp,
+            relax = method.opts.relax,
             verbose = method.opts.verbose,
             c_init = c_init,
         )

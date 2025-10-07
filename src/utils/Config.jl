@@ -124,76 +124,159 @@ function validate_config(cfg::NamedTuple)
 
     # solver
     s = cfg.solver
-    hasproperty(s, :method) || error("missing solver.method")
-    mth = _lower(getproperty(s, :method))
-    # Accept canonical method names, shorthand for TI, and the special "all" token
-    mth in ("egm", "projection", "perturbation", "nn", "timeiteration", "ti", "all") ||
-        error("solver.method invalid")
+    required_common = (:method, :tol, :tol_pol, :maxit, :verbose, :relax, :warm_start)
+    for key in required_common
+        hasproperty(s, key) || error("missing solver.$key")
+    end
+    s.tol isa Real && s.tol > 0 || error("tol > 0 required")
+    s.tol_pol isa Real && s.tol_pol > 0 || error("tol_pol > 0 required")
+    s.maxit isa Integer && s.maxit ≥ 1 || error("maxit ≥ 1 required")
+    s.verbose isa Bool || error("verbose not Bool")
+    s.relax isa Real && s.relax > 0 || error("relax > 0 required")
 
-    if hasproperty(s, :tol)
-        s.tol isa Real && s.tol > 0 || error("tol > 0 required")
-    end
-    if hasproperty(s, :maxit)
-        s.maxit isa Integer && s.maxit ≥ 1 || error("maxit ≥ 1 required")
-    end
-    if hasproperty(s, :verbose)
-        s.verbose isa Bool || error("verbose not Bool")
+    warm_start_lower = _lower(s.warm_start)
+    warm_start_lower in ("default", "half_resources", "none", "steady_state") ||
+        error("warm_start invalid")
+    if warm_start_lower == "steady_state"
+        hasproperty(p, :y) || error("need params.y for steady_state")
+        hasproperty(p, :r) || error("need params.r for steady_state")
+        hasproperty(g, :a_min) || error("need grids.a_min for steady_state")
     end
 
-    # EGM options
-    if hasproperty(s, :interp_kind)
-        _lower(getproperty(s, :interp_kind)) in ("linear", "pchip", "monotone_cubic") ||
-            error("interp_kind invalid")
-    end
-    if hasproperty(s, :warm_start)
-        ws = _lower(getproperty(s, :warm_start))
-        ws in ("default", "half_resources", "none", "steady_state") ||
-            error("warm_start invalid")
-        if ws == "steady_state"
-            hasproperty(p, :y) || error("need params.y for steady_state")
-            hasproperty(p, :r) || error("need params.r for steady_state")
-            hasproperty(g, :a_min) || error("need grids.a_min for steady_state")
+    supported_methods = (:EGM, :Projection, :Perturbation, :NN, :TimeIteration)
+    method_blocks = Dict(
+        :EGM => :egm,
+        :Projection => :projection,
+        :Perturbation => :perturbation,
+        :NN => :nn,
+        :TimeIteration => :time_iteration,
+    )
+
+    function _canonical_method(m)
+        str = _lower(m)
+        if str == "egm"
+            return :EGM
+        elseif str == "projection"
+            return :Projection
+        elseif str == "perturbation"
+            return :Perturbation
+        elseif str == "nn"
+            return :NN
+        elseif str == "timeiteration" || str == "ti"
+            return :TimeIteration
+        elseif str == "all"
+            return :ALL
+        else
+            error("solver.method invalid")
         end
     end
 
-    # Projection
-    if mth == "projection"
-        if hasproperty(s, :orders)
-            ords = getproperty(s, :orders)
+    requested_raw = getproperty(s, :method)
+    requested_methods = Symbol[]
+    if requested_raw isa AbstractVector
+        for entry in requested_raw
+            canon = _canonical_method(entry)
+            if canon == :ALL
+                requested_methods = collect(supported_methods)
+                break
+            else
+                push!(requested_methods, canon)
+            end
+        end
+    else
+        canon = _canonical_method(requested_raw)
+        requested_methods = canon == :ALL ? collect(supported_methods) : [canon]
+    end
+
+    unique_methods = Set(requested_methods)
+    for canon in unique_methods
+        block = method_blocks[canon]
+        hasproperty(s, block) || error("missing solver.$block")
+        block_cfg = getproperty(s, block)
+        block_cfg isa NamedTuple || error("solver.$block wrong type")
+        if canon == :EGM
+            hasproperty(block_cfg, :interp_kind) || error("missing solver.egm.interp_kind")
+            _lower(block_cfg.interp_kind) in ("linear", "pchip", "monotone_cubic") ||
+                error("interp_kind invalid")
+        elseif canon == :TimeIteration
+            hasproperty(block_cfg, :interp_kind) ||
+                error("missing solver.time_iteration.interp_kind")
+            _lower(block_cfg.interp_kind) in ("linear", "pchip", "monotone_cubic") ||
+                error("interp_kind invalid")
+        elseif canon == :Projection
+            hasproperty(block_cfg, :orders) || error("missing solver.projection.orders")
+            ords = block_cfg.orders
             ords isa AbstractVector{<:Integer} && !isempty(ords) || error("orders invalid")
             maxord = g.Na - 1
             all(o -> 0 ≤ o ≤ maxord, ords) || error("orders out of range")
-        end
-        if hasproperty(s, :Nval)
-            s.Nval isa Integer && s.Nval ≥ 2 || error("Nval ≥ 2 required")
-        end
-    end
-
-    # Perturbation
-    if mth == "perturbation"
-        if hasproperty(s, :order)
-            s.order isa Integer && s.order ≥ 1 || error("order ≥ 1 required")
-        end
-        if hasproperty(s, :a_bar)
-            abar = getproperty(s, :a_bar)
+            hasproperty(block_cfg, :Nval) || error("missing solver.projection.Nval")
+            block_cfg.Nval isa Integer && block_cfg.Nval ≥ 2 || error("Nval ≥ 2 required")
+        elseif canon == :Perturbation
+            hasproperty(block_cfg, :order) || error("missing solver.perturbation.order")
+            block_cfg.order isa Integer && block_cfg.order ≥ 1 ||
+                error("order ≥ 1 required")
+            hasproperty(block_cfg, :a_bar) || error("missing solver.perturbation.a_bar")
+            abar = block_cfg.a_bar
             (abar === nothing || (abar isa Real && g.a_min ≤ abar ≤ g.a_max)) ||
                 error("a_bar out of range")
-        end
-        if _getprop(s, :order, 1) ≥ 2
-            if hasproperty(s, :h_a) && s.h_a !== nothing
-                s.h_a isa Real && s.h_a > 0 || error("h_a > 0 required")
-            end
-            if hasproperty(cfg, :shocks) && _getprop(cfg.shocks, :active, false)
-                if hasproperty(s, :h_z) && s.h_z !== nothing
-                    s.h_z isa Real && s.h_z > 0 || error("h_z > 0 required")
+            if block_cfg.order ≥ 2
+                if hasproperty(block_cfg, :h_a) && block_cfg.h_a !== nothing
+                    block_cfg.h_a isa Real && block_cfg.h_a > 0 || error("h_a > 0 required")
+                else
+                    error("missing solver.perturbation.h_a")
+                end
+                if hasproperty(cfg, :shocks) && _getprop(cfg.shocks, :active, false)
+                    if hasproperty(block_cfg, :h_z) && block_cfg.h_z !== nothing
+                        block_cfg.h_z isa Real && block_cfg.h_z > 0 ||
+                            error("h_z > 0 required")
+                    else
+                        error("missing solver.perturbation.h_z")
+                    end
                 end
             end
-        end
-        if hasproperty(s, :tol_fit)
-            s.tol_fit isa Real && s.tol_fit > 0 || error("tol_fit > 0 required")
-        end
-        if hasproperty(s, :maxit_fit)
-            s.maxit_fit isa Integer && s.maxit_fit ≥ 1 || error("maxit_fit ≥ 1 required")
+            hasproperty(block_cfg, :tol_fit) || error("missing solver.perturbation.tol_fit")
+            block_cfg.tol_fit isa Real && block_cfg.tol_fit > 0 ||
+                error("tol_fit > 0 required")
+            hasproperty(block_cfg, :maxit_fit) ||
+                error("missing solver.perturbation.maxit_fit")
+            block_cfg.maxit_fit isa Integer && block_cfg.maxit_fit ≥ 1 ||
+                error("maxit_fit ≥ 1 required")
+        elseif canon == :NN
+            hasproperty(block_cfg, :epochs) || error("missing solver.nn.epochs")
+            block_cfg.epochs isa Integer && block_cfg.epochs ≥ 1 ||
+                error("epochs ≥ 1 required")
+            hasproperty(block_cfg, :batch) || error("missing solver.nn.batch")
+            block_cfg.batch isa Integer && block_cfg.batch ≥ 1 ||
+                error("batch ≥ 1 required")
+            hasproperty(block_cfg, :lr) || error("missing solver.nn.lr")
+            block_cfg.lr isa Real && block_cfg.lr > 0 || error("lr > 0 required")
+            hasproperty(block_cfg, :samples_per_epoch) ||
+                error("missing solver.nn.samples_per_epoch")
+            block_cfg.samples_per_epoch isa Integer && block_cfg.samples_per_epoch ≥ 1 ||
+                error("samples_per_epoch ≥ 1 required")
+            hasproperty(block_cfg, :objective) || error("missing solver.nn.objective")
+            obj = block_cfg.objective
+            obj isa Symbol || obj isa AbstractString || error("objective wrong type")
+            hasproperty(block_cfg, :hid1) || error("missing solver.nn.hid1")
+            block_cfg.hid1 isa Integer && block_cfg.hid1 ≥ 1 || error("hid1 ≥ 1 required")
+            hasproperty(block_cfg, :hid2) || error("missing solver.nn.hid2")
+            block_cfg.hid2 isa Integer && block_cfg.hid2 ≥ 1 || error("hid2 ≥ 1 required")
+            hasproperty(block_cfg, :v_h) || error("missing solver.nn.v_h")
+            block_cfg.v_h isa Real && block_cfg.v_h > 0 || error("v_h > 0 required")
+            hasproperty(block_cfg, :w_min) || error("missing solver.nn.w_min")
+            block_cfg.w_min isa Real || error("w_min not Real")
+            hasproperty(block_cfg, :w_max) || error("missing solver.nn.w_max")
+            block_cfg.w_max isa Real || error("w_max not Real")
+            block_cfg.w_max ≥ block_cfg.w_min || error("w_max < w_min")
+            hasproperty(block_cfg, :sigma_shocks) || error("missing solver.nn.sigma_shocks")
+            σs = block_cfg.sigma_shocks
+            (σs === nothing || (σs isa Real && σs ≥ 0)) || error("sigma_shocks invalid")
+            hasproperty(block_cfg, :target_loss) || error("missing solver.nn.target_loss")
+            block_cfg.target_loss isa Real && block_cfg.target_loss > 0 ||
+                error("target_loss > 0 required")
+            hasproperty(block_cfg, :use_cuda) || error("missing solver.nn.use_cuda")
+            uc = block_cfg.use_cuda
+            (uc === nothing || uc isa Bool) || error("use_cuda invalid")
         end
     end
 

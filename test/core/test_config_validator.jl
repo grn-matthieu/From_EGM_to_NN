@@ -60,20 +60,61 @@ function base_cfg(;
         model = (name = "consumer_saving",),
         params = (; (Symbol("β") => β), (Symbol("σ") => σ), r = r, y = y),
         grids = (Na = Na, a_min = a_min, a_max = a_max),
-        solver = (method = method,),
+        solver = (
+            method = method,
+            tol = 1e-6,
+            tol_pol = 1e-6,
+            maxit = 1000,
+            verbose = false,
+            relax = 0.5,
+            warm_start = :default,
+            egm = (interp_kind = :linear,),
+            time_iteration = (interp_kind = :linear,),
+            projection = (orders = [2], Nval = max(Na, 3), basis_orders = [2]),
+            perturbation = (
+                order = 1,
+                a_bar = nothing,
+                h_a = nothing,
+                h_z = nothing,
+                tol_fit = 1e-8,
+                maxit_fit = 25,
+            ),
+            nn = (
+                epochs = 10,
+                batch = 32,
+                lr = 1e-3,
+                hid1 = 8,
+                hid2 = 8,
+                samples_per_epoch = 64,
+                objective = :euler_fb_aio,
+                v_h = 0.5,
+                w_min = 0.1,
+                w_max = 4.0,
+                sigma_shocks = nothing,
+                target_loss = 1e-10,
+                use_cuda = false,
+            ),
+        ),
     )
 end
 
 @testset "validate_config happy paths" begin
     @test UC.validate_config(base_cfg()) === true             # egm
-    @test UC.validate_config(
-        base_cfg(method = "projection") |>
-        x -> merge(x, (solver = merge(x.solver, (orders = [0, 2], Nval = 3)),)),
-    ) === true
-    @test UC.validate_config(
-        base_cfg(method = "perturbation") |>
-        x -> merge(x, (solver = merge(x.solver, (order = 1,)),)),
-    ) === true
+    proj_cfg = base_cfg(method = "projection")
+    proj_solver = merge(
+        proj_cfg.solver,
+        (projection = merge(proj_cfg.solver.projection, (orders = [0, 2], Nval = 3)),),
+    )
+    proj_cfg = merge(proj_cfg, (solver = proj_solver,))
+    @test UC.validate_config(proj_cfg) === true
+
+    pert_cfg = base_cfg(method = "perturbation")
+    pert_solver = merge(
+        pert_cfg.solver,
+        (perturbation = merge(pert_cfg.solver.perturbation, (order = 1,)),),
+    )
+    pert_cfg = merge(pert_cfg, (solver = pert_solver,))
+    @test UC.validate_config(pert_cfg) === true
     # optional utility
     cfgU = merge(base_cfg(), (utility = (u_type = "crra",),))
     @test UC.validate_config(cfgU) === true
@@ -85,6 +126,16 @@ end
 # validate_config: errors (cover branches)
 # -------------------------
 @testset "validate_config errors" begin
+    update_solver(cfg, nt::NamedTuple) = merge(cfg, (solver = merge(cfg.solver, nt),))
+    function update_solver_block(cfg, block::Symbol, nt::NamedTuple)
+        solver = cfg.solver
+        block_cfg = getproperty(solver, block)
+        new_block = merge(block_cfg, nt)
+        block_tuple = NamedTuple{(block,)}((new_block,))
+        solver = merge(solver, block_tuple)
+        return merge(cfg, (solver = solver,))
+    end
+
     # missing sections / wrong types
     @test_throws ErrorException UC.validate_config((
         params = (;),
@@ -103,62 +154,56 @@ end
     @test_throws ErrorException UC.validate_config(base_cfg(a_max = 0.0))
     # solver method invalid
     @test_throws ErrorException UC.validate_config(
-        merge(base_cfg(), (solver = (method = "nope",),)),
+        update_solver(base_cfg(), (; method = "nope")),
     )
     # tol / maxit / verbose type checks
     @test_throws ErrorException UC.validate_config(
-        merge(base_cfg(), (solver = (method = "egm", tol = -1.0),)),
+        update_solver(base_cfg(), (; tol = -1.0)),
     )
+    @test_throws ErrorException UC.validate_config(update_solver(base_cfg(), (; maxit = 0)))
     @test_throws ErrorException UC.validate_config(
-        merge(base_cfg(), (solver = (method = "egm", maxit = 0),)),
-    )
-    @test_throws ErrorException UC.validate_config(
-        merge(base_cfg(), (solver = (method = "egm", verbose = 1),)),
+        update_solver(base_cfg(), (; verbose = 1)),
     )
     # EGM: interp_kind
     @test_throws ErrorException UC.validate_config(
-        merge(base_cfg(), (solver = (method = "egm", interp_kind = "cubic"),)),
+        update_solver_block(base_cfg(), :egm, (; interp_kind = "cubic")),
     )
     # warm_start variants + steady_state requirements
-    @test UC.validate_config(
-        merge(base_cfg(), (solver = (method = "egm", warm_start = "default"),)),
-    )
+    @test UC.validate_config(update_solver(base_cfg(), (; warm_start = "default")))
     @test_throws ErrorException UC.validate_config(
-        merge(
-            base_cfg(y = nothing),
-            (solver = (method = "egm", warm_start = "steady_state"),),
-        ),
+        update_solver(base_cfg(y = nothing), (; warm_start = "steady_state")),
     )
     # projection: orders and Nval
     @test_throws ErrorException UC.validate_config(
-        merge(
+        update_solver_block(
             base_cfg(method = "projection"),
-            (solver = (method = "projection", orders = Int[]),),
+            :projection,
+            (; orders = Int[]),
         ),
     )
     @test_throws ErrorException UC.validate_config(
-        merge(
+        update_solver_block(
             base_cfg(method = "projection"),
-            (solver = (method = "projection", orders = [-1]),),
+            :projection,
+            (; orders = [-1]),
         ),
     )
     @test_throws ErrorException UC.validate_config(
-        merge(
-            base_cfg(method = "projection"),
-            (solver = (method = "projection", Nval = 1),),
-        ),
+        update_solver_block(base_cfg(method = "projection"), :projection, (; Nval = 1)),
     )
     # perturbation: order / a_bar / 2nd order h_a/h_z / tol_fit / maxit_fit
     @test_throws ErrorException UC.validate_config(
-        merge(
+        update_solver_block(
             base_cfg(method = "perturbation"),
-            (solver = (method = "perturbation", order = 0),),
+            :perturbation,
+            (; order = 0),
         ),
     )
     @test_throws ErrorException UC.validate_config(
-        merge(
+        update_solver_block(
             base_cfg(method = "perturbation"),
-            (solver = (method = "perturbation", a_bar = 9.0),),
+            :perturbation,
+            (; a_bar = 9.0),
         ),
     )
     # active shocks require h_z>0 when order≥2
@@ -173,21 +218,23 @@ end
                 Nz = 3,
                 m = 3.0,
             ),
-            solver = (method = "perturbation", order = 2, h_a = 0.1, h_z = 0.0),
         ),
     )
+    cfgP2 = update_solver_block(cfgP2, :perturbation, (; order = 2, h_a = 0.1, h_z = 0.0))
     @test_throws ErrorException UC.validate_config(cfgP2)
     # tol_fit / maxit_fit invalid
     @test_throws ErrorException UC.validate_config(
-        merge(
+        update_solver_block(
             base_cfg(method = "perturbation"),
-            (solver = (method = "perturbation", tol_fit = 0.0),),
+            :perturbation,
+            (; tol_fit = 0.0),
         ),
     )
     @test_throws ErrorException UC.validate_config(
-        merge(
+        update_solver_block(
             base_cfg(method = "perturbation"),
-            (solver = (method = "perturbation", maxit_fit = 0),),
+            :perturbation,
+            (; maxit_fit = 0),
         ),
     )
     # shocks block validations

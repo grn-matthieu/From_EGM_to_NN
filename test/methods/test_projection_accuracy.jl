@@ -9,8 +9,8 @@ using ThesisProject.EulerResiduals: euler_resid_det_grid, euler_resid_stoch
     cfg_det = cfg_patch(
         SMOKE_CFG,
         (:solver, :method) => "Projection",
-        (:solver, :orders) => [3],
-        (:solver, :Nval) => 41,
+        (:solver, :projection, :orders) => [3],
+        (:solver, :projection, :Nval) => 41,
     )
     # Ensure deterministic shape: remove shocks so policy arrays are vectors
     cfg_det = cfg_without(cfg_det, :shocks)
@@ -48,8 +48,8 @@ using ThesisProject.EulerResiduals: euler_resid_det_grid, euler_resid_stoch
     cfg_st = cfg_patch(
         SMOKE_STOCH_CFG,
         (:solver, :method) => "Projection",
-        (:solver, :orders) => [2],
-        (:solver, :Nval) => 21,
+        (:solver, :projection, :orders) => [2],
+        (:solver, :projection, :Nval) => 21,
     )
     model_st = build_model(cfg_st)
     method_st = build_method(cfg_st)

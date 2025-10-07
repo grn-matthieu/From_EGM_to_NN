@@ -23,16 +23,15 @@ Construct a `ProjectionMethod` using solver options contained in the NamedTuple 
 """
 function build_projection_method(cfg::NamedTuple)
     solver_cfg = cfg.solver
-    grids_cfg = cfg.grids
-    default_orders = [grids_cfg.Na - 1]
+    projection_cfg = solver_cfg.projection
     return ProjectionMethod((
         name = maybe(cfg, :method, solver_cfg.method),
-        tol = maybe(solver_cfg, :tol, 1e-6),
-        tol_pol = maybe(solver_cfg, :tol_pol, maybe(solver_cfg, :tol, 1e-6)),
-        maxit = maybe(solver_cfg, :maxit, 1000),
-        verbose = maybe(solver_cfg, :verbose, false),
-        orders = maybe(solver_cfg, :orders, default_orders),
-        Nval = maybe(solver_cfg, :Nval, grids_cfg.Na),
+        tol = solver_cfg.tol,
+        tol_pol = solver_cfg.tol_pol,
+        maxit = solver_cfg.maxit,
+        verbose = solver_cfg.verbose,
+        orders = projection_cfg.orders,
+        Nval = projection_cfg.Nval,
     ))
 end
 function solve(

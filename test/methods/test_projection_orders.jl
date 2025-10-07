@@ -8,20 +8,20 @@ using ThesisProject.EulerResiduals: euler_resid_det_grid, euler_resid_stoch
     cfg = cfg_patch(
         SMOKE_CFG,
         (:solver, :method) => "Projection",
-        (:solver, :orders) => [2, 3],
-        (:solver, :Nval) => 21,
+        (:solver, :projection, :orders) => [2, 3],
+        (:solver, :projection, :Nval) => 21,
         (:grids, :Na) => 20,
     )
     model = build_model(cfg)
     method = build_method(cfg_patch(cfg, (:solver, :method) => "Projection"))
     sol = solve(model, method, cfg)
-    @test sol.metadata[:order] in cfg_get(cfg, :solver, :orders)
+    @test sol.metadata[:order] in cfg_get(cfg, :solver, :projection, :orders)
 
     p = get_params(model)
     g = get_grids(model)
     U = get_utility(model)
-    orders = cfg_get(cfg, :solver, :orders)
-    Nval = cfg_get(cfg, :solver, :Nval)
+    orders = cfg_get(cfg, :solver, :projection, :orders)
+    Nval = cfg_get(cfg, :solver, :projection, :Nval)
     maxres = Float64[]
     for k in orders
         sol_k = solve_projection_det(
@@ -49,22 +49,22 @@ end
     cfg = cfg_patch(
         SMOKE_STOCH_CFG,
         (:solver, :method) => "Projection",
-        (:solver, :orders) => [2, 3],
-        (:solver, :Nval) => 21,
+        (:solver, :projection, :orders) => [2, 3],
+        (:solver, :projection, :Nval) => 21,
         (:grids, :Na) => 15,
         (:shocks, :Nz) => 3,
     )
     model = build_model(cfg)
     method = build_method(cfg)
     sol = solve(model, method, cfg)
-    @test sol.metadata[:order] in cfg_get(cfg, :solver, :orders)
+    @test sol.metadata[:order] in cfg_get(cfg, :solver, :projection, :orders)
 
     p = get_params(model)
     g = get_grids(model)
     S = get_shocks(model)
     U = get_utility(model)
-    orders = cfg_get(cfg, :solver, :orders)
-    Nval = cfg_get(cfg, :solver, :Nval)
+    orders = cfg_get(cfg, :solver, :projection, :orders)
+    Nval = cfg_get(cfg, :solver, :projection, :Nval)
     maxres = Float64[]
     for k in orders
         sol_k = solve_projection_stoch(

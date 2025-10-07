@@ -31,15 +31,16 @@ Options:
 """
 function build_perturbation_method(cfg::NamedTuple)
     solver_cfg = cfg.solver
+    perturbation_cfg = solver_cfg.perturbation
     return PerturbationMethod((
         name = maybe(cfg, :method, solver_cfg.method),
-        a_bar = maybe(solver_cfg, :a_bar),
-        verbose = maybe(solver_cfg, :verbose, false),
-        order = maybe(solver_cfg, :order, 1),
-        h_a = maybe(solver_cfg, :h_a),
-        h_z = maybe(solver_cfg, :h_z),
-        tol_fit = maybe(solver_cfg, :tol_fit, 1e-8),
-        maxit_fit = maybe(solver_cfg, :maxit_fit, 25),
+        a_bar = perturbation_cfg.a_bar,
+        verbose = solver_cfg.verbose,
+        order = perturbation_cfg.order,
+        h_a = perturbation_cfg.h_a,
+        h_z = perturbation_cfg.h_z,
+        tol_fit = perturbation_cfg.tol_fit,
+        maxit_fit = perturbation_cfg.maxit_fit,
     ))
 end
 

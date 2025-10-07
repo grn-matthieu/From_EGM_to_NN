@@ -22,34 +22,35 @@ end
 
 function build_nn_method(cfg::NamedTuple)
     solver_cfg = cfg.solver
+    nn_cfg = solver_cfg.nn
     return NNMethod((
         name = maybe(cfg, :method, solver_cfg.method),
         # Paper defaults: 50_000 epochs, ADAM lr = 1e-3, batch = 64
-        epochs = maybe(solver_cfg, :epochs, 50_000),
-        batch = maybe(solver_cfg, :batch, 64),
-        lr = maybe(solver_cfg, :lr, 1e-3),
-        verbose = maybe(solver_cfg, :verbose, false),
+        epochs = nn_cfg.epochs,
+        batch = nn_cfg.batch,
+        lr = nn_cfg.lr,
+        verbose = solver_cfg.verbose,
 
         # Architecture: hidden sizes (paper compares 8x8, 16x16, ...)
-        hid1 = maybe(solver_cfg, :hid1, 8),
-        hid2 = maybe(solver_cfg, :hid2, 8),
+        hid1 = nn_cfg.hid1,
+        hid2 = nn_cfg.hid2,
 
         # samples per epoch: paper draws 64 random grid points per epoch
-        samples_per_epoch = maybe(solver_cfg, :samples_per_epoch, 64),
+        samples_per_epoch = nn_cfg.samples_per_epoch,
 
         # new: loss selector + stability knobs
-        objective = maybe(solver_cfg, :objective, :euler_fb_aio),
-        v_h = maybe(solver_cfg, :v_h, 0.5),
-        w_min = maybe(solver_cfg, :w_min, 0.1),
-        w_max = maybe(solver_cfg, :w_max, 4.0),
+        objective = nn_cfg.objective,
+        v_h = nn_cfg.v_h,
+        w_min = nn_cfg.w_min,
+        w_max = nn_cfg.w_max,
 
         # optional: pass shock std override for convenience
-        sigma_shocks = maybe(solver_cfg, :sigma_shocks, nothing),
-        target_loss = maybe(solver_cfg, :target_loss, 1e-10),
+        sigma_shocks = nn_cfg.sigma_shocks,
+        target_loss = nn_cfg.target_loss,
 
         # device selection: allow config to explicitly request CUDA
         # pass-through so NNKernel.solver_settings can honor it
-        use_cuda = maybe(solver_cfg, :use_cuda, nothing),
+        use_cuda = nn_cfg.use_cuda,
     ))
 end
 

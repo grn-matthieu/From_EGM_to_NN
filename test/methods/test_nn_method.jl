@@ -16,7 +16,7 @@ end
     cfg = cfg_patch(
         SMOKE_CFG,
         (:solver, :method) => :NN,
-        (:solver, :epochs) => 2,
+        (:solver, :nn, :epochs) => 2,
         (:solver, :verbose) => false,
     )
     model = build_model(cfg)

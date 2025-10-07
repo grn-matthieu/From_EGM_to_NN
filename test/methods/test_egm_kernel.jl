@@ -227,7 +227,7 @@ end
     cfg1 = cfg_patch(
         SMOKE_CFG,
         (:solver, :method) => "EGM",
-        (:solver, :interp_kind) => "linear",
+        (:solver, :egm, :interp_kind) => "linear",
         (:solver, :warm_start) => :steady_state,
         (:grids, :Na) => 12,
         (:solver, :maxit) => 50,
@@ -240,7 +240,7 @@ end
     cfg2 = cfg_patch(
         SMOKE_STOCH_CFG,
         (:solver, :method) => "EGM",
-        (:solver, :interp_kind) => "pchip",
+        (:solver, :egm, :interp_kind) => "pchip",
         (:solver, :warm_start) => :steady_state,
         (:grids, :Na) => 10,
         (:solver, :maxit) => 40,
@@ -255,7 +255,7 @@ end
     cfg3 = cfg_patch(
         SMOKE_CFG,
         (:solver, :method) => "EGM",
-        (:solver, :interp_kind) => "linear",
+        (:solver, :egm, :interp_kind) => "linear",
         (:solver, :warm_start) => :custom_any, # not in default set
         (:grids, :Na) => Na,
         (:init, :c) => custom_vec,
@@ -272,7 +272,7 @@ end
     cfg4 = cfg_patch(
         cfg4_0,
         (:solver, :method) => "EGM",
-        (:solver, :interp_kind) => "linear",
+        (:solver, :egm, :interp_kind) => "linear",
         (:solver, :warm_start) => :custom_any, # not in default set
         (:init, :c) => custom_mat,
         (:solver, :maxit) => 25,
@@ -286,7 +286,7 @@ end
     cfg5 = cfg_patch(
         SMOKE_CFG,
         (:solver, :method) => "EGM",
-        (:solver, :interp_kind) => "linear",
+        (:solver, :egm, :interp_kind) => "linear",
         (:grids, :Na) => 6,
         (:solver, :maxit) => 15,
     )
