@@ -9,7 +9,12 @@ existing `methods` adapter.
 module TimeIterationKernel
 
 using ..CommonInterp:
-    interp_linear!, interp_pchip!, InterpKind, LinearInterp, MonotoneCubicInterp
+    interp_linear,
+    interp_linear!,
+    interp_pchip!,
+    InterpKind,
+    LinearInterp,
+    MonotoneCubicInterp
 using ..EulerResiduals: euler_resid_det!, euler_resid_stoch!, euler_resid_stoch_interp!
 using ..PolicyUtils:
     clamp_policy!,
@@ -22,6 +27,42 @@ using ..PolicyUtils:
 using Printf
 
 export solve_ti_det, solve_ti_stoch
+
+"""
+    solve_consumption_root(euler_gap, c_lo, c_hi, root_tol, max_root_iter)
+
+Helper to bracket and solve the Euler equation for consumption via bisection. It
+handles boundary cases where the bracket endpoints already satisfy the Euler
+equation, returning the appropriate bound if so.
+"""
+function solve_consumption_root(euler_gap, c_lo, c_hi, root_tol, max_root_iter)
+    f_hi = euler_gap(c_hi)
+    if f_hi >= 0
+        return c_hi
+    end
+
+    f_lo = euler_gap(c_lo)
+    if f_lo <= 0
+        return c_lo
+    end
+
+    lo = c_lo
+    hi = c_hi
+    mid = 0.5 * (lo + hi)
+    for _ = 1:max_root_iter
+        mid = 0.5 * (lo + hi)
+        f_mid = euler_gap(mid)
+        if abs(f_mid) < root_tol || 0.5 * (hi - lo) < root_tol
+            break
+        elseif f_mid > 0
+            lo = mid
+        else
+            hi = mid
+        end
+    end
+
+    return mid
+end
 
 function solve_ti_det(
     model_params,
@@ -76,7 +117,6 @@ function solve_ti_det_impl(
 
     R = 1 + model_params.r
     β = model_params.β
-    σ = model_params.σ
     cmin = 1e-12
     bind_tol = compute_binding_tolerance(a_min, a_max, Na; floor = 1e-12, rel = 0.0)
 
@@ -94,23 +134,42 @@ function solve_ti_det_impl(
     best_resid = Inf
     Δpol = Inf
 
+    root_tol = min(1e-10, tol)
+    max_root_iter = 100
+
     for it = 1:maxit
         iters = it
-        # compute implied next assets from current policy
-        @. a_next = clamp(model_params.y + R * a_grid - c, a_min, a_max)
 
-        # interpolate consumption at a_next
-        interp_linear!(cnext, a_grid, c, a_next)
-        ensure_minimum!(cnext, cmin)
+        copyto!(cold, c)
 
-        # update consumption from Euler equation: c_new = (u'^{-1}(β R u'(c_next)))
-        @. cnew = model_utility.u_prime_inv(β * R * cnext .^ (-σ))
+        @inbounds for (i, a) in enumerate(a_grid)
+            resources = model_params.y + R * a
+            c_hi = max(cmin, resources - a_min)
+
+            if c_hi <= cmin
+                cnew[i] = cmin
+                continue
+            end
+
+            function euler_gap(c_guess)
+                a_prime = clamp(resources - c_guess, a_min, a_max)
+                c_future = interp_linear(a_grid, cold, a_prime)
+                c_future = c_future < cmin ? cmin : c_future
+                return model_utility.u_prime(c_guess) -
+                       β * R * model_utility.u_prime(c_future)
+            end
+
+            cnew[i] = solve_consumption_root(euler_gap, cmin, c_hi, root_tol, max_root_iter)
+        end
+
         cmax = @. model_params.y + R * a_grid - a_min
         clamp_policy!(cnew, cmin, cmax)
 
-        # policy progress: infinity norm of change between successive iterates
-        copyto!(cold, c)
         Δpol = relaxation_step!(c, cold, cnew, relax)
+
+        @. a_next = clamp(model_params.y + R * a_grid - c, a_min, a_max)
+        interp_linear!(cnext, a_grid, c, a_next)
+        ensure_minimum!(cnext, cmin)
 
         euler_resid_det!(resid, model_params, c, cnext)
         max_resid = rmse_nonbinding(resid, a_next, a_min, bind_tol)
@@ -192,7 +251,6 @@ function solve_ti_det_impl(
 
     R = 1 + model_params.r
     β = model_params.β
-    σ = model_params.σ
     cmin = 1e-12
     bind_tol = compute_binding_tolerance(a_min, a_max, Na; floor = 1e-12, rel = 0.0)
 
@@ -210,23 +268,50 @@ function solve_ti_det_impl(
     best_resid = Inf
     Δpol = Inf
 
+    root_tol = min(1e-10, tol)
+    max_root_iter = 100
+    interp_buf = similar(c, (1,))
+    query_buf = similar(a_grid, (1,))
+
     for it = 1:maxit
         iters = it
-        @. a_next = clamp(model_params.y + R * a_grid - c, a_min, a_max)
+        copyto!(cold, c)
 
-        interp_pchip!(cnext, a_grid, c, a_next)
-        ensure_minimum!(cnext, cmin)
+        @inbounds for (i, a) in enumerate(a_grid)
+            resources = model_params.y + R * a
+            c_hi = max(cmin, resources - a_min)
 
-        @. cnew = model_utility.u_prime_inv(β * R * cnext .^ (-σ))
+            if c_hi <= cmin
+                cnew[i] = cmin
+                continue
+            end
+
+            function future_consumption(a_prime)
+                query_buf[1] = a_prime
+                interp_pchip!(interp_buf, a_grid, cold, query_buf)
+                val = interp_buf[1]
+                return val < cmin ? cmin : val
+            end
+
+            function euler_gap(c_guess)
+                a_prime = clamp(resources - c_guess, a_min, a_max)
+                c_future = future_consumption(a_prime)
+                return model_utility.u_prime(c_guess) -
+                       β * R * model_utility.u_prime(c_future)
+            end
+
+            cnew[i] = solve_consumption_root(euler_gap, cmin, c_hi, root_tol, max_root_iter)
+        end
+
         cmax = @. model_params.y + R * a_grid - a_min
         clamp_policy!(cnew, cmin, cmax)
-
-        # monotone enforcement
         enforce_monotone!(cnew)
 
-        # policy progress per formula Δ^{(k)}_∞ = max_{i,j} |c^{(k)} - c^{(k-1)}|
-        copyto!(cold, c)
         Δpol = relaxation_step!(c, cold, cnew, relax)
+
+        @. a_next = clamp(model_params.y + R * a_grid - c, a_min, a_max)
+        interp_pchip!(cnext, a_grid, c, a_next)
+        ensure_minimum!(cnext, cmin)
 
         euler_resid_det!(resid, model_params, c, cnext)
         max_resid = rmse_nonbinding(resid, a_next, a_min, bind_tol)
@@ -349,15 +434,12 @@ function solve_ti_stoch_impl(
     Nz = length(z_grid)
 
     β = model_params.β
-    σ = model_params.σ
     R = 1 + model_params.r
     cmin = 1e-12
 
     c = c_init === nothing ? fill(1.0, Na, Nz) : copy(c_init)
     a_next = similar(c)
-    cnext = similar(a_grid)
     cnew = similar(c)
-    EUprime = similar(a_grid)
     resid_mat = similar(c)
     cmax = similar(a_grid)
     bind_tol = compute_binding_tolerance(a_min, a_max, Na; floor = 1e-12, rel = 0.0)
@@ -369,29 +451,43 @@ function solve_ti_stoch_impl(
     best_resid = Inf
     Δpol = Inf
 
+    root_tol = min(1e-10, tol)
+    max_root_iter = 100
+
     for it = 1:maxit
         iters = it
         copyto!(cold, c)
 
         for (j, z) in enumerate(z_grid)
             y = exp(z)
-            @views begin
-                aj = view(a_next, :, j)
-                cj = view(c, :, j)
-                aj .= clamp.(R .* a_grid .+ y .- cj, a_min, a_max)
-            end
-
-            fill!(EUprime, 0.0)
-            for (jp, _) in enumerate(z_grid)
-                interp_linear!(cnext, a_grid, view(c, :, jp), view(a_next, :, j))
-                ensure_minimum!(cnext, cmin)
-                @. EUprime += Π[j, jp] * (cnext .^ (-σ))
-            end
-
-            column = view(cnew, :, j)
-            @. column = model_utility.u_prime_inv(β * R * EUprime)
+            column_new = view(cnew, :, j)
             @. cmax = y + R * a_grid - a_min
-            clamp_policy!(column, cmin, cmax)
+
+            @inbounds for (i, a) in enumerate(a_grid)
+                resources = R * a + y
+                c_hi = max(cmin, resources - a_min)
+
+                if c_hi <= cmin
+                    column_new[i] = cmin
+                    continue
+                end
+
+                function euler_gap(c_guess)
+                    a_prime = clamp(resources - c_guess, a_min, a_max)
+                    Emu = zero(c_guess)
+                    @inbounds for (jp, _) in enumerate(z_grid)
+                        c_future = interp_linear(a_grid, view(cold, :, jp), a_prime)
+                        c_future = c_future < cmin ? cmin : c_future
+                        Emu += Π[j, jp] * model_utility.u_prime(c_future)
+                    end
+                    return model_utility.u_prime(c_guess) - β * R * Emu
+                end
+
+                column_new[i] =
+                    solve_consumption_root(euler_gap, cmin, c_hi, root_tol, max_root_iter)
+            end
+
+            clamp_policy!(column_new, cmin, cmax)
         end
 
         Δpol = relaxation_step!(c, cold, cnew, relax)
