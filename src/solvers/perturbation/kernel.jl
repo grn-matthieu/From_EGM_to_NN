@@ -297,8 +297,8 @@ function solve_perturbation_stoch(
     Π = S.Π
     Nz = length(z_grid)
     R = 1 + p.r
-    # For stochastic residuals, income uses exp(z) in current codebase
-    ȳ = 1.0
+    # Use model mean income
+    ȳ = p.y
     ρ, _, _, σε2 = _shock_moments(S)
 
     ā = a_bar === nothing ? _steady_state_asset(p, g) : a_bar
