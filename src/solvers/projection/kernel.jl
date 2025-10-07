@@ -19,7 +19,7 @@ export solve_projection_det, solve_projection_stoch
 
 const Β_SYM = Symbol(Char(0x03B2))
 const PI_TRANSITION_SYM = Symbol(Char(0x03A0))
-const DEFAULT_BINDING_TOL = 1e-10
+const DEFAULT_BINDING_TOL = 1e-12
 const MAX_CHEBYSHEV_DEGREE = 15
 const MAX_COLLOCATION_POINTS = MAX_CHEBYSHEV_DEGREE + 1
 

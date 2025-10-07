@@ -15,7 +15,7 @@ using LinearAlgebra
 
 export solve_perturbation_det, solve_perturbation_stoch
 
-const DEFAULT_BINDING_TOL = 1e-10
+const DEFAULT_BINDING_TOL = 1e-12
 
 """
     _steady_state_asset(p, g)

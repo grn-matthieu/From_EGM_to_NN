@@ -24,7 +24,7 @@ using Printf
 
 export solve_egm_det, solve_egm_stoch
 
-const DEFAULT_BINDING_TOL = 1e-10
+const DEFAULT_BINDING_TOL = 1e-12
 
 """
     solve_egm_det(model_params, model_grids, model_utility; ...)
