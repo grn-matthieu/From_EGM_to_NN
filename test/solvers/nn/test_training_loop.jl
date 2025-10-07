@@ -1,4 +1,4 @@
-# test/methods/test_nn_training_utils.jl
+# test/solvers/nn/test_training_loop.jl
 using ThesisProject
 using ThesisProject.Determinism: make_rng
 using LinearAlgebra: I
@@ -7,8 +7,36 @@ using Random
 const NN = ThesisProject.NNKernel  # adjust if these funcs live under a submodule
 
 # ---- helpers for grids/shocks -------------------------------------------------
-make_G(a::AbstractVector) = Dict(:a => (grid = a, min = minimum(a), max = maximum(a)))
-make_S(z::AbstractVector) = (zgrid = Float32.(z),)
+make_G(a::AbstractVector) =
+    Dict(:a => (grid = Float32.(a), min = minimum(a), max = maximum(a)))
+make_S(z::AbstractVector) =
+    (zgrid = Float32.(z), Π = Matrix{Float32}(I, length(z), length(z)))
+make_params(; σ = 2.0f0, β = 0.95f0, r = 0.01f0, y = 0.0f0) = (σ = σ, β = β, r = r, y = y)
+
+function dummy_settings(;
+    has_shocks::Bool = false,
+    objective::Symbol = :euler,
+    use_cuda::Bool = false,
+)
+    return NN.NNSolverSettings(
+        1,               # epochs
+        nothing,         # batch_choice
+        1e-3,            # learning_rate
+        false,           # verbose
+        1,               # resample_interval
+        Float32(1e-3),   # target_loss
+        0,               # patience
+        (4, 4),          # hidden_sizes
+        has_shocks,
+        objective,
+        0.5,             # v_h
+        0.1f0,           # w_min
+        4.0f0,           # w_max
+        32,              # samples_per_epoch
+        nothing,         # sigma_shocks
+        use_cuda,
+    )
+end
 
 # ---- solver_settings ----------------------------------------------------------
 @testset "solver_settings parsing and clamping" begin
@@ -19,7 +47,7 @@ make_S(z::AbstractVector) = (zgrid = Float32.(z),)
     @test s.learning_rate ≈ 1e-3
     @test s.verbose == false
     @test s.resample_interval == 1
-    @test s.target_loss ≈ 2e-4 * 1.0f0
+    @test s.target_loss == Float32(2e-4)
     @test s.patience == 200
     @test s.hidden_sizes == (128, 128)
     @test s.objective == :euler_fb_aio
@@ -27,6 +55,8 @@ make_S(z::AbstractVector) = (zgrid = Float32.(z),)
     @test s.w_min ≈ 0.1f0
     @test s.w_max ≈ 4.0f0
     @test s.sigma_shocks === nothing
+    @test s.samples_per_epoch == 64
+    @test s.use_cuda isa Bool
 
     # provided opts with negatives and zeros to trigger clamps
     opts = (;
@@ -35,7 +65,7 @@ make_S(z::AbstractVector) = (zgrid = Float32.(z),)
         lr = 5e-4,
         verbose = true,
         resample_every = -1,
-        target_loss = 1e-5 * 1.0f0,
+        target_loss = 1e-5f0,
         patience = -7,
         hid1 = 0,
         hid2 = 1,
@@ -44,6 +74,7 @@ make_S(z::AbstractVector) = (zgrid = Float32.(z),)
         w_min = 0.05,
         w_max = 10.0,
         sigma_shocks = 0.2,
+        samples_per_epoch = 12,
     )
     s2 = NN.solver_settings(opts; has_shocks = true)
     @test s2.epochs == 0
@@ -51,7 +82,7 @@ make_S(z::AbstractVector) = (zgrid = Float32.(z),)
     @test s2.learning_rate ≈ 5e-4
     @test s2.verbose == true
     @test s2.resample_interval == 0
-    @test s2.target_loss ≈ 1e-5 * 1.0f0
+    @test s2.target_loss == Float32(1e-5)
     @test s2.patience == 0
     @test s2.hidden_sizes == (1, 1)
     @test s2.objective == :euler
@@ -60,6 +91,8 @@ make_S(z::AbstractVector) = (zgrid = Float32.(z),)
     @test s2.w_max ≈ 10.0f0
     @test s2.sigma_shocks ≈ 0.2
     @test s2.has_shocks
+    @test s2.samples_per_epoch == 12
+    @test s2.use_cuda == false
 end
 
 # ---- build_network / create_optimizer ----------------------------------------
@@ -111,37 +144,75 @@ end
 
 # ---- create_training_batch ----------------------------------------------------
 @testset "create_training_batch deterministic/stochastic" begin
-    # deterministic case (no shocks)
-    scaler = NN.FeatureScaler(0.0f0, 1.0f0, 0.0f0, 1.0f0, false)
-    a = 0.0:0.5:2.0
-    G = make_G(a)
+    params = make_params()
+    P_resid = NN.scalar_params(params)
 
-    batch, n = NN.create_training_batch(G, nothing, scaler; mode = :full, rng = make_rng(0))
-    @test size(batch, 1) == 1                      # features = (a,)
-    @test size(batch, 2) == length(a)              # samples
-    @test n == length(a)
+    # deterministic case (no shocks)
+    settings_det = dummy_settings(has_shocks = false)
+    G = make_G(0.0:0.5:2.0)
+    sc = NN.FeatureScaler(params, G, nothing, settings_det)
+
+    batch, n = NN.create_training_batch(
+        G,
+        nothing,
+        sc;
+        mode = :full,
+        rng = make_rng(0),
+        P_resid = P_resid,
+        settings = settings_det,
+    )
+    @test size(batch, 1) == 2                      # features = (y, w)
+    @test size(batch, 2) == length(G[:a].grid)      # samples
+    @test n == length(G[:a].grid)
+    @test all(abs.(batch) .<= 1.0f0)
 
     # stochastic case (has shocks)
     z = [-0.7f0, 0.2f0]
     S = make_S(z)
-    scaler = NN.FeatureScaler(0.0f0, 1.0f0, 0.0f0, 1.0f0, true)
+    settings_st = dummy_settings(has_shocks = true)
+    sc_s = NN.FeatureScaler(params, G, S, settings_st)
 
-    batch2, n2 = NN.create_training_batch(G, S, scaler; mode = :full, rng = make_rng(1))
-    @test size(batch2, 1) == 2                     # features = (a, z)
-    @test size(batch2, 2) == length(a) * length(z) # samples
-    @test n2 == length(a) * length(z)
+    batch2, n2 = NN.create_training_batch(
+        G,
+        S,
+        sc_s;
+        mode = :full,
+        rng = make_rng(1),
+        P_resid = P_resid,
+        settings = settings_st,
+    )
+    @test size(batch2, 1) == 2                     # features = (y, w)
+    @test size(batch2, 2) == length(G[:a].grid) * length(S.zgrid)
+    @test n2 == length(G[:a].grid) * length(S.zgrid)
+    @test all(abs.(batch2) .<= 1.0f0)
 
     # rejection sampler honours w-window and errors when infeasible
-    tight_settings =
-        NN.solver_settings((; w_min = 10.0f0, w_max = 10.5f0); has_shocks = true)
+    tight_settings = NN.NNSolverSettings(
+        settings_st.epochs,
+        settings_st.batch_choice,
+        settings_st.learning_rate,
+        settings_st.verbose,
+        settings_st.resample_interval,
+        settings_st.target_loss,
+        settings_st.patience,
+        settings_st.hidden_sizes,
+        true,
+        settings_st.objective,
+        settings_st.v_h,
+        10.0f0,
+        10.5f0,
+        settings_st.samples_per_epoch,
+        settings_st.sigma_shocks,
+        settings_st.use_cuda,
+    )
     @test_throws AssertionError NN.create_training_batch(
         G,
         S,
-        scaler;
+        sc_s;
         mode = :rand,
         nsamples = 32,
         rng = Random.MersenneTwister(1),
-        P_resid = (r = 0.01f0, β = 0.95f0, σ = 2.0f0, y = 0.0f0),
+        P_resid = P_resid,
         settings = tight_settings,
     )
 end
@@ -182,60 +253,71 @@ end
 
 # ---- build_loss_function: deterministic and stochastic closures --------------
 @testset "build_loss_function closures run" begin
-    a = collect(0.0:0.5:2.0)
-    G = make_G(a)
-
-    P_resid = (r = 0.01f0, β = 0.95f0, σ = 2.0f0, y = 1.0f0)
+    params = make_params()
+    P_resid = NN.scalar_params(params)
+    G = make_G(0.0:0.5:2.0)
 
     # Deterministic: new signature includes scaler and settings
-    scaler = NN.FeatureScaler(G, nothing)
     settings = NN.solver_settings((; objective = :euler, hid1 = 4, hid2 = 4))
+    scaler = NN.FeatureScaler(params, G, nothing, settings)
+    rng_loss = make_rng(2)
     loss_det =
-        NN.build_loss_function(P_resid, G, nothing, scaler, settings, nothing, make_rng(2))
-    model = (X, ps, st) -> vec(X)
+        NN.build_loss_function(P_resid, G, nothing, scaler, settings, rng_loss, nothing)
+    batch_det, _ = NN.create_training_batch(
+        G,
+        nothing,
+        scaler;
+        mode = :full,
+        rng = make_rng(2),
+        P_resid = P_resid,
+        settings = settings,
+    )
+    model = (X, ps, st) -> reshape(fill(Float32(0.5), size(X, 2)), 1, :)
     ps = nothing
     st = nothing
-    data = (reshape(Float32.(a), :, 1),)
+    data = (batch_det,)
     l1, st_out, meta = loss_det(model, ps, st, data)
     @test l1 isa Real
-    @test st_out === nothing
+    @test st_out === st
     @test isa(meta, NamedTuple)
 
     # Stochastic
     z = [-0.7f0, 0.2f0]
-    Π = Matrix{Float32}(I, length(z), length(z))
-    S = (zgrid = Float32.(z), Π = Π)
-    scaler_s = NN.FeatureScaler(G, S)
+    S = make_S(z)
     settings_s =
         NN.solver_settings((; objective = :euler, hid1 = 4, hid2 = 4); has_shocks = true)
+    scaler_s = NN.FeatureScaler(params, G, S, settings_s)
+    rng_loss_s = make_rng(3)
     loss_st =
-        NN.build_loss_function(P_resid, G, S, scaler_s, settings_s, nothing, make_rng(3))
+        NN.build_loss_function(P_resid, G, S, scaler_s, settings_s, rng_loss_s, nothing)
 
-    # Model should output (Na, Nz) consumption matrix (or NamedTuple with :Φ)
-    Na, Nz = length(a), length(z)
-    model_stoch = (X, ps, st) -> reshape(Float32.(1:Na*Nz), Na, Nz)
-
-    # Input batch used by loss: features×samples; for stochastic full-grid we
-    # typically use Na*Nz samples with two features
-    X_dummy = rand(Float32, Na * Nz, 2)
-    data2 = (X_dummy,)
+    batch_st, _ = NN.create_training_batch(
+        G,
+        S,
+        scaler_s;
+        mode = :full,
+        rng = make_rng(3),
+        P_resid = P_resid,
+        settings = settings_s,
+    )
+    Na, Nz = length(G[:a].grid), length(S.zgrid)
+    model_stoch = (X, ps, st) -> reshape(Float32.(1:(Na*Nz)), 1, :)
+    data2 = (batch_st,)
     l2, st_out2, meta2 = loss_st(model_stoch, ps, st, data2)
     @test l2 isa Real
-    @test st_out2 === nothing
+    @test st_out2 === st
     @test isa(meta2, NamedTuple)
 end
 
-
-
-
 # ---- train_consumption_network!: smoke + resample + early stop ---------------
 @testset "train_consumption_network! smoke and early-stop" begin
-    # Tiny deterministic problem; early stop immediately
-    a = [0.0, 1.0]   # length 2 to match batch=2
-    G = make_G(a)
-    scaler = NN.FeatureScaler(G, nothing)
+    params = make_params()
+    P_resid = NN.scalar_params(params)
 
-    # Minimal valid solver settings
+    # Tiny deterministic problem; early stop immediately
+    a = [0.0f0, 1.0f0]   # length 2 to match batch=2
+    G = make_G(a)
+
     s = NN.solver_settings((;
         epochs = 1,
         batch = 2,
@@ -247,36 +329,21 @@ end
         hid1 = 4,
         hid2 = 4,
         objective = :euler,
+        samples_per_epoch = 2,
     ))
+    scaler = NN.FeatureScaler(params, G, nothing, s)
+    net = NN.build_network(NN.input_dimension(nothing), s)
 
-    net = NN.build_network(1, s)
-
-    # Dummy residual parameters required by euler_resid_det_grid / stoch_grid
-    P_resid = (r = 0.01f0, β = 0.95f0, σ = 2.0f0, y = 1.0f0)
-
-    # Deterministic training run
-    tr = NN.train_consumption_network!(
-        net,
-        s,
-        scaler,
-        P_resid,
-        G,
-        nothing,
-        nothing,
-        make_rng(4),
-    )
-    @test tr.epochs_run ≤ 1
+    tr = NN.train_consumption_network!(net, s, scaler, P_resid, G, nothing, make_rng(4))
+    @test tr.epochs_run ≤ s.epochs
     @test tr.batch_size ≥ 1
     @test tr.batches_per_epoch ≥ 1
 
     # Stochastic variant with 2 inputs
-    a = [0.0]          # <-- ensures Na=1
-    G = make_G(a)
-
+    a_stoch = [0.0f0]
+    Gs = make_G(a_stoch)
     z = [-0.7f0, 0.2f0]
-    Π = Matrix{Float32}(I, length(z), length(z))
-    S = (zgrid = Float32.(z), Π = Π)
-    scaler_s = NN.FeatureScaler(G, S)
+    S = make_S(z)
 
     s_stoch = NN.solver_settings(
         (;
@@ -290,22 +357,15 @@ end
             hid1 = 4,
             hid2 = 4,
             objective = :euler,
+            samples_per_epoch = 4,
         );
         has_shocks = true,
     )
+    scaler_s = NN.FeatureScaler(params, Gs, S, s_stoch)
+    net2 = NN.build_network(NN.input_dimension(S), s_stoch)
 
-    net2 = NN.build_network(2, s_stoch)
-    # For stochastic problem training we expect full-batch; ensure call succeeds
-    tr2 = NN.train_consumption_network!(
-        net2,
-        s_stoch,
-        scaler_s,
-        P_resid,
-        G,  # Na
-        S,
-        nothing,
-        make_rng(5),
-    )
+    tr2 =
+        NN.train_consumption_network!(net2, s_stoch, scaler_s, P_resid, Gs, S, make_rng(5))
     @test tr2.batch_size ≥ 1
     @test tr2.batches_per_epoch ≥ 1
 end
