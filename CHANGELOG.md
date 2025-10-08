@@ -1,3 +1,17 @@
+## [0.7.0] - 2025-10-08
+- Refactor + change test procedure to match with higher standards
+- Clean the NN repo for pollution in the solvers; now yields acceptable results
+- Add CUDA compatibility to run the NN kernel on the GPU if requested
+- Add utils refactoring recurrent operations in overall funs
+- Fix bad handling of the RNG. Master RNG/seed is now set at validation, and cannot be modified afterwards.
+
+### Upcoming...
+- New model : high-dimensional setting to compare actual performance
+- New operator : AiO upgrades to bc-MC with optimal N to minimize variance.
+- Minor tweaks to match exactly the methodology section
+- Better docs and test coverage.
+
+
 
 ## [0.6.0] - 2025-09-24
 ### Bugfixes & Improvements

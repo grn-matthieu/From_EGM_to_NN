@@ -4,19 +4,22 @@ export simulate_panel
 
 using Random
 using Statistics
-using ..Determinism: make_rng, derive_seed
+using ..Determinism:
+    derive_rng, derive_seed, make_master_rng, make_rng, master_seed, promote_master_rng
 
 using ..API:
     Solution, AbstractModel, AbstractMethod, get_params, get_grids, get_shocks, solve
 using ..CommonInterp: interp_linear!
-using ..UtilsConfig: maybe
 
 
 """
-    simulate_panel(model, method, cfg::NamedTuple; N = 1000, T = 200, rng::AbstractRNG)
+    simulate_panel(model, method, cfg::NamedTuple; N = 1000, T = 200, rng = nothing)
 
-Simulates a panel of N agents for T periods using a solved policy from `method` on `model`.
-Agents draw from the Markov chain implied by the model's shocks. The master seed is taken from `cfg.random.seed` if available, otherwise it is deterministically derived from the provided `rng` via `derive_seed`.
+Simulates a panel of N agents for T periods using a solved policy from `method`
+on `model`. Randomness is driven by a master RNG: prefer `cfg.random.master_rng`
+when present. The master RNG itself is never mutated;
+instead deterministic sub-generators are derived for the solver call and each
+agent.
 
 Returns a NamedTuple with fields: `assets::Matrix`, `consumption::Matrix`,
 `shocks::Matrix`, `seeds::Vector`, and `diagnostics::Vector`.
@@ -27,10 +30,14 @@ function simulate_panel(
     cfg::NamedTuple;
     N::Int = 1_000,
     T::Int = 200,
-    rng::AbstractRNG,
+    master_rng = nothing,
 )
+    cand = master_rng !== nothing ? master_rng : make_master_rng(cfg.random.seed)
+    resolved_master = promote_master_rng(cand)
+
     # Solve once and for all to get the optimal policy fun and grids
-    sol = solve(model, method, cfg; rng = rng)
+    solve_rng = derive_rng(resolved_master, :panel_solve)
+    sol = solve(model, method, cfg; rng = solve_rng)
 
     p = get_params(model)
     g = get_grids(model)
@@ -54,17 +61,6 @@ function simulate_panel(
 
 
     # --- Seed handling ---
-    # Master RNG/seed: prefer cfg.random.seed; else derive from the provided rng
-    # The rule is to derive individual agent seeds from the master seed so that
-    # identical rng instances lead to identical panel simulations.
-    master_seed = maybe(maybe(cfg, :random), :seed)
-    if master_seed === nothing
-        master_seed = derive_seed(rng, :panel)
-    else
-        master_seed = UInt64(master_seed)
-    end
-    master_rng = make_rng(master_seed)
-
     if S === nothing
         # Deterministic model: document shocks as zeros in the output
         zdraws .= 0.0
@@ -90,7 +86,7 @@ function simulate_panel(
     end
 
     @inbounds for n in axes(assets, 1)
-        # independent rng per agent derived from the master rng
+        # independent rng per agent derived from the panel master rng
         agent_seed = derive_seed(master_rng, n)
         seeds[n] = agent_seed
         arng = make_rng(agent_seed)
@@ -147,7 +143,7 @@ function simulate_panel(
 
     diagnostics = (
         rng_kind = string(typeof(master_rng)),
-        master_seed = master_seed,
+        master_seed = master_seed(master_rng),
         mean_log_c_growth = mean_log_c_growth,
         final_asset_mean = final_asset_mean,
         final_asset_std = final_asset_std,

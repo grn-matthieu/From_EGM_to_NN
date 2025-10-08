@@ -63,8 +63,8 @@ scripts
 
 config
 +-- smoke_config
-|   +-- smoke_config_stochastic.yaml
-|   +-- smoke_config.yaml
+|   +-- smoke_cfg_stoch.yaml
+|   +-- smoke_cfg_det.yaml
 +-- simple_baseline.yaml
 +-- simple_stochastic.yaml
 

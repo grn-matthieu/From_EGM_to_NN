@@ -266,8 +266,8 @@ function main()
     outdir = ensure_outputs_dir()
     plotdir = ensure_plots_dir(outdir)
 
-    det_cfg = joinpath(ROOT, "config", "smoke_config", "smoke_config.yaml")
-    stc_cfg = joinpath(ROOT, "config", "smoke_config", "smoke_config_stochastic.yaml")
+    det_cfg = joinpath(ROOT, "config", "smoke_config", "smoke_cfg_det.yaml")
+    stc_cfg = joinpath(ROOT, "config", "smoke_config", "smoke_cfg_stoch.yaml")
 
     @info "Running deterministic baseline" det_cfg
     sol_det, cfg_det = run_one(det_cfg, opts)

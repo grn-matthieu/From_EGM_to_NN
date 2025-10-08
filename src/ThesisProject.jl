@@ -13,13 +13,14 @@ using PrecompileTools
 
 # --- Includes ---
 # 1) spine
+include("utils/Determinism.jl")
 include("core/api.jl")
 include("core/model_contract.jl")
 
 # 2) utilities
 include("utils/Config.jl")
 # include("utils/Schema.jl")
-include("utils/Determinism.jl")
+include("utils/Diagnostics.jl")
 
 # 3) shared + models + model builder
 include("models/shared/Shocks.jl")
@@ -29,6 +30,7 @@ include("core/model_factory.jl")
 # 4) solvers (pure kernels)
 # common solver utilities
 include("solvers/common/interp.jl")
+include("solvers/common/policy_utils.jl")
 include("solvers/common/value_fun.jl")
 include("solvers/common/chebyshev.jl")
 include("solvers/common/residuals.jl")
@@ -41,6 +43,7 @@ include("solvers/projection/kernel.jl")
 # egm specific
 include("solvers/egm/kernel.jl")
 include("solvers/perturbation/kernel.jl")
+include("solvers/time_iteration/kernel.jl")
 
 # NN solver
 include("solvers/nn/data_nn.jl")
@@ -51,6 +54,7 @@ include("methods/EGM.jl")
 include("methods/Projection.jl")
 include("methods/Perturbation.jl")
 include("methods/NN.jl")
+include("methods/TimeIteration.jl")
 
 # 6) method factory
 include("core/method_factory.jl")
@@ -99,7 +103,7 @@ include("viz/api.jl")      # visualization API stubs; enabled by Plots extension
 export plot_policy, plot_euler_errors
 
 @setup_workload begin
-    cfg_path = joinpath(@__DIR__, "..", "config", "smoke_config", "smoke_config.yaml")
+    cfg_path = joinpath(@__DIR__, "..", "config", "smoke_config", "smoke_cfg_det.yaml")
     if isfile(cfg_path)
         @compile_workload begin
             cfg = load_config(cfg_path)

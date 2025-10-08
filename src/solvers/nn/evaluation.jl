@@ -6,6 +6,12 @@ trained network, computing Euler residuals on the model grids and aggregating
 common diagnostic bundles.
 """
 
+using Random
+using Lux: fmap
+
+# Local sigmoid function to avoid NNlib dependency
+@inline sigmoid(x) = 1 / (1 + exp(-x))
+
 struct EvaluationResult
     c::Any
     a_next::Any
@@ -14,6 +20,51 @@ struct EvaluationResult
 end
 
 const CONSUMPTION_FLOOR = 1.0f-8
+
+const DEFAULT_EVAL_SAMPLES = 8192
+const EVAL_MIN_CONSUMPTION = 1.0f-3
+
+@inline function denormalize_features(scaler::FeatureScaler, batch)
+    if size(batch, 1) == 2
+        y = ((batch[1, :] .+ 1.0f0) ./ 2.0f0) .* scaler.y_range .+ scaler.y_min
+        w = ((batch[2, :] .+ 1.0f0) ./ 2.0f0) .* scaler.w_range .+ scaler.w_min
+        return Float32.(y), Float32.(w)
+    elseif size(batch, 1) == 1
+        w = ((batch[1, :] .+ 1.0f0) ./ 2.0f0) .* scaler.w_range .+ scaler.w_min
+        y = fill(scaler.y_min, length(w))
+        return Float32.(y), Float32.(w)
+    else
+        throw(ArgumentError("Expected 1 or 2 feature rows, got $(size(batch, 1))"))
+    end
+end
+
+function extract_consumption(prediction, w)
+    if prediction isa NamedTuple
+        return vec(phi_to_consumption(prediction[:Φ], w; min_c = EVAL_MIN_CONSUMPTION))
+    else
+        values = ensure_row(prediction)
+        consumption = vec(values)
+        T = eltype(consumption)
+        floor = T(EVAL_MIN_CONSUMPTION)
+        return clamp.(consumption, floor, T(Inf))
+    end
+end
+
+@inline function fallback_uprime(c, sigma)
+    T = typeof(c)
+    threshold = T(1e-8)
+    value = c <= threshold ? threshold : c
+    return value^(-sigma)
+end
+
+function get_uprime(U, P_resid)
+    if U !== nothing && hasproperty(U, :u_prime)
+        return U.u_prime
+    else
+        σ = Float64(P_resid.σ)
+        return c -> max.(c, 1e-8) .^ (-σ)
+    end
+end
 
 """Ensure a Lux output is reshaped as a single-row matrix."""
 function ensure_row(values)
@@ -43,24 +94,19 @@ function phi_to_consumption(Φ, w; min_c = CONSUMPTION_FLOOR)
     return clamp.(consumption, T(min_c), T(Inf))
 end
 
-"""Compute next-period assets given consumption on the asset grid."""
-function next_assets(P, G, consumption)
+"""Compute next-period assets from current cash-on-hand and consumption."""
+function next_assets_from_cash(w, consumption)
     T = eltype(consumption)
-    R = T(1) + T(P.r)
-    y = T(P.y)
-    a_grid = convert.(T, G[:a].grid)
-    return @. R * a_grid + y - consumption
+    return convert.(T, w) .- consumption
 end
 
 function evaluate_deterministic(model, params, states, P_resid, P, G, scaler)
-    X_forward, _ = det_forward_inputs(G)
+    X_forward, w_grid = det_forward_inputs(G, P_resid)
     normalize_feature_batch!(scaler, X_forward)
     prediction = run_model(model, params, states, X_forward)
 
     if prediction isa NamedTuple
-        a_grid_f32 = float32_vector(G[:a].grid)
-        w = cash_on_hand(a_grid_f32, 0.0f0, P_resid, scaler.has_shocks)
-        c_row = phi_to_consumption(prediction[:Φ], w)
+        c_row = phi_to_consumption(prediction[:Φ], w_grid)
         a_grid_f32, c_vec, c_vec_f32 = det_residual_inputs(c_row, G)
     else
         a_grid_f32, c_vec, c_vec_f32 = det_residual_inputs(prediction, G)
@@ -68,28 +114,32 @@ function evaluate_deterministic(model, params, states, P_resid, P, G, scaler)
 
     residuals = euler_resid_det_grid(P_resid, a_grid_f32, c_vec_f32)
     c_on_grid = convert_to_grid_eltype(G[:a].grid, c_vec)
-    a_next = next_assets(P, G, c_on_grid)
+    a_next = next_assets_from_cash(w_grid, c_on_grid)
     a_next = clamp_to_asset_bounds(a_next, G[:a])
     max_resid = maximum(abs.(residuals))
 
     return EvaluationResult(c_on_grid, a_next, residuals, max_resid)
 end
 
-function evaluate_stochastic(model, params, states, P_resid, P, G, S, scaler)
-    X_eval, _ = generate_dataset(G, S; mode = :full)
+function evaluate_stochastic(model, params, states, P_resid, P, G, S, scaler, settings, U)
+    X_eval, _ = generate_dataset(G, S, P_resid; mode = :full)
     normalize_samples!(scaler, X_eval)
-    batch = prepare_training_batch(X_eval)
+    batch = prepare_training_batch(X_eval, Val(settings.use_cuda))
     prediction = run_model(model, params, states, batch)
 
+    a_f32 = float32_vector(G[:a].grid)
+    z_f32 = float32_vector(S.zgrid)
+    Na = length(a_f32)
+    Nz = length(z_f32)
+    A = repeat(a_f32, inner = Nz)
+    Z = repeat(z_f32, outer = Na)
+    μ = Float32(P_resid.y)
+    Rg = 1.0f0 + Float32(P_resid.r)
+    Y = exp.(μ .+ Z)
+    W = settings.use_cuda ? fmap(cu, Rg * A + Y) : Rg * A + Y
+
     if prediction isa NamedTuple
-        a_f32 = float32_vector(G[:a].grid)
-        z_f32 = float32_vector(S.zgrid)
-        Na = length(a_f32)
-        Nz = length(z_f32)
-        A = repeat(a_f32, inner = Nz)
-        Z = repeat(z_f32, outer = Na)
-        w = cash_on_hand(A, Z, P_resid, scaler.has_shocks)
-        c_row = phi_to_consumption(prediction[:Φ], w)
+        c_row = phi_to_consumption(prediction[:Φ], W)
         a_grid_f32, z_grid_f32, Pz_f32, c_matrix, c_matrix_f32 =
             stoch_residual_inputs(c_row, G, S)
     else
@@ -100,17 +150,45 @@ function evaluate_stochastic(model, params, states, P_resid, P, G, S, scaler)
     residuals =
         euler_resid_stoch_grid(P_resid, a_grid_f32, z_grid_f32, Pz_f32, c_matrix_f32)
     c_on_grid = convert_to_grid_eltype(G[:a].grid, c_matrix)
-    a_next = next_assets(P, G, c_on_grid)
+    w_matrix = reshape(W, Na, Nz)
+    a_next = next_assets_from_cash(w_matrix, c_on_grid)
     a_next = clamp_to_asset_bounds(a_next, G[:a])
     max_resid = maximum(abs.(residuals))
 
     return EvaluationResult(c_on_grid, a_next, residuals, max_resid)
 end
 
-function evaluate_solution(model, params, states, P_resid, P, G, S, scaler)
-    return isnothing(S) ?
-           evaluate_deterministic(model, params, states, P_resid, P, G, scaler) :
-           evaluate_stochastic(model, params, states, P_resid, P, G, S, scaler)
+function evaluate_solution(
+    model,
+    params,
+    states,
+    P_resid,
+    P,
+    G,
+    S,
+    scaler;
+    settings::Union{NNSolverSettings,Nothing} = nothing,
+    U = nothing,
+)
+    local_settings =
+        settings === nothing ? solver_settings(nothing; has_shocks = scaler.has_shocks) :
+        settings
+    if scaler.has_shocks
+        return evaluate_stochastic(
+            model,
+            params,
+            states,
+            P_resid,
+            P,
+            G,
+            S,
+            scaler,
+            local_settings,
+            U,
+        )
+    else
+        return evaluate_deterministic(model, params, states, P_resid, P, G, scaler)
+    end
 end
 
 """Return Monte Carlo Euler residual diagnostics for stochastic problems."""
@@ -123,12 +201,19 @@ function eval_euler_residuals_mc(
     scaler,
     settings;
     N = 8192,
-    rng = Random.GLOBAL_RNG,
+    rng::AbstractRNG,
+    G = nothing,
+    S = nothing,
+    P = nothing,
 )
     @assert settings.has_shocks "MC eval is for stochastic spec"
+    @assert !(G === nothing) "eval_euler_residuals_mc requires G to be provided"
+    @assert !(S === nothing) "eval_euler_residuals_mc requires S to be provided"
+    @assert !(P === nothing) "eval_euler_residuals_mc requires P to be provided"
+
     batch, _ = create_training_batch(
-        getfield(Main, :G),
-        getfield(Main, :S),
+        G,
+        S,
         scaler;
         mode = :rand,
         nsamples = N,
@@ -137,47 +222,74 @@ function eval_euler_residuals_mc(
         settings = settings,
     )
 
-    a0 = ((batch[1, :] .+ 1.0f0) ./ 2.0f0) .* scaler.a_range .+ scaler.a_min
-    z0 = ((batch[2, :] .+ 1.0f0) ./ 2.0f0) .* scaler.z_range .+ scaler.z_min
+    y0 = ((batch[1, :] .+ 1.0f0) ./ 2.0f0) .* scaler.y_range .+ scaler.y_min
+    w0 = ((batch[2, :] .+ 1.0f0) ./ 2.0f0) .* scaler.w_range .+ scaler.w_min
+
+    # Ensure y0/w0 live on the same device as model outputs when using CUDA
+    if settings.use_cuda
+        y0 = cu(y0)
+        w0 = cu(w0)
+    end
 
     out, _ = Lux.apply(model, batch, ps, st)
-    w0 = cash_on_hand(a0, z0, P_resid, true)
     c0 = vec(phi_to_consumption(out[:Φ], w0; min_c = 1.0f-3))
     h = vec(ensure_row(out[:h]))
 
-    P = getfield(Main, :P)
-    ρ = Float32(P.ρ)
-    σϵ = Float32(P.σ_shocks)
+    μ = Float32(P_resid.y)
+    z0 = log.(y0) .- μ
+    ρ = Float32(P.ρ_shock)
+    σϵ =
+        settings.sigma_shocks === nothing ? Float32(P.σ_shock) :
+        Float32(settings.sigma_shocks)
     β = Float32(P.β)
     Rg = 1.0f0 + Float32(P.r)
 
     ε = randn(rng, Float32, N)
+    if settings.use_cuda
+        ε = cu(ε)
+    end
     z1 = @. ρ * z0 + σϵ * ε
+    y1 = exp.(μ .+ z1)
     a1 = @. w0 - c0
-    w1 = cash_on_hand(a1, z1, P_resid, true)
+    w1 = @. Rg * a1 + y1
 
-    X1 = vcat(reshape(a1, 1, :), reshape(z1, 1, :))
-    NX1 = normalize_feature_batch(scaler, X1)
-    out1, _ = Lux.apply(model, NX1, ps, st)
+    X1 = vcat(reshape(y1, 1, :), reshape(w1, 1, :))
+    normalize_feature_batch!(scaler, X1)
+    out1, _ = Lux.apply(model, X1, ps, st)
     c1 = vec(phi_to_consumption(out1[:Φ], w1; min_c = 1.0f-3))
 
     uprime = U.u_prime
     ratio = @. β * Rg * uprime(c1) / uprime(c0)
     resid = abs.(1.0f0 .- ratio)
 
-    sr = sort(vec(resid))
+    # Move diagnostics to CPU for aggregation (sorting, quantiles) and return
+    if settings.use_cuda
+        resid_cpu = Array(resid)
+        w_cpu = Array(w0)
+        y_cpu = Array(y0)
+        c_cpu = Array(c0)
+        h_cpu = Array(h)
+    else
+        resid_cpu = resid
+        w_cpu = w0
+        y_cpu = y0
+        c_cpu = c0
+        h_cpu = h
+    end
+
+    sr = sort(vec(resid_cpu))
     n = length(sr)
     p50 = sr[clamp(Int(round(0.5 * n)), 1, n)]
     p95 = sr[clamp(Int(ceil(0.95 * n)), 1, n)]
 
-    stats = (mean = mean(resid), p50 = p50, p95 = p95, max = maximum(resid))
+    stats = (mean = mean(resid_cpu), p50 = p50, p95 = p95, max = maximum(resid_cpu))
     return (
-        abs_resid = Float32.(resid),
-        w = Float32.(w0),
-        z = Float32.(z0),
-        c = Float32.(c0),
+        abs_resid = Float32.(resid_cpu),
+        w = Float32.(w_cpu),
+        y = Float32.(y_cpu),
+        c = Float32.(c_cpu),
         stats = stats,
-        h = Float32.(h),
+        h = Float32.(h_cpu),
     )
 end
 
@@ -218,12 +330,19 @@ function eval_euler_residuals_gh(
     scaler,
     settings;
     N = 4096,
-    rng = Random.GLOBAL_RNG,
+    rng::AbstractRNG,
+    G = nothing,
+    S = nothing,
+    P = nothing,
 )
     @assert settings.has_shocks
+    @assert !(G === nothing) "eval_euler_residuals_gh requires G to be provided"
+    @assert !(S === nothing) "eval_euler_residuals_gh requires S to be provided"
+    @assert !(P === nothing) "eval_euler_residuals_gh requires P to be provided"
+
     batch, _ = create_training_batch(
-        getfield(Main, :G),
-        getfield(Main, :S),
+        G,
+        S,
         scaler;
         mode = :rand,
         nsamples = N,
@@ -231,48 +350,67 @@ function eval_euler_residuals_gh(
         P_resid = P_resid,
         settings = settings,
     )
-    a0 = ((batch[1, :] .+ 1.0f0) ./ 2.0f0) .* scaler.a_range .+ scaler.a_min
-    z0 = ((batch[2, :] .+ 1.0f0) ./ 2.0f0) .* scaler.z_range .+ scaler.z_min
+    y0 = ((batch[1, :] .+ 1.0f0) ./ 2.0f0) .* scaler.y_range .+ scaler.y_min
+    w0 = ((batch[2, :] .+ 1.0f0) ./ 2.0f0) .* scaler.w_range .+ scaler.w_min
+    if settings.use_cuda
+        y0 = cu(y0)
+        w0 = cu(w0)
+    end
     out, _ = Lux.apply(model, batch, ps, st)
-    c0 = vec(
-        phi_to_consumption(out[:Φ], cash_on_hand(a0, z0, P_resid, true); min_c = 1.0f-3),
-    )
+    c0 = vec(phi_to_consumption(out[:Φ], w0; min_c = 1.0f-3))
 
-    P = getfield(Main, :P)
-    ρ = Float32(P.ρ)
-    σϵ = Float32(P.σ_shocks)
+    μ = Float32(P_resid.y)
+    z0 = log.(y0) .- μ
+    ρ = Float32(P.ρ_shock)
+    σϵ =
+        settings.sigma_shocks === nothing ? Float32(P.σ_shock) :
+        Float32(settings.sigma_shocks)
     β = Float32(P.β)
     Rg = 1.0f0 + Float32(P.r)
     uprime = U.u_prime
 
-    w0 = cash_on_hand(a0, z0, P_resid, true)
-    EUprime = zeros(Float32, length(a0))
+    EUprime =
+        settings.use_cuda ? cu(zeros(Float32, length(w0))) : zeros(Float32, length(w0))
     @inbounds for k in eachindex(GH10_X)
         εk = GH10_X[k]
         wk = GH10_W[k] / sqrt(pi)
         z1 = @. ρ * z0 + σϵ * εk
+        y1 = exp.(μ .+ z1)
         a1 = @. w0 - c0
-        w1 = cash_on_hand(a1, z1, P_resid, true)
-        X1 = vcat(reshape(a1, 1, :), reshape(z1, 1, :))
-        NX1 = normalize_feature_batch(scaler, X1)
-        out1, _ = Lux.apply(model, NX1, ps, st)
+        w1 = @. Rg * a1 + y1
+        X1 = vcat(reshape(y1, 1, :), reshape(w1, 1, :))
+        normalize_feature_batch!(scaler, X1)
+        out1, _ = Lux.apply(model, X1, ps, st)
         c1 = vec(phi_to_consumption(out1[:Φ], w1; min_c = 1.0f-3))
         EUprime .+= wk .* uprime(c1)
     end
-
     ratio = @. β * Rg * EUprime / uprime(c0)
     resid = abs.(1.0f0 .- ratio)
+
+    # Move back to CPU for aggregation and returning results
+    if settings.use_cuda
+        resid_cpu = Array(resid)
+        w_cpu = Array(w0)
+        y_cpu = Array(y0)
+        c_cpu = Array(c0)
+    else
+        resid_cpu = resid
+        w_cpu = w0
+        y_cpu = y0
+        c_cpu = c0
+    end
+
     stats = (
-        mean = mean(resid),
-        p50 = quantile(resid, 0.5),
-        p95 = quantile(resid, 0.95),
-        max = maximum(resid),
+        mean = mean(resid_cpu),
+        p50 = quantile(resid_cpu, 0.5),
+        p95 = quantile(resid_cpu, 0.95),
+        max = maximum(resid_cpu),
     )
     return (
-        abs_resid = Float32.(resid),
-        w = Float32.(w0),
-        z = Float32.(z0),
-        c = Float32.(c0),
+        abs_resid = Float32.(resid_cpu),
+        w = Float32.(w_cpu),
+        y = Float32.(y_cpu),
+        c = Float32.(c_cpu),
         stats = stats,
     )
 end

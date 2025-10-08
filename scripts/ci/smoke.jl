@@ -39,7 +39,7 @@ function main()
     if isempty(ARGS)
         push!(
             cfgs,
-            joinpath(@__DIR__, "..", "..", "config", "smoke_config", "smoke_config.yaml"),
+            joinpath(@__DIR__, "..", "..", "config", "smoke_config", "smoke_cfg_det.yaml"),
         )
         push!(
             cfgs,
@@ -49,7 +49,7 @@ function main()
                 "..",
                 "config",
                 "smoke_config",
-                "smoke_config_stochastic.yaml",
+                "smoke_cfg_stoch.yaml",
             ),
         )
     else

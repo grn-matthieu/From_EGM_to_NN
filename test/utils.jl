@@ -1,132 +1,135 @@
-const _ConfigLike = Union{AbstractDict,NamedTuple}
+module TestUtils
 
-cfg_has(cfg::_ConfigLike, key::Symbol) =
-    cfg isa NamedTuple ? hasproperty(cfg, key) : haskey(cfg, key)
+using ThesisProject
+const Determinism = ThesisProject.Determinism
+const UtilsConfig = ThesisProject.UtilsConfig
 
-function cfg_has(cfg::_ConfigLike, key::Symbol, rest::Symbol...)
-    cfg_has(cfg, key) || return false
-    return cfg_has(cfg_get(cfg, key), rest...)
-end
+export deterministic_config,
+    stochastic_config, deep_merge, master_rng, build_model_and_method, derive_solver_rng
 
-cfg_get(cfg::_ConfigLike, key::Symbol) = cfg isa NamedTuple ? getfield(cfg, key) : cfg[key]
+const DEFAULT_SEED = 2024
 
-function cfg_get(cfg::_ConfigLike, key::Symbol, rest::Symbol...)
-    return cfg_get(cfg_get(cfg, key), rest...)
-end
+"""Return a reusable `MasterRNG` used across tests."""
+master_rng(seed::Integer = DEFAULT_SEED) = Determinism.make_master_rng(seed)
 
-# --- fixed getdefault ---
+_single(k::Symbol, v) = NamedTuple{(k,)}((v,))
 
-# base case: single key
-function cfg_getdefault(cfg::_ConfigLike, default, key::Symbol)
-    if cfg isa NamedTuple
-        return hasproperty(cfg, key) ? getfield(cfg, key) : default
-    else
-        return get(cfg, key, default)
-    end
-end
-
-# recursive case: multiple keys
-function cfg_getdefault(cfg::_ConfigLike, default, key::Symbol, rest::Symbol...)
-    if cfg_has(cfg, key)
-        return cfg_getdefault(cfg_get(cfg, key), default, rest...)
-    else
-        return default
-    end
-end
-
-# ---------------------------------------
-
-function _cfg_set(cfg::_ConfigLike, key::Symbol, value)
-    if cfg isa NamedTuple
-        return merge(cfg, NamedTuple{(key,)}((value,)))
-    else
-        new_cfg = deepcopy(cfg)
-        new_cfg[key] = value
-        return new_cfg
-    end
-end
-
-function _cfg_set(cfg::_ConfigLike, path::Tuple{Vararg{Symbol}}, value)
-    if length(path) == 1
-        return _cfg_set(cfg, path[1], value)
-    else
-        head = path[1]
-        tail = Base.tail(path)
-        # If the intermediate key is missing, create an empty container of the
-        # same kind (NamedTuple => NamedTuple(), Dict => Dict()) so we can
-        # recursively set deep values. This allows tests to patch nested
-        # configuration paths that don't exist yet (e.g. (:init, :c)).
-        if cfg isa NamedTuple
-            child = hasproperty(cfg, head) ? cfg_get(cfg, head) : NamedTuple()
-        else
-            child = haskey(cfg, head) ? cfg_get(cfg, head) : Dict()
-        end
-        updated = _cfg_set(child, tail, value)
-        return _cfg_set(cfg, head, updated)
-    end
-end
-
-function cfg_patch(cfg::_ConfigLike, updates::Pair...)
-    for (path, value) in updates
-        if path isa Symbol
-            cfg = _cfg_set(cfg, path, value)
-        elseif path isa Tuple{Vararg{Symbol}}
-            cfg = _cfg_set(cfg, path, value)
-        else
-            error("Unsupported config path type $(typeof(path))")
-        end
-    end
-    return cfg
-end
-
-function _cfg_without(cfg::NamedTuple, key::Symbol)
-    keep = Tuple(k for k in keys(cfg) if k != key)
-    values = tuple((getfield(cfg, k) for k in keep)...)
-    return NamedTuple{keep}(values)
-end
-
-function _cfg_without(cfg::AbstractDict, key::Symbol)
-    new_cfg = deepcopy(cfg)
-    delete!(new_cfg, key)
-    return new_cfg
-end
-
-function _cfg_without(cfg::_ConfigLike, path::Tuple{Vararg{Symbol}})
-    if length(path) == 1
-        return _cfg_without(cfg, path[1])
-    else
-        head = path[1]
-        tail = Base.tail(path)
-        child = cfg_get(cfg, head)
-        updated = _cfg_without(child, tail)
-        return _cfg_set(cfg, head, updated)
-    end
-end
-
-cfg_without(cfg::_ConfigLike, key::Symbol) = _cfg_without(cfg, key)
-cfg_without(cfg::_ConfigLike, path::Tuple{Vararg{Symbol}}) = _cfg_without(cfg, path)
-cfg_without(cfg::_ConfigLike, keys::Symbol...) = _cfg_without(cfg, keys)
-
-function is_nondec(x::AbstractVector; tol = 1e-8)
-    n = length(x)
-    @inbounds for i = 1:(n-1)
-        if x[i+1] < x[i] - tol
-            return false
-        end
-    end
-    return true
-end
-
-function is_nondec(x::AbstractMatrix; tol = 1e-8)
-    nrow, ncol = size(x)
-    @inbounds for j = 1:ncol
-        for i = 1:(nrow-1)
-            if x[i+1, j] < x[i, j] - tol
-                return false
+function deep_merge(a::NamedTuple, b::NamedTuple)
+    result = a
+    for key in keys(b)
+        vb = getfield(b, key)
+        if hasproperty(result, key)
+            va = getfield(result, key)
+            if va isa NamedTuple && vb isa NamedTuple
+                result = merge(result, _single(key, deep_merge(va, vb)))
+            else
+                result = merge(result, _single(key, vb))
             end
+        else
+            result = merge(result, _single(key, vb))
         end
     end
-    return true
+    return result
 end
 
-Base.zero(x::NamedTuple) = map(zero, x)
+deep_merge(a::NamedTuple, b) = merge(a, b)
+
+deep_merge(a, b) = b
+
+function _base_solver_block(; method::String = "EGM")
+    return (
+        method = method,
+        tol = 1.0e-5,
+        tol_pol = 1.0e-6,
+        maxit = 400,
+        verbose = false,
+        relax = 0.5,
+        warm_start = :default,
+        egm = (interp_kind = :linear,),
+        time_iteration = (interp_kind = :linear,),
+        projection = (orders = [3], Nval = 24),
+        perturbation = (
+            order = 1,
+            a_bar = nothing,
+            h_a = nothing,
+            h_z = nothing,
+            tol_fit = 1.0e-8,
+            maxit_fit = 20,
+        ),
+        nn = (
+            epochs = 2,
+            batch = 16,
+            lr = 1.0e-3,
+            hid1 = 8,
+            hid2 = 8,
+            samples_per_epoch = 32,
+            objective = :euler_fb_aio,
+            v_h = 0.5,
+            w_min = 0.1,
+            w_max = 4.0,
+            sigma_shocks = nothing,
+            target_loss = 1.0e-2,
+            use_cuda = false,
+        ),
+    )
+end
+
+function deterministic_config(;
+    method::String = "EGM",
+    Na::Int = 21,
+    a_min::Real = 0.0,
+    a_max::Real = 5.0,
+    β::Real = 0.96,
+    σ::Real = 2.0,
+    r::Real = 0.02,
+    y::Real = 1.0,
+    solver_overrides::NamedTuple = NamedTuple(),
+    random_seed::Integer = DEFAULT_SEED,
+    utility_type = :CRRA,
+    shocks::Union{Nothing,NamedTuple} = nothing,
+)
+
+    solver_cfg = _base_solver_block(method = method)
+    solver_cfg = deep_merge(solver_cfg, solver_overrides)
+
+    random_cfg = (seed = UInt64(random_seed), master_rng = master_rng(random_seed))
+
+    cfg = (
+        model = (name = "cs",),
+        params = (β = β, σ = σ, r = r, y = y),
+        grids = (Na = Na, a_min = a_min, a_max = a_max),
+        utility = (u_type = utility_type,),
+        solver = solver_cfg,
+        random = random_cfg,
+    )
+
+    if shocks !== nothing
+        cfg = merge(cfg, (shocks = shocks,))
+    end
+
+    return UtilsConfig.ensure_master_rng(cfg)
+end
+
+function stochastic_config(;
+    method::String = "EGM",
+    shock_overrides::NamedTuple = NamedTuple(),
+    kwargs...,
+)
+    base_shocks =
+        (active = true, method = "tauchen", ρ_shock = 0.9, σ_shock = 0.05, Nz = 3, m = 1.5)
+    shocks = deep_merge(base_shocks, shock_overrides)
+    return deterministic_config(; method = method, shocks = shocks, kwargs...)
+end
+
+function build_model_and_method(cfg::NamedTuple)
+    model = ThesisProject.build_model(cfg)
+    method = ThesisProject.build_method(cfg)
+    return model, method
+end
+
+function derive_solver_rng(cfg::NamedTuple, key)
+    master = cfg.random.master_rng
+    return Determinism.derive_rng(master, key)
+end
+
+end

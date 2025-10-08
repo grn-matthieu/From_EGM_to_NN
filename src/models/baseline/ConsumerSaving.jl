@@ -42,7 +42,7 @@ function build_cs_model(cfg::NamedTuple)
         end
         # If active explicitly true, use shocks. Otherwise check for
         # common shock keys that indicate the user supplied shock specs.
-        keys_present = (:Nz, :σ_shock, :s_shock, :ρ_shock, :method, :m)
+        keys_present = (:Nz, :σ_shock, :ρ_shock, :method, :m)
         if maybe(sc, :active, false)
             return true
         end
@@ -55,6 +55,14 @@ function build_cs_model(cfg::NamedTuple)
     end
 
     shocks = shocks_specified(shocks_cfg) ? discretize(shocks_cfg) : nothing
+
+    # Augment params with shock-specific scalars expected by some solvers (NN)
+    if shocks !== nothing
+        # copy ρ_shock and σ_shock into params as ρ and σ_shock for backward compatibility
+        ρ_shock = maybe(shocks_cfg, :ρ_shock, 0.0)
+        σ_shock = maybe(shocks_cfg, :σ_shock, 0.0)
+        params = merge(params, (ρ_shock = ρ_shock, σ_shock = σ_shock))
+    end
 
     # Utility closure (CRRA)
     σ = params.σ

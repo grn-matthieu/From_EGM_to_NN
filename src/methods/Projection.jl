@@ -10,6 +10,7 @@ using ..ProjectionKernel: solve_projection_det, solve_projection_stoch
 using ..ValueFunction: compute_value_policy
 using ..Determinism: canonicalize_cfg, hash_hex
 using ..UtilsConfig: maybe
+using ..UtilsDiagnostics: mean_abs_error
 export ProjectionMethod
 
 struct ProjectionMethod <: AbstractMethod
@@ -22,15 +23,15 @@ Construct a `ProjectionMethod` using solver options contained in the NamedTuple 
 """
 function build_projection_method(cfg::NamedTuple)
     solver_cfg = cfg.solver
-    grids_cfg = cfg.grids
-    default_orders = [grids_cfg.Na - 1]
+    projection_cfg = solver_cfg.projection
     return ProjectionMethod((
         name = maybe(cfg, :method, solver_cfg.method),
-        tol = maybe(solver_cfg, :tol, 1e-6),
-        maxit = maybe(solver_cfg, :maxit, 1000),
-        verbose = maybe(solver_cfg, :verbose, false),
-        orders = maybe(solver_cfg, :orders, default_orders),
-        Nval = maybe(solver_cfg, :Nval, grids_cfg.Na),
+        tol = solver_cfg.tol,
+        tol_pol = solver_cfg.tol_pol,
+        maxit = solver_cfg.maxit,
+        verbose = solver_cfg.verbose,
+        orders = projection_cfg.orders,
+        Nval = projection_cfg.Nval,
     ))
 end
 function solve(
@@ -51,6 +52,7 @@ function solve(
             g,
             U;
             tol = method.opts.tol,
+            tol_pol = method.opts.tol_pol,
             maxit = method.opts.maxit,
             orders = method.opts.orders,
             Nval = method.opts.Nval,
@@ -61,6 +63,7 @@ function solve(
             S,
             U;
             tol = method.opts.tol,
+            tol_pol = method.opts.tol_pol,
             maxit = method.opts.maxit,
             orders = method.opts.orders,
             Nval = method.opts.Nval,
@@ -69,6 +72,8 @@ function solve(
     ee = sol.resid
     ee_vec = ee isa AbstractMatrix ? vec(maximum(ee, dims = 2)) : ee
     ee_mat = ee isa AbstractMatrix ? ee : nothing
+    ee_mean = ee_mat === nothing ? mean_abs_error(ee_vec) : mean_abs_error(ee_mat)
+    delta_pol = hasproperty(sol, :delta_pol) ? sol.delta_pol : missing
 
     policy = Dict{Symbol,Any}(
         :c => (;
@@ -88,15 +93,21 @@ function solve(
         method = method.opts.name,
         seed = sol.opts.seed,
         runtime = sol.opts.runtime,
+        iterations = sol.iters,
+        mean_ee = ee_mean,
+        delta_pol = delta_pol,
     )
 
     metadata = Dict{Symbol,Any}(
         :iters => sol.iters,
-        :max_it => sol.opts.maxit,
+        :max_it => get(sol.opts, :maxit, missing),
         :converged => sol.converged,
         :max_resid => sol.max_resid,
-        :tol => sol.opts.tol,
-        :order => sol.opts.order,
+        :tol => get(sol.opts, :tol, missing),
+        :order => get(sol.opts, :order, missing),
+        :tol_pol => hasproperty(sol.opts, :tol_pol) ? sol.opts.tol_pol : missing,
+        :delta_pol => delta_pol,
+        :mean_ee => ee_mean,
         :julia_version => string(VERSION),
     )
 

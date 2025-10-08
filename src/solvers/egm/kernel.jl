@@ -8,11 +8,23 @@ module EGMKernel
 
 using ..CommonInterp:
     interp_linear!, interp_pchip!, InterpKind, LinearInterp, MonotoneCubicInterp
-using ..EulerResiduals:
-    euler_resid_det, euler_resid_stoch, euler_resid_det!, euler_resid_stoch!
+using ..EulerResiduals: euler_resid_det!, euler_resid_stoch!, euler_resid_stoch_interp!
+using ..PolicyUtils:
+    clamp_policy!,
+    compute_binding_tolerance,
+    enforce_borrowing_constraint!,
+    enforce_monotone!,
+    enforce_strict_increase!,
+    ensure_minimum!,
+    init_consumption_det,
+    relaxation_step!,
+    rmse_nonbinding,
+    sort_policy_pairs!
+using Printf
 
 export solve_egm_det, solve_egm_stoch
 
+const DEFAULT_BINDING_TOL = 1e-12
 
 """
     solve_egm_det(model_params, model_grids, model_utility; ...)
@@ -26,16 +38,14 @@ function solve_egm_det(
     model_params,
     model_grids,
     model_utility;
-    tol::Real = 1e-8,
+    tol::Real = 1e-4,
     tol_pol::Real = 1e-6,
-    maxit::Int = 500,
+    maxit::Int = 10_000,
     interp_kind::InterpKind = LinearInterp(),
     relax::Real = 0.5,
-    patience::Int = 50,
-    ϵ::Real = 1e-10,
+    verbose::Bool = false,
     c_init = nothing,
 )::NamedTuple
-    # Delegate to interpolation-specialized implementation (preserves public API)
     return solve_egm_det_impl(
         interp_kind,
         model_params,
@@ -45,28 +55,24 @@ function solve_egm_det(
         tol_pol = tol_pol,
         maxit = maxit,
         relax = relax,
-        patience = patience,
-        ϵ = ϵ,
+        verbose = verbose,
         c_init = c_init,
     )
 end
 
-# Fallback in case of unknown interpolation kind
 solve_egm_det_impl(::InterpKind, args...; kwargs...) =
     error("Unknown interpolation kind for EGM (deterministic)")
 
-# Linear interpolation specialized helper
 function solve_egm_det_impl(
-    interp_kind::LinearInterp,
+    ::LinearInterp,
     model_params,
     model_grids,
     model_utility;
-    tol::Real = 1e-8,
+    tol::Real = 1e-4,
     tol_pol::Real = 1e-6,
-    maxit::Int = 500,
+    maxit::Int = 10_000,
     relax::Real = 0.5,
-    patience::Int = 50,
-    ϵ::Real = 1e-10,
+    verbose::Bool = false,
     c_init = nothing,
 )::NamedTuple
     start_time = time_ns()
@@ -75,57 +81,68 @@ function solve_egm_det_impl(
     a_min = model_grids[:a].min
     a_max = model_grids[:a].max
     Na = model_grids[:a].N
+    bind_tol = compute_binding_tolerance(a_min, a_max, Na; floor = DEFAULT_BINDING_TOL)
 
-    βR = model_params.β * (1 + model_params.r)
-    R = (1 + model_params.r)
+    β = model_params.β
+    R = 1 + model_params.r
+    σ = model_params.σ
     cmin = 1e-12
 
-    # Initial guess for resources and consumption
-    resources = @. R * a_grid - a_min + model_params.y
-    c = c_init === nothing ? clamp.(0.5 .* resources, cmin, resources) : copy(c_init)
+    c = init_consumption_det(a_grid, a_min, R, model_params.y; c_init = c_init, cmin = cmin)
 
-    # Buffers
-    cnext = similar(c)
     cnew = similar(c)
+    cnext = similar(c)
+    resid = similar(c)
     a_next = similar(c)
+    cold = similar(c)
+    c_prime = similar(c)
+    c_endo = similar(c)
+    a_endo = similar(c)
+    a_sorted = similar(a_endo)
+    c_sorted = similar(c_endo)
 
     converged = false
     iters = 0
     max_resid = Inf
-    best_resid = Inf
-    no_progress = 0
-    resid = similar(c)
+    Δpol = Inf
 
     for it = 1:maxit
         iters = it
 
-        @. a_next = model_params.y + R * a_grid - c
-        @. a_next = clamp(a_next, a_min, a_max)
+        copyto!(cold, c)
+        copyto!(c_prime, cold)
+        ensure_minimum!(c_prime, cmin)
 
-        # Linear interpolation
+        @. c_endo = model_utility.u_prime_inv(β * R * c_prime^(-σ))
+        @. a_endo = (a_grid - model_params.y + c_endo) / R
+
+        enforce_borrowing_constraint!(
+            a_endo,
+            c_endo,
+            a_min,
+            model_params.y,
+            R,
+            a_grid;
+            cmin = cmin,
+        )
+        sort_policy_pairs!(a_sorted, c_sorted, a_endo, c_endo)
+
+        interp_linear!(cnew, a_sorted, c_sorted, a_grid)
+        cmax = @. model_params.y + R * a_grid - a_min
+        clamp_policy!(cnew, cmin, cmax)
+
+        Δpol = relaxation_step!(c, cold, cnew, relax)
+
+        @. a_next = clamp(model_params.y + R * a_grid - c, a_min, a_max)
         interp_linear!(cnext, a_grid, c, a_next)
-
-        @. cnext = max(cnext, cmin)
-
-        @. cnew = model_utility.u_prime_inv(βR * cnext .^ (-model_params.σ))
-        cmax = @. model_params.y + R * a_grid - a_min
-        @. cnew = clamp(cnew, cmin, cmax)
-
-        Δpol = maximum(abs.(c - cnew))
-        c .= (1 - relax) .* c .+ relax .* cnew
-
+        ensure_minimum!(cnext, cmin)
         euler_resid_det!(resid, model_params, c, cnext)
-        max_resid = maximum(resid[min(2, end):end])
 
-        if (best_resid - max_resid < ϵ) && (Δpol < ϵ)
-            no_progress += 1
-        else
-            no_progress = 0
-            best_resid = max_resid
-        end
+        max_resid = rmse_nonbinding(resid, a_next, a_min, bind_tol)
 
-        if no_progress ≥ patience
-            break
+        if verbose && it % 10 == 0
+            @printf("[EGM det linear] it=%d rmse=%.6e Δpol=%.6e\n", it, max_resid, Δpol)
+            flush(stdout)
         end
 
         if max_resid < tol && Δpol < tol_pol
@@ -134,43 +151,50 @@ function solve_egm_det_impl(
         end
     end
 
-    # Final consistency
-    @. a_next = R * a_grid + model_params.y - c
-    @. a_next = clamp(a_next, a_min, a_max)
-    # Final interpolation consistency (linear)
+    @. a_next = clamp(R * a_grid + model_params.y - c, a_min, a_max)
     interp_linear!(cnext, a_grid, c, a_next)
-    @. cnext = max(cnext, cmin)
+    ensure_minimum!(cnext, cmin)
     euler_resid_det!(resid, model_params, c, cnext)
-    max_resid = maximum(resid[min(2, end):end])
+    max_resid = rmse_nonbinding(resid, a_next, a_min, bind_tol)
 
     runtime = (time_ns() - start_time) / 1e9
     opts = (;
-        tol = tol,
-        tol_pol = tol_pol,
-        maxit = maxit,
-        interp_kind = interp_kind,
-        relax = relax,
-        patience = patience,
-        ϵ = ϵ,
+        tol,
+        tol_pol,
+        maxit,
+        interp_kind = LinearInterp(),
+        relax,
+        verbose,
+        resid_metric = :rmse,
         seed = nothing,
-        runtime = runtime,
+        runtime,
     )
 
-    return (; a_grid, c, a_next, resid, iters, converged, max_resid, model_params, opts)
+    return (;
+        a_grid,
+        c,
+        a_next,
+        resid,
+        iters,
+        converged,
+        max_resid,
+        rmse = max_resid,
+        model_params,
+        opts,
+        delta_pol = Δpol,
+    )
 end
 
-# Monotone cubic (PCHIP) specialized helper
 function solve_egm_det_impl(
-    interp_kind::MonotoneCubicInterp,
+    ::MonotoneCubicInterp,
     model_params,
     model_grids,
     model_utility;
-    tol::Real = 1e-8,
+    tol::Real = 1e-4,
     tol_pol::Real = 1e-6,
     maxit::Int = 500,
     relax::Real = 0.5,
-    patience::Int = 50,
-    ϵ::Real = 1e-10,
+    verbose::Bool = false,
     c_init = nothing,
 )::NamedTuple
     start_time = time_ns()
@@ -179,64 +203,69 @@ function solve_egm_det_impl(
     a_min = model_grids[:a].min
     a_max = model_grids[:a].max
     Na = model_grids[:a].N
+    bind_tol = compute_binding_tolerance(a_min, a_max, Na; floor = DEFAULT_BINDING_TOL)
 
-    βR = model_params.β * (1 + model_params.r)
-    R = (1 + model_params.r)
+    β = model_params.β
+    R = 1 + model_params.r
+    σ = model_params.σ
     cmin = 1e-12
 
-    # Initial guess for resources and consumption
-    resources = @. R * a_grid - a_min + model_params.y
-    c = c_init === nothing ? clamp.(0.5 .* resources, cmin, resources) : copy(c_init)
+    c = init_consumption_det(a_grid, a_min, R, model_params.y; c_init = c_init, cmin = cmin)
 
-    # Buffers
-    cnext = similar(c)
     cnew = similar(c)
+    cnext = similar(c)
+    resid = similar(c)
     a_next = similar(c)
-
+    cold = similar(c)
+    c_prime = similar(c)
+    c_endo = similar(c)
+    a_endo = similar(c)
+    a_sorted = similar(a_endo)
+    c_sorted = similar(c_endo)
     converged = false
     iters = 0
     max_resid = Inf
-    best_resid = Inf
-    no_progress = 0
-    resid = similar(c)
+    Δpol = Inf
 
     for it = 1:maxit
         iters = it
 
-        @. a_next = model_params.y + R * a_grid - c
-        @. a_next = clamp(a_next, a_min, a_max)
+        copyto!(cold, c)
+        copyto!(c_prime, cold)
+        ensure_minimum!(c_prime, cmin)
 
-        # Monotone cubic interpolation
-        interp_pchip!(cnext, a_grid, c, a_next)
+        @. c_endo = model_utility.u_prime_inv(β * R * c_prime^(-σ))
+        @. a_endo = (a_grid - model_params.y + c_endo) / R
 
-        @. cnext = max(cnext, cmin)
+        enforce_borrowing_constraint!(
+            a_endo,
+            c_endo,
+            a_min,
+            model_params.y,
+            R,
+            a_grid;
+            cmin = cmin,
+        )
+        sort_policy_pairs!(a_sorted, c_sorted, a_endo, c_endo)
+        enforce_strict_increase!(a_sorted)
 
-        @. cnew = model_utility.u_prime_inv(βR * cnext .^ (-model_params.σ))
+        interp_pchip!(cnew, a_sorted, c_sorted, a_grid)
         cmax = @. model_params.y + R * a_grid - a_min
-        @. cnew = clamp(cnew, cmin, cmax)
+        clamp_policy!(cnew, cmin, cmax)
+        enforce_monotone!(cnew)
 
-        # Monotone enforcement under PCHIP
-        @inbounds for i = 2:Na
-            if cnew[i] < cnew[i-1]
-                cnew[i] = cnew[i-1] + 1e-12
-            end
-        end
+        Δpol = relaxation_step!(c, cold, cnew, relax)
 
-        Δpol = maximum(abs.(c - cnew))
-        c .= (1 - relax) .* c .+ relax .* cnew
-
+        @. a_next = clamp(model_params.y + R * a_grid - c, a_min, a_max)
+        interp_pchip!(cnext, a_grid, c, a_next)
+        ensure_minimum!(cnext, cmin)
         euler_resid_det!(resid, model_params, c, cnext)
-        max_resid = maximum(resid[min(2, end):end])
 
-        if (best_resid - max_resid < ϵ) && (Δpol < ϵ)
-            no_progress += 1
-        else
-            no_progress = 0
-            best_resid = max_resid
-        end
+        max_resid = rmse_nonbinding(resid, a_next, a_min, bind_tol)
 
-        if no_progress ≥ patience
-            break
+        if verbose && it % 10 == 0
+            @printf("[EGM det pchip] it=%d rmse=%.6e Δpol=%.6e\n", it, max_resid, Δpol)
+            flush(stdout)
         end
 
         if max_resid < tol && Δpol < tol_pol
@@ -245,31 +274,39 @@ function solve_egm_det_impl(
         end
     end
 
-    # Final consistency
-    @. a_next = R * a_grid + model_params.y - c
-    @. a_next = clamp(a_next, a_min, a_max)
-    # Final interpolation consistency (PCHIP)
+    @. a_next = clamp(R * a_grid + model_params.y - c, a_min, a_max)
     interp_pchip!(cnext, a_grid, c, a_next)
-    @. cnext = max(cnext, cmin)
+    ensure_minimum!(cnext, cmin)
     euler_resid_det!(resid, model_params, c, cnext)
-    max_resid = maximum(resid[min(2, end):end])
+    max_resid = rmse_nonbinding(resid, a_next, a_min, bind_tol)
 
     runtime = (time_ns() - start_time) / 1e9
     opts = (;
-        tol = tol,
-        tol_pol = tol_pol,
-        maxit = maxit,
-        interp_kind = interp_kind,
-        relax = relax,
-        patience = patience,
-        ϵ = ϵ,
+        tol,
+        tol_pol,
+        maxit,
+        interp_kind = MonotoneCubicInterp(),
+        relax,
+        verbose,
+        resid_metric = :rmse,
         seed = nothing,
-        runtime = runtime,
+        runtime,
     )
 
-    return (; a_grid, c, a_next, resid, iters, converged, max_resid, model_params, opts)
+    return (;
+        a_grid,
+        c,
+        a_next,
+        resid,
+        iters,
+        converged,
+        max_resid,
+        rmse = max_resid,
+        model_params,
+        opts,
+        delta_pol = Δpol,
+    )
 end
-
 
 """
     solve_egm_stoch(model_params, model_grids, model_shocks, model_utility; ...)
@@ -283,17 +320,14 @@ function solve_egm_stoch(
     model_grids,
     model_shocks,
     model_utility;
-    tol::Real = 1e-8,
+    tol::Real = 1e-4,
     tol_pol::Real = 1e-6,
     maxit::Int = 1000,
     interp_kind::InterpKind = LinearInterp(),
     relax::Real = 0.5,
-    ϵ::Real = 1e-10,
-    patience::Int = 50,
+    verbose::Bool = false,
     c_init = nothing,
 )::NamedTuple
-
-    # Delegate to interpolation-specialized implementation (preserves public API)
     return solve_egm_stoch_impl(
         interp_kind,
         model_params,
@@ -304,38 +338,34 @@ function solve_egm_stoch(
         tol_pol = tol_pol,
         maxit = maxit,
         relax = relax,
-        ϵ = ϵ,
-        patience = patience,
+        verbose = verbose,
         c_init = c_init,
     )
 end
 
-# Fallback in case of unknown interpolation kind
 solve_egm_stoch_impl(::InterpKind, args...; kwargs...) =
     error("Unknown interpolation kind for EGM (stochastic)")
 
-# Linear interpolation specialized helper
 function solve_egm_stoch_impl(
-    interp_kind::LinearInterp,
+    ::LinearInterp,
     model_params,
     model_grids,
     model_shocks,
     model_utility;
-    tol::Real = 1e-8,
+    tol::Real = 1e-4,
     tol_pol::Real = 1e-6,
     maxit::Int = 1000,
     relax::Real = 0.5,
-    ϵ::Real = 1e-10,
-    patience::Int = 50,
+    verbose::Bool = false,
     c_init = nothing,
 )::NamedTuple
-
     start_time = time_ns()
 
     a_grid = model_grids[:a].grid
     a_min = model_grids[:a].min
     a_max = model_grids[:a].max
     Na = model_grids[:a].N
+    bind_tol = compute_binding_tolerance(a_min, a_max, Na; floor = DEFAULT_BINDING_TOL)
 
     z_grid = model_shocks.zgrid
     Π = model_shocks.Π
@@ -346,80 +376,94 @@ function solve_egm_stoch_impl(
     R = 1 + model_params.r
     cmin = 1e-12
 
+    c = c_init === nothing ? fill(1.0, Na, Nz) : copy(c_init)
+    cold = similar(c)
+    cnew = similar(c)
+    a_next = similar(c)
+    resid_mat = similar(c)
+    EUprime = similar(view(c, :, 1))
+    c_endo = similar(EUprime)
+    a_endo = similar(EUprime)
+    a_sorted = similar(EUprime)
+    c_sorted = similar(EUprime)
+    cmax = similar(EUprime)
+
     converged = false
     iters = 0
     max_resid = Inf
-    best_resid = Inf
-    no_progress = 0
-
-    c = c_init === nothing ? fill(1.0, Na, Nz) : copy(c_init)
-    a_star = similar(c)
-    cnext = similar(a_grid)
-    cnew = similar(c)
-    a_next = similar(c)
-    EUprime = similar(a_grid)
-    resid_mat = similar(c)
+    Δpol = Inf
 
     for it = 1:maxit
         iters = it
+        copyto!(cold, c)
 
         for (j, z) in enumerate(z_grid)
             y = exp(z)
-
-            @. a_star[:, j] = R * a_grid + y - c[:, j]
-            @. a_star[:, j] = clamp(a_star[:, j], a_min, a_max)
-
             fill!(EUprime, 0.0)
-            for (jp, _) in enumerate(z_grid)
-                # Linear interpolation across future states
-                interp_linear!(cnext, a_grid, view(c, :, jp), view(a_star, :, j))
-                @. cnext = max(cnext, cmin)
-                @. EUprime += Π[j, jp] * (cnext^(-σ))
+            for jp = 1:Nz
+                c_future = view(cold, :, jp)
+                @. EUprime += Π[j, jp] * (max(c_future, cmin)^(-σ))
             end
 
-            @. cnew[:, j] = ((β * R) * EUprime)^(-1 / σ)
-            cmax = @. y + R * a_grid - a_min
-            @. cnew[:, j] = clamp(cnew[:, j], cmin, cmax)
+            @. c_endo = model_utility.u_prime_inv(β * R * EUprime)
+            @. a_endo = (a_grid - y + c_endo) / R
 
-            @. a_next[:, j] = R * a_grid + y - cnew[:, j]
-            @. a_next[:, j] = clamp(a_next[:, j], a_min, a_max)
+            enforce_borrowing_constraint!(a_endo, c_endo, a_min, y, R, a_grid; cmin = cmin)
+            sort_policy_pairs!(a_sorted, c_sorted, a_endo, c_endo)
+
+            interp_linear!(view(cnew, :, j), a_sorted, c_sorted, a_grid)
+            @. cmax = y + R * a_grid - a_min
+            clamp_policy!(view(cnew, :, j), cmin, cmax)
         end
 
-        Δpol = maximum(abs.(c - cnew))
-        @. c = (1 - relax) * c + relax * cnew
+        Δpol = relaxation_step!(c, cold, cnew, relax)
 
-        euler_resid_stoch!(resid_mat, model_params, a_grid, z_grid, Π, c)
-        max_resid = maximum(resid_mat[min(2, end):end, :])
+        for (j, z) in enumerate(z_grid)
+            y = exp(z)
+            @views @. a_next[:, j] = clamp(R * a_grid + y - c[:, j], a_min, a_max)
+        end
+
+        euler_resid_stoch_interp!(
+            resid_mat,
+            model_params,
+            a_grid,
+            z_grid,
+            Π,
+            c,
+            LinearInterp(),
+        )
+
+        max_resid = rmse_nonbinding(resid_mat, a_next, a_min, bind_tol)
+
+        if verbose && it % 10 == 0
+            @printf("[EGM stoch linear] it=%d rmse=%.6e Δpol=%.6e\n", it, max_resid, Δpol)
+            flush(stdout)
+        end
 
         if max_resid < tol && Δpol < tol_pol
             converged = true
             break
         end
-
-        if best_resid - max_resid < ϵ
-            no_progress += 1
-        else
-            no_progress = 0
-            best_resid = max_resid
-        end
-
-        if no_progress ≥ patience
-            break
-        end
     end
-    euler_resid_stoch!(resid_mat, model_params, a_grid, z_grid, Π, c)
+
+    for (j, z) in enumerate(z_grid)
+        y = exp(z)
+        @views @. a_next[:, j] = clamp(R * a_grid + y - c[:, j], a_min, a_max)
+    end
+
+    euler_resid_stoch_interp!(resid_mat, model_params, a_grid, z_grid, Π, c, LinearInterp())
+    max_resid = rmse_nonbinding(resid_mat, a_next, a_min, bind_tol)
 
     runtime = (time_ns() - start_time) / 1e9
     opts = (;
-        tol = tol,
-        tol_pol = tol_pol,
-        maxit = maxit,
-        interp_kind = interp_kind,
-        relax = relax,
-        patience = patience,
-        ϵ = ϵ,
+        tol,
+        tol_pol,
+        maxit,
+        interp_kind = LinearInterp(),
+        relax,
+        verbose,
         seed = nothing,
-        runtime = runtime,
+        runtime,
     )
 
     return (;
@@ -433,31 +477,30 @@ function solve_egm_stoch_impl(
         max_resid,
         model_params,
         opts,
+        delta_pol = Δpol,
     )
 end
 
-# Monotone cubic (PCHIP) specialized helper
 function solve_egm_stoch_impl(
-    interp_kind::MonotoneCubicInterp,
+    ::MonotoneCubicInterp,
     model_params,
     model_grids,
     model_shocks,
     model_utility;
-    tol::Real = 1e-8,
+    tol::Real = 1e-4,
     tol_pol::Real = 1e-6,
     maxit::Int = 1000,
     relax::Real = 0.5,
-    ϵ::Real = 1e-10,
-    patience::Int = 50,
+    verbose::Bool = false,
     c_init = nothing,
 )::NamedTuple
-
     start_time = time_ns()
 
     a_grid = model_grids[:a].grid
     a_min = model_grids[:a].min
     a_max = model_grids[:a].max
     Na = model_grids[:a].N
+    bind_tol = compute_binding_tolerance(a_min, a_max, Na; floor = DEFAULT_BINDING_TOL)
 
     z_grid = model_shocks.zgrid
     Π = model_shocks.Π
@@ -468,86 +511,108 @@ function solve_egm_stoch_impl(
     R = 1 + model_params.r
     cmin = 1e-12
 
+    c = c_init === nothing ? fill(1.0, Na, Nz) : copy(c_init)
+    cold = similar(c)
+    cnew = similar(c)
+    a_next = similar(c)
+    resid_mat = similar(c)
+    EUprime = similar(view(c, :, 1))
+    c_endo = similar(EUprime)
+    a_endo = similar(EUprime)
+    a_sorted = similar(EUprime)
+    c_sorted = similar(EUprime)
+    cmax = similar(EUprime)
+
     converged = false
     iters = 0
     max_resid = Inf
-    best_resid = Inf
-    no_progress = 0
-
-    c = c_init === nothing ? fill(1.0, Na, Nz) : copy(c_init)
-    a_star = similar(c)
-    cnext = similar(a_grid)
-    cnew = similar(c)
-    a_next = similar(c)
-    EUprime = similar(a_grid)
-    resid_mat = similar(c)
+    Δpol = Inf
 
     for it = 1:maxit
         iters = it
+        copyto!(cold, c)
 
         for (j, z) in enumerate(z_grid)
             y = exp(z)
-
-            @. a_star[:, j] = R * a_grid + y - c[:, j]
-            @. a_star[:, j] = clamp(a_star[:, j], a_min, a_max)
-
             fill!(EUprime, 0.0)
-            for (jp, _) in enumerate(z_grid)
-                # Monotone cubic interpolation across future states
-                interp_pchip!(cnext, a_grid, view(c, :, jp), view(a_star, :, j))
-                @. cnext = max(cnext, cmin)
-                @. EUprime += Π[j, jp] * (cnext^(-σ))
+            for jp = 1:Nz
+                c_future = view(cold, :, jp)
+                @. EUprime += Π[j, jp] * (max(c_future, cmin)^(-σ))
             end
 
-            @. cnew[:, j] = ((β * R) * EUprime)^(-1 / σ)
-            cmax = @. y + R * a_grid - a_min
-            @. cnew[:, j] = clamp(cnew[:, j], cmin, cmax)
+            @. c_endo = model_utility.u_prime_inv(β * R * EUprime)
+            @. a_endo = (a_grid - y + c_endo) / R
 
-            @. a_next[:, j] = R * a_grid + y - cnew[:, j]
-            @. a_next[:, j] = clamp(a_next[:, j], a_min, a_max)
+            enforce_borrowing_constraint!(a_endo, c_endo, a_min, y, R, a_grid; cmin = cmin)
+            sort_policy_pairs!(a_sorted, c_sorted, a_endo, c_endo)
+            enforce_strict_increase!(a_sorted)
+            enforce_monotone!(c_sorted)
 
-            @inbounds for i = 2:Na
-                if cnew[i, j] < cnew[i-1, j]
-                    cnew[i, j] = cnew[i-1, j] + 1e-12
-                end
-            end
+            column = view(cnew, :, j)
+            interp_pchip!(column, a_sorted, c_sorted, a_grid)
+
+            @. cmax = y + R * a_grid - a_min
+            clamp_policy!(column, cmin, cmax)
+            enforce_monotone!(column)
         end
 
-        Δpol = maximum(abs.(c - cnew))
-        @. c = (1 - relax) * c + relax * cnew
+        Δpol = relaxation_step!(c, cold, cnew, relax)
 
-        euler_resid_stoch!(resid_mat, model_params, a_grid, z_grid, Π, c)
-        max_resid = maximum(resid_mat[min(2, end):end, :])
+        for (j, z) in enumerate(z_grid)
+            y = exp(z)
+            @views @. a_next[:, j] = clamp(R * a_grid + y - c[:, j], a_min, a_max)
+        end
+
+        euler_resid_stoch_interp!(
+            resid_mat,
+            model_params,
+            a_grid,
+            z_grid,
+            Π,
+            c,
+            MonotoneCubicInterp(),
+        )
+
+        max_resid = rmse_nonbinding(resid_mat, a_next, a_min, bind_tol)
+
+        if verbose && it % 10 == 0
+            @printf("[EGM stoch pchip] it=%d rmse=%.6e Δpol=%.6e\n", it, max_resid, Δpol)
+            flush(stdout)
+        end
 
         if max_resid < tol && Δpol < tol_pol
             converged = true
             break
         end
-
-        if best_resid - max_resid < ϵ
-            no_progress += 1
-        else
-            no_progress = 0
-            best_resid = max_resid
-        end
-
-        if no_progress ≥ patience
-            break
-        end
     end
-    euler_resid_stoch!(resid_mat, model_params, a_grid, z_grid, Π, c)
+
+    for (j, z) in enumerate(z_grid)
+        y = exp(z)
+        @views @. a_next[:, j] = clamp(R * a_grid + y - c[:, j], a_min, a_max)
+    end
+
+    euler_resid_stoch_interp!(
+        resid_mat,
+        model_params,
+        a_grid,
+        z_grid,
+        Π,
+        c,
+        MonotoneCubicInterp(),
+    )
+    max_resid = rmse_nonbinding(resid_mat, a_next, a_min, bind_tol)
 
     runtime = (time_ns() - start_time) / 1e9
     opts = (;
-        tol = tol,
-        tol_pol = tol_pol,
-        maxit = maxit,
-        interp_kind = interp_kind,
-        relax = relax,
-        patience = patience,
-        ϵ = ϵ,
+        tol,
+        tol_pol,
+        maxit,
+        interp_kind = MonotoneCubicInterp(),
+        relax,
+        verbose,
+        resid_metric = :rmse,
         seed = nothing,
-        runtime = runtime,
+        runtime,
     )
 
     return (;
@@ -559,8 +624,10 @@ function solve_egm_stoch_impl(
         iters,
         converged,
         max_resid,
+        rmse = max_resid,
         model_params,
         opts,
+        delta_pol = Δpol,
     )
 end
 

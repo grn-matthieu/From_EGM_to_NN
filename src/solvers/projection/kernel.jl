@@ -6,36 +6,36 @@ the consumption-saving model.
 """
 module ProjectionKernel
 
-using ..Chebyshev: chebyshev_basis, chebyshev_nodes
+using ..Chebyshev: chebyshev_basis, gauss_lobatto_nodes
 using ..ProjectionCoefficients: solve_coefficients
 using ..EulerResiduals:
     euler_resid_det, euler_resid_stoch, euler_resid_det_grid, euler_resid_stoch_grid
 using ..CommonInterp: interp_pchip!
+using ..PolicyUtils:
+    clamp_policy!, compute_binding_tolerance, init_consumption_det, rmse_nonbinding
+using ..CommonValidators: is_nondec
 
 export solve_projection_det, solve_projection_stoch
 
 const Β_SYM = Symbol(Char(0x03B2))
 const PI_TRANSITION_SYM = Symbol(Char(0x03A0))
+const DEFAULT_BINDING_TOL = 1e-12
+const MAX_CHEBYSHEV_DEGREE = 15
+const MAX_COLLOCATION_POINTS = MAX_CHEBYSHEV_DEGREE + 1
 
-# -----------------------------------------------------------------------------
-# Utilities
-# -----------------------------------------------------------------------------
-
-@inline function is_nondec(x::AbstractVector{<:Real}; tol::Real = 1e-12)
-    @inbounds for i = 1:(length(x)-1)
-        x[i+1] < x[i] - tol && return false
-    end
-    return true
+@inline function clamp_orders(orders::AbstractVector{Int}, max_order::Int)
+    return clamp.(orders, 0, max_order)
 end
 
-@inline function is_nondec(x::AbstractMatrix{<:Real}; tol::Real = 1e-12)
-    nrow, ncol = size(x)
-    @inbounds for j = 1:ncol
-        for i = 1:(nrow-1)
-            x[i+1, j] < x[i, j] - tol && return false
-        end
+@inline function gauss_lobatto_or_midpoint(N::Int, a_min::Real, a_max::Real)
+    if N <= 0
+        return Float64[]
+    elseif N == 1
+        midpoint = (a_min + a_max) / 2
+        return fill(midpoint, 1)
+    else
+        return gauss_lobatto_nodes(N, a_min, a_max)
     end
-    return true
 end
 
 # -----------------------------------------------------------------------------
@@ -51,22 +51,24 @@ function solve_projection_det(
     orders::AbstractVector{Int} = Int[],
     Nval::Int = model_grids[:a].N,
     λ::Real = 0.0,
+    tol_pol::Real = tol,
 )::NamedTuple
     start_time = time_ns()
 
     a_min = model_grids[:a].min
     a_max = model_grids[:a].max
-    Na = model_grids[:a].N
-    a_grid = chebyshev_nodes(Na, a_min, a_max)
+    Na = clamp(model_grids[:a].N, 2, MAX_COLLOCATION_POINTS)
+    a_grid = gauss_lobatto_nodes(Na, a_min, a_max)
     a_out = model_grids[:a].grid
+    bind_tol = compute_binding_tolerance(a_min, a_max, Na; floor = DEFAULT_BINDING_TOL)
     β = getproperty(model_params, Β_SYM)
     income = model_params.y
     R = 1 + model_params.r
 
-    candidate_orders = isempty(orders) ? Int[Na-1] : orders
+    candidate_orders = isempty(orders) ? Int[Na-1] : clamp_orders(orders, Na - 1)
     max_order = maximum(candidate_orders)
 
-    a_val = chebyshev_nodes(Nval, a_min, a_max)
+    a_val = gauss_lobatto_or_midpoint(Nval, a_min, a_max)
     B_cache = chebyshev_basis(a_grid, max_order, a_min, a_max)
     B_val_cache = chebyshev_basis(a_val, max_order, a_min, a_max)
     B_out_cache = chebyshev_basis(a_out, max_order, a_min, a_max)
@@ -80,6 +82,7 @@ function solve_projection_det(
     best_iters = 0
     best_converged = false
     best_order = candidate_orders[1]
+    best_delta = nothing
 
     cmin = 1e-12
 
@@ -87,7 +90,7 @@ function solve_projection_det(
 
     for order in candidate_orders
         B = B_cache[:, 1:(order+1)]
-        c = clamp.(0.5 .* available_grid, cmin, available_grid)
+        c = init_consumption_det(a_grid, a_min, R, income; cmin = cmin)
         coeffs = solve_coefficients(B, c; λ = λ)
         a_next = similar(c)
         c_next = similar(c)
@@ -95,20 +98,19 @@ function solve_projection_det(
         converged = false
         iters = 0
 
+        last_delta = Inf
         for it = 1:maxit
             iters = it
             @. a_next = clamp(R * a_grid + income - c, a_min, a_max)
             Bnext = chebyshev_basis(a_next, order, a_min, a_max)
             c_next .= Bnext * coeffs
-            @. c_new = clamp(
-                model_utility.u_prime_inv(β * R * model_utility.u_prime(c_next)),
-                cmin,
-                available_grid,
-            )
+            c_new .= model_utility.u_prime_inv(β * R * model_utility.u_prime(c_next))
+            clamp_policy!(c_new, cmin, available_grid)
             coeffs = solve_coefficients(B, c_new; λ = λ)
             delta = maximum(abs.(c_new .- c))
+            last_delta = delta
             c .= c_new
-            if delta < tol
+            if delta < tol_pol
                 converged = true
                 break
             end
@@ -118,7 +120,8 @@ function solve_projection_det(
         B_val = B_val_cache[:, 1:(order+1)]
         c_val = B_val * coeffs
         resid_val = euler_resid_det_grid(model_params, a_val, c_val)
-        max_resid_val = maximum(resid_val[min(2, end):end])
+        a_next_val = clamp.(R .* a_val .+ income .- c_val, a_min, a_max)
+        max_resid_val = rmse_nonbinding(resid_val, a_next_val, a_min, bind_tol)
 
         if max_resid_val < best_val_resid
             best_val_resid = max_resid_val
@@ -126,10 +129,11 @@ function solve_projection_det(
             best_c = copy(c)
             best_a_next = copy(a_next)
             best_resid = euler_resid_det_grid(model_params, a_grid, c)
-            best_max_resid = maximum(best_resid[min(2, end):end])
+            best_max_resid = rmse_nonbinding(best_resid, best_a_next, a_min, bind_tol)
             best_iters = iters
             best_converged = converged
             best_order = order
+            best_delta = last_delta
         end
     end
 
@@ -140,10 +144,19 @@ function solve_projection_det(
     end
     a_next_out = clamp.(R .* a_out .+ income .- c_out, a_min, a_max)
     resid_out = euler_resid_det_grid(model_params, a_out, c_out)
-    max_resid_out = maximum(resid_out[min(2, end):end])
+    max_resid_out = rmse_nonbinding(resid_out, a_next_out, a_min, bind_tol)
 
     runtime = (time_ns() - start_time) / 1e9
-    opts = (; tol, maxit, order = best_order, runtime, seed = nothing)
+    # include policy tolerance in opts
+    opts = (;
+        tol,
+        tol_pol,
+        maxit,
+        order = best_order,
+        runtime,
+        seed = nothing,
+        resid_metric = :rmse,
+    )
 
     return (
         a_grid = a_out,
@@ -153,8 +166,11 @@ function solve_projection_det(
         iters = best_iters,
         converged = best_converged,
         max_resid = max_resid_out,
+        rmse = max_resid_out,
+        model_params = model_params,
         coeffs = best_coeffs,
         opts = opts,
+        delta_pol = best_delta,
     )
 end
 
@@ -172,15 +188,17 @@ function solve_projection_stoch(
     orders::AbstractVector{Int} = Int[],
     Nval::Int = model_grids[:a].N,
     λ::Real = 0.0,
+    tol_pol::Real = tol,
 )::NamedTuple
     start_time = time_ns()
 
     a_min = model_grids[:a].min
     a_max = model_grids[:a].max
-    Na = model_grids[:a].N
-    a_grid = chebyshev_nodes(Na, a_min, a_max)
+    Na = clamp(model_grids[:a].N, 2, MAX_COLLOCATION_POINTS)
+    a_grid = gauss_lobatto_nodes(Na, a_min, a_max)
     a_out = model_grids[:a].grid
-    a_val = chebyshev_nodes(Nval, a_min, a_max)
+    a_val = gauss_lobatto_or_midpoint(Nval, a_min, a_max)
+    bind_tol = compute_binding_tolerance(a_min, a_max, Na; floor = DEFAULT_BINDING_TOL)
 
     z_grid = model_shocks.zgrid
     transition = getproperty(model_shocks, PI_TRANSITION_SYM)
@@ -189,7 +207,7 @@ function solve_projection_stoch(
     β = getproperty(model_params, Β_SYM)
     R = 1 + model_params.r
 
-    candidate_orders = isempty(orders) ? Int[Na-1] : orders
+    candidate_orders = isempty(orders) ? Int[Na-1] : clamp_orders(orders, Na - 1)
     max_order = maximum(candidate_orders)
 
     B_cache = chebyshev_basis(a_grid, max_order, a_min, a_max)
@@ -205,16 +223,21 @@ function solve_projection_stoch(
     best_iters = 0
     best_converged = false
     best_order = candidate_orders[1]
+    best_delta = nothing
 
     cmin = 1e-12
+
+    available = similar(a_grid)
 
     for order in candidate_orders
         B = B_cache[:, 1:(order+1)]
         c = Matrix{Float64}(undef, Na, Nz)
         for j = 1:Nz
             income = exp(z_grid[j])
-            available = income .+ R .* a_grid .- a_min
-            @views @. c[:, j] = clamp(0.5 * available, cmin, available)
+            @. available = income + R * a_grid - a_min
+            col = view(c, :, j)
+            @. col = 0.5 * available
+            clamp_policy!(col, cmin, available)
         end
 
         coeffs = solve_coefficients(B, c; λ = λ)
@@ -225,6 +248,7 @@ function solve_projection_stoch(
         converged = false
         iters = 0
 
+        last_delta = Inf
         for it = 1:maxit
             iters = it
             for j = 1:Nz
@@ -236,20 +260,20 @@ function solve_projection_stoch(
                     tmp .= Bnext * view(coeffs, :, jp)
                     @. expected_marginal += transition[j, jp] * model_utility.u_prime(tmp)
                 end
-                available = income .+ R .* a_grid .- a_min
-                @views @. c_new[:, j] = clamp(
-                    model_utility.u_prime_inv(β * R * expected_marginal),
-                    cmin,
-                    available,
-                )
+                @. available = income + R * a_grid - a_min
+                view_cnew = view(c_new, :, j)
+                view_cnew .= model_utility.u_prime_inv(β * R * expected_marginal)
+                clamp_policy!(view_cnew, cmin, available)
             end
 
             coeffs = solve_coefficients(B, c_new; λ = λ)
             delta = maximum(abs.(c_new .- c))
+            last_delta = delta
             c .= c_new
             resid_mat = euler_resid_stoch_grid(model_params, a_grid, z_grid, transition, c)
-            max_resid = maximum(resid_mat[2:end, :])
-            if delta < tol && max_resid < tol
+            max_resid = rmse_nonbinding(resid_mat, a_next, a_min, bind_tol)
+            # use tol_pol for policy iteration delta and tol for residual
+            if delta < tol_pol && max_resid < tol
                 converged = true
                 break
             end
@@ -263,7 +287,13 @@ function solve_projection_stoch(
         B_val = B_val_cache[:, 1:(order+1)]
         c_val = B_val * coeffs
         resid_val = euler_resid_stoch_grid(model_params, a_val, z_grid, transition, c_val)
-        max_resid_val = maximum(resid_val[min(2, end):end, :])
+        a_next_val = similar(c_val)
+        for j = 1:Nz
+            income = exp(z_grid[j])
+            @views @. a_next_val[:, j] =
+                clamp(R * a_val + income - c_val[:, j], a_min, a_max)
+        end
+        max_resid_val = rmse_nonbinding(resid_val, a_next_val, a_min, bind_tol)
 
         if max_resid_val < best_val_resid
             best_val_resid = max_resid_val
@@ -271,10 +301,11 @@ function solve_projection_stoch(
             best_c = copy(c)
             best_a_next = copy(a_next)
             best_resid = euler_resid_stoch_grid(model_params, a_grid, z_grid, transition, c)
-            best_max_resid = maximum(best_resid[min(2, end):end, :])
+            best_max_resid = rmse_nonbinding(best_resid, best_a_next, a_min, bind_tol)
             best_iters = iters
             best_converged = converged
             best_order = order
+            best_delta = last_delta
         end
     end
 
@@ -293,21 +324,33 @@ function solve_projection_stoch(
     end
 
     resid_out = euler_resid_stoch_grid(model_params, a_out, z_grid, transition, c_out)
-    max_resid_out = maximum(resid_out[min(2, end):end, :])
+    max_resid_out = rmse_nonbinding(resid_out, a_next_out, a_min, bind_tol)
 
     runtime = (time_ns() - start_time) / 1e9
-    opts = (; tol, maxit, order = best_order, runtime, seed = nothing)
+    opts = (;
+        tol,
+        tol_pol,
+        maxit,
+        order = best_order,
+        runtime,
+        seed = nothing,
+        resid_metric = :rmse,
+    )
 
     return (
         a_grid = a_out,
+        z_grid = z_grid,
         c = c_out,
         a_next = a_next_out,
         resid = resid_out,
         iters = best_iters,
         converged = best_converged,
         max_resid = max_resid_out,
+        rmse = max_resid_out,
+        model_params = model_params,
         coeffs = best_coeffs,
         opts = opts,
+        delta_pol = best_delta,
     )
 end
 

@@ -33,7 +33,7 @@ ThesisProject
 ```julia
 using ThesisProject
 
-cfg = load_config("config/smoke_config/smoke_config.yaml")
+cfg = load_config("config/smoke_cfg_det.yaml")
 
 # load_config now returns a nested NamedTuple, so fields are dot-accessible
 @show cfg.model.name
@@ -91,7 +91,7 @@ solver:
 `load_config` returns a nested `NamedTuple` with symbol keys and runs validation, so configuration values are accessed via property syntax and invalid schemas fail early.
 
 ```julia
-cfg = load_config("config/smoke_config/smoke_config.yaml")
+cfg = load_config("config/smoke_cfg_det.yaml")
 cfg.params.β        # → 0.96
 cfg.grids.Na        # → 40
 cfg.solver.method   # → :EGM
@@ -113,7 +113,9 @@ Because `NamedTuple`s are immutable, create experiment-specific overrides with `
 
 ## Reproducibility
 
-- Deterministic seeds are derived via `utils/Determinism.make_rng` without mutating Julia’s global RNG.
+- Deterministic seeds originate from the config-provided master RNG via
+  `utils/Determinism.make_master_rng`/`derive_rng`, avoiding any mutation of Julia’s
+  global RNG state.
 - Each `scripts/experiments/*.jl` entry accepts `--config path/to/config.yaml` and writes outputs under `outputs/` (ignored by git).
 - The CI smoke test (`scripts/ci/smoke.jl`) runs the fast configs used in regression testing.
 - A lightweight precompile workload is provided so that `using ThesisProject` warms essential code paths.

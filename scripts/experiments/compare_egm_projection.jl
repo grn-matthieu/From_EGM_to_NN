@@ -9,7 +9,7 @@ module CompareEGMProjection
 import Pkg
 Pkg.activate(normpath(joinpath(@__DIR__, "..", "..")); io = devnull)
 using ThesisProject
-using ThesisProject.Determinism: make_rng
+using ThesisProject.Determinism: make_master_rng
 using Statistics: mean, maximum, minimum
 using Plots
 const ROOT = normpath(joinpath(@__DIR__, "..", "..", "outputs"))
@@ -45,13 +45,14 @@ function run()
     cfg_egm = merge_config(cfg_egm, (; method = :EGM))
     model_egm = ThesisProject.build_model(cfg_egm)
     method_egm = ThesisProject.build_method(cfg_egm)
-    sol_egm = ThesisProject.solve(model_egm, method_egm, cfg_egm; rng = make_rng(0))
+    sol_egm = ThesisProject.solve(model_egm, method_egm, cfg_egm; rng = make_master_rng(0))
 
     cfg_proj = merge_section(cfg, :solver, (; method = :Projection))
     cfg_proj = merge_config(cfg_proj, (; method = :Projection))
     model_proj = ThesisProject.build_model(cfg_proj)
     method_proj = ThesisProject.build_method(cfg_proj)
-    sol_proj = ThesisProject.solve(model_proj, method_proj, cfg_proj; rng = make_rng(0))
+    sol_proj =
+        ThesisProject.solve(model_proj, method_proj, cfg_proj; rng = make_master_rng(0))
     ee_egm = ee_stats(sol_egm)
     ee_proj = ee_stats(sol_proj)
     diffs = policy_diff_stats(sol_egm, sol_proj)

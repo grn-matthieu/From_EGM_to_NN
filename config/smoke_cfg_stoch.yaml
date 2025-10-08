@@ -1,0 +1,68 @@
+# Consolidated stochastic smoke config
+# Includes all solver fields and activates shocks
+model:
+  name: cs
+
+params:
+  β: 0.9
+  σ: 2.0
+  r: 0.04
+  y: 1.0
+
+grids:
+  Na: 50
+  a_min: 0.0
+  a_max: 4.0
+
+utility:
+  u_type: CRRA
+
+solver:
+  # run a single method name (string or symbol), a list of names, or use "all"
+  method: NN
+  tol: 1.0e-4
+  tol_pol: 1.0e-3
+  maxit: 1000
+  verbose: false
+  relax: 0.5
+  warm_start: default
+  egm:
+    interp_kind: linear
+  time_iteration:
+    interp_kind: linear
+  projection:
+    orders: [5]
+    Nval: 50
+    basis_orders: [5]
+  perturbation:
+    order: 1
+    a_bar: null
+    h_a: null
+    h_z: null
+    tol_fit: 1e-8
+    maxit_fit: 25
+  nn:
+    epochs: 10000
+    batch: 2048
+    lr: 1e-3
+    hid1: 64
+    hid2: 64
+    samples_per_epoch: 2048
+    objective: euler_fb_aio
+    v_h: 2.0
+    w_min: 0.1
+    w_max: 4.0
+    sigma_shocks: 0.1
+    target_loss: 1e-10
+    use_cuda: true
+
+shocks:
+  active: true
+  method: "tauchen"
+  ρ_shock: 0
+  σ_shock: 0.10
+  Nz: 7
+  m: 3.0
+
+random:
+  seed: 1234

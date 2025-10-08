@@ -1,25 +1,12 @@
-Fast developer helpers
-======================
-
-This directory contains small helper scripts to speed up local development and testing.
-
-fast_test.ps1 (Windows PowerShell)
-  - Runs `scripts/precompile.jl` (unless called with `-NoPrecompile`) to warm the precompilation cache, then runs the test suite with `FAST_TEST=1` which skips heavy/coverage testsets.
-  - Usage (from repo root):
-      .\scripts\fast_test.ps1
-  - Skip precompile if already done:
-      .\scripts\fast_test.ps1 -NoPrecompile
-
-fast_test.sh (POSIX)
-  - Same behavior for Linux/macOS. Usage:
-      ./scripts/fast_test.sh
-  - Skip precompile:
-      ./scripts/fast_test.sh --no-precompile
-
-Other helpers
-  - `precompile.jl`: precompiles the project to speed up repeated Julia process startups.
-  - `run_single_test.jl`: run a single test file from the command line.
 # Scripts Index
+
+# Scripts Overview
+
+This directory now contains only scripts for:
+- CI and coverage workflows
+- Multi-method experiments and report generation
+
+## Main Scripts
 
 | Script | Purpose | Notes |
 |--------|---------|-------|
@@ -29,8 +16,8 @@ Other helpers
 | `experiments/compare_methods_deviations.jl` | Compare perturbation, projection, and NN responses around steady state | Produces deviation tables in `outputs/diagnostics` |
 | `experiments/stress_all_methods.jl` | Stress test methods on kinks and occasionally binding constraints | Heavy runtime; batch configurable |
 | `experiments/generate_baseline_csv.jl` | Export baseline residuals and policies for paper tables | CSVs in `results/benchmarks` |
-| `dev/run_nn_baseline.jl` | Convenience launcher for the NN training loop | Run-time options mirror training helpers |
-| `dev/run_pretrain.jl` | Run NN pretraining against EGM targets | Requires existing EGM solution |
-| `dev/coverage_report.jl` | Generate lcov coverage artefacts | Use after `Pkg.test()` with coverage enabled |
+| `experiments/methodology_report.jl` | Automated methodology reporting and experiment documentation | Integrates with config and outputs |
+| `experiments/robustness_sweep.jl` | Robustness checks across parameter sweeps | Batch configurable |
+| `experiments/steady_state.jl` | Steady state analysis and verification | Supports deterministic and stochastic configs |
 
 All scripts are executed with `julia --project path/to/script.jl [args...]`. Outputs are intentionally ignored by git; copy artefacts to `docs/` if you need to publish them.

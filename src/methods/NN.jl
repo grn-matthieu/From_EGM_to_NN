@@ -10,8 +10,9 @@ using Printf
 import ..API: solve
 using ..NNKernel: solve_nn
 using ..ValueFunction: compute_value_policy
-using ..Determinism: canonicalize_cfg, hash_hex
+using ..Determinism: canonicalize_cfg, derive_rng, hash_hex, promote_master_rng
 using ..UtilsConfig: maybe
+using ..UtilsDiagnostics: mean_abs_error
 
 export NNMethod, build_nn_method
 
@@ -21,52 +22,104 @@ end
 
 function build_nn_method(cfg::NamedTuple)
     solver_cfg = cfg.solver
+    nn_cfg = solver_cfg.nn
     return NNMethod((
         name = maybe(cfg, :method, solver_cfg.method),
-        epochs = maybe(solver_cfg, :epochs, 1000),
-        batch = maybe(solver_cfg, :batch, 64),
-        lr = maybe(solver_cfg, :lr, 1e-4),
-        verbose = maybe(solver_cfg, :verbose, false),
+        # Paper defaults: 50_000 epochs, ADAM lr = 1e-3, batch = 64
+        epochs = nn_cfg.epochs,
+        batch = nn_cfg.batch,
+        lr = nn_cfg.lr,
+        verbose = solver_cfg.verbose,
+
+        # Architecture: hidden sizes (paper compares 8x8, 16x16, ...)
+        hid1 = nn_cfg.hid1,
+        hid2 = nn_cfg.hid2,
+
+        # samples per epoch: paper draws 64 random grid points per epoch
+        samples_per_epoch = nn_cfg.samples_per_epoch,
 
         # new: loss selector + stability knobs
-        objective = maybe(solver_cfg, :objective, :euler_fb_aio),
-        v_h = maybe(solver_cfg, :v_h, 0.5),
-        w_min = maybe(solver_cfg, :w_min, 0.1),
-        w_max = maybe(solver_cfg, :w_max, 4.0),
+        objective = nn_cfg.objective,
+        v_h = nn_cfg.v_h,
+        w_min = nn_cfg.w_min,
+        w_max = nn_cfg.w_max,
 
         # optional: pass shock std override for convenience
-        sigma_shocks = maybe(solver_cfg, :sigma_shocks, nothing),
+        sigma_shocks = nn_cfg.sigma_shocks,
+        target_loss = nn_cfg.target_loss,
+
+        # device selection: allow config to explicitly request CUDA
+        # pass-through so NNKernel.solver_settings can honor it
+        use_cuda = nn_cfg.use_cuda,
     ))
 end
 
-function solve(model::AbstractModel, method::NNMethod, cfg::NamedTuple;)::Solution
+function solve(
+    model::AbstractModel,
+    method::NNMethod,
+    cfg::NamedTuple;
+    rng = nothing,
+)::Solution
     p = get_params(model)
     g = get_grids(model)
     S = get_shocks(model)
     U = get_utility(model)
 
+    master = rng !== nothing ? cfg.random.master_rng : make_master_rng(rng)
+
     # Call the NN kernel to solve the model and return the solution struct
-    sol = solve_nn(model; opts = method.opts)
+    sol = solve_nn(model; opts = method.opts, rng = derive_rng(master, :nn_kernel))
 
     ee = sol.resid
     ee_vec = ee isa AbstractMatrix ? vec(maximum(ee, dims = 2)) : ee
     ee_mat = ee isa AbstractMatrix ? ee : nothing
+    ee_mean = ee_mat === nothing ? mean_abs_error(ee_vec) : mean_abs_error(ee_mat)
+    delta_pol = hasproperty(sol, :delta_pol) ? sol.delta_pol : missing
+    agrid = g.a.grid
 
     policy = Dict{Symbol,Any}(
         :c => (;
             value = sol.c,
-            grid = sol.a_grid,
+            grid = agrid,
             euler_errors = ee_vec,
             euler_errors_mat = ee_mat,
         ),
-        :a => (; value = sol.a_next, grid = sol.a_grid),
+        :a => (; value = sol.a_next, grid = agrid),
     )
 
-    value = compute_value_policy(p, g, S, U, policy)
+    # Only compute value if the policy arrays are grid-aligned.
+    Na = length(agrid)
+    has_shocks = S !== nothing
+    shapes_ok = false
+    if !has_shocks
+        shapes_ok =
+            (sol.c isa AbstractVector) &&
+            (sol.a_next isa AbstractVector) &&
+            (length(sol.c) == Na) &&
+            (length(sol.a_next) == Na)
+    else
+        Nz = size(S.Π, 1)
+        shapes_ok =
+            (sol.c isa AbstractMatrix) &&
+            (sol.a_next isa AbstractMatrix) &&
+            (size(sol.c, 1) == Na) &&
+            (size(sol.c, 2) == Nz) &&
+            (size(sol.a_next, 1) == Na) &&
+            (size(sol.a_next, 2) == Nz)
+    end
+
+    value = shapes_ok ? compute_value_policy(p, g, S, U, policy) : nothing
 
     model_id = hash_hex(canonicalize_cfg(cfg))
-    diagnostics =
-        (; model_id = model_id, method = method.opts.name, runtime = sol.opts.runtime)
+    diagnostics = (;
+        model_id = model_id,
+        method = method.opts.name,
+        runtime = sol.opts.runtime,
+        device = get(sol.opts, :device, :cpu),
+        iterations = sol.iters,
+        mean_ee = ee_mean,
+        delta_pol = delta_pol,
+    )
 
     metadata = Dict{Symbol,Any}(
         :iters => sol.iters,
@@ -74,6 +127,8 @@ function solve(model::AbstractModel, method::NNMethod, cfg::NamedTuple;)::Soluti
         :converged => sol.converged,
         :max_resid => sol.max_resid,
         :tol => nothing,
+        :delta_pol => delta_pol,
+        :mean_ee => ee_mean,
         :julia_version => string(VERSION),
     )
 

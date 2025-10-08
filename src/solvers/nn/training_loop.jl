@@ -1,3 +1,9 @@
+import CUDA
+import Adapt
+import Zygote
+import Adapt
+using Lux: fmap
+
 struct NNSolverSettings
     epochs::Int
     batch_choice::Union{Nothing,Int}
@@ -12,7 +18,9 @@ struct NNSolverSettings
     v_h::Float64
     w_min::Float32
     w_max::Float32
+    samples_per_epoch::Int
     sigma_shocks::Union{Nothing,Float64}
+    use_cuda::Bool
 end
 
 struct TrainingResult
@@ -23,8 +31,88 @@ struct TrainingResult
     batches_per_epoch::Int
 end
 
+maybe_to_device(x::Nothing, ::NNSolverSettings) = nothing
+maybe_to_device(x, settings::NNSolverSettings) =
+    settings.use_cuda ? Adapt.adapt(CUDA.CuArray, x) : x
+
+maybe_to_host(x::Nothing, ::NNSolverSettings) = nothing
+maybe_to_host(x, settings::NNSolverSettings) = settings.use_cuda ? Adapt.adapt(Array, x) : x
+
+function maybe_to_host(state::Lux.Training.TrainState, settings::NNSolverSettings)
+    mdl = hasproperty(state, :model) ? getfield(state, :model) : nothing
+    ps = state_parameters(state)
+    st = state_states(state)
+    return (
+        model = mdl,
+        parameters = maybe_to_host(ps, settings),
+        states = maybe_to_host(st, settings),
+    )
+end
+
+function randn_like(rng, ref::CUDA.AbstractGPUArray)
+    return CUDA.randn(eltype(ref), size(ref)...)
+end
+function randn_like(rng, ref)
+    out = similar(ref)
+    randn!(rng, out)
+    return out
+end
+Zygote.@nograd randn_like
+
+function fill_like(value, ref)
+    if ref isa CUDA.AbstractGPUArray
+        out = similar(ref)
+        fill!(out, value)
+        return out
+    else
+        return fill(value, size(ref))
+    end
+end
+
 get_option(opts, key::Symbol, default) =
     opts === nothing ? default : (hasproperty(opts, key) ? getfield(opts, key) : default)
+
+const CUDA_OBJECTIVE = :euler_fb_aio
+
+maybe_objective_cuda(objective, default) = objective == CUDA_OBJECTIVE ? default : false
+
+function detect_cuda_preference(objective, opts)
+    requested = get_option(opts, :use_cuda, nothing)
+    device_pref = get_option(opts, :device, nothing)
+    gpu_available = try
+        CUDA.functional()
+    catch
+        false
+    end
+
+    default_use_cuda = maybe_objective_cuda(objective, gpu_available)
+
+    use_cuda =
+        requested !== nothing ? Bool(requested) :
+        device_pref === nothing ? default_use_cuda :
+        begin
+            dev_sym = Symbol(device_pref)
+            if dev_sym === :auto
+                default_use_cuda
+            elseif dev_sym === :cuda
+                true
+            elseif dev_sym === :cpu
+                false
+            else
+                throw(ArgumentError("Unknown device preference: $(device_pref)"))
+            end
+        end
+
+    if use_cuda && !gpu_available
+        @warn "CUDA requested but no functional GPU detected. Falling back to CPU." use_cuda =
+            false
+    end
+    if use_cuda && objective != CUDA_OBJECTIVE
+        @warn "CUDA acceleration currently supported only for objective :$(CUDA_OBJECTIVE); got :$(objective). Falling back to CPU." use_cuda =
+            false
+    end
+    return use_cuda
+end
 
 function solver_settings(opts; has_shocks::Bool = false)
     epochs = max(Int(get_option(opts, :epochs, 1000)), 0)
@@ -43,7 +131,9 @@ function solver_settings(opts; has_shocks::Bool = false)
     v_h = clamp(Float64(get_option(opts, :v_h, 0.5)), 0.2, 5.0)
     w_min = Float32(get_option(opts, :w_min, 0.1))
     w_max = Float32(get_option(opts, :w_max, 4.0))
+    samples_per_epoch = max(Int(get_option(opts, :samples_per_epoch, 64)), 1)
     sigma_shocks = get_option(opts, :sigma_shocks, nothing)
+    use_cuda = detect_cuda_preference(objective, opts)
 
     return NNSolverSettings(
         epochs,
@@ -59,7 +149,9 @@ function solver_settings(opts; has_shocks::Bool = false)
         v_h,
         w_min,
         w_max,
+        samples_per_epoch,
         sigma_shocks,
+        use_cuda,
     )
 end
 
@@ -80,28 +172,20 @@ end
 
 huber_loss(x, δ) = abs(x) ≤ δ ? 0.5f0 * x * x : δ * (abs(x) - 0.5f0 * δ)
 
-@inline function cash_on_hand(a, z, P, has_shocks::Bool)
-    R = 1.0f0 + Float32(P.r)
-    μ = Float32(P.y)                # log-mean income level
-    if has_shocks
-        inc = @. exp(μ + z)
-    else
-        inc = exp(μ)
-    end
-    return @. R * a + inc
-end
-
 function build_loss_function(
     P_resid,
     G,
     S,
     scaler::FeatureScaler,
     settings::NNSolverSettings,
+    rng::AbstractRNG,
     model_cfg = nothing,
-    rng = Random.GLOBAL_RNG,
 )
     return function (model, ps, st, data)
         X = data[1]
+        T = eltype(X)
+        Rg = one(T) + T(P_resid.r)
+        μ = T(P_resid.y)
 
         # If caller selected the FB AiO objective, delegate to the custom loss
         if settings.objective == :euler_fb_aio
@@ -130,15 +214,15 @@ function build_loss_function(
             Φ = prediction.Φ
             h_raw = prediction.h
 
-            # Recover original (unnormalized) a and z from normalized input X
-            a = ((X[1, :] .+ 1.0f0) ./ 2.0f0) .* scaler.a_range .+ scaler.a_min
-            if scaler.has_shocks
-                z = ((X[2, :] .+ 1.0f0) ./ 2.0f0) .* scaler.z_range .+ scaler.z_min
+            if size(X, 1) == 2
+                y = ((X[1, :] .+ one(T)) ./ T(2)) .* T(scaler.y_range) .+ T(scaler.y_min)
+                w = ((X[2, :] .+ one(T)) ./ T(2)) .* T(scaler.w_range) .+ T(scaler.w_min)
+            elseif size(X, 1) == 1
+                w = ((X[1, :] .+ one(T)) ./ T(2)) .* T(scaler.w_range) .+ T(scaler.w_min)
+                y = fill(exp(μ), size(w))
             else
-                z = zeros(eltype(a), size(a))
+                throw(ArgumentError("Expected 1 or 2 feature rows, got $(size(X, 1))"))
             end
-
-            w = cash_on_hand(a, z, P_resid, scaler.has_shocks)
 
             # Align shapes: Φ and h may be 1×N (row) or N×1 (column)
             if ndims(Φ) == 2 && size(Φ, 1) == 1
@@ -159,12 +243,33 @@ function build_loss_function(
             c_pred = Φ_row .* reshape(w, 1, :)
             # avoid u'(0) by clamping consumption away from zero
             c_pred = clamp.(c_pred, eps(eltype(X)), Inf)
+            c_vec = vec(c_pred)
         elseif prediction isa Tuple
             c_pred, st_out = prediction
             c_pred = clamp.(c_pred, eps(eltype(X)), Inf)
+            if size(X, 1) == 2
+                y = ((X[1, :] .+ one(T)) ./ T(2)) .* T(scaler.y_range) .+ T(scaler.y_min)
+                w = ((X[2, :] .+ one(T)) ./ T(2)) .* T(scaler.w_range) .+ T(scaler.w_min)
+            elseif size(X, 1) == 1
+                w = ((X[1, :] .+ one(T)) ./ T(2)) .* T(scaler.w_range) .+ T(scaler.w_min)
+                y = fill(exp(μ), size(w))
+            else
+                throw(ArgumentError("Expected 1 or 2 feature rows, got $(size(X, 1))"))
+            end
+            c_vec = vec(c_pred)
         else
             c_pred = prediction
             c_pred = clamp.(c_pred, eps(eltype(X)), Inf)
+            if size(X, 1) == 2
+                y = ((X[1, :] .+ one(T)) ./ T(2)) .* T(scaler.y_range) .+ T(scaler.y_min)
+                w = ((X[2, :] .+ one(T)) ./ T(2)) .* T(scaler.w_range) .+ T(scaler.w_min)
+            elseif size(X, 1) == 1
+                w = ((X[1, :] .+ one(T)) ./ T(2)) .* T(scaler.w_range) .+ T(scaler.w_min)
+                y = fill(exp(μ), size(w))
+            else
+                throw(ArgumentError("Expected 1 or 2 feature rows, got $(size(X, 1))"))
+            end
+            c_vec = vec(c_pred)
         end
 
         if isnothing(S)
@@ -180,34 +285,9 @@ function build_loss_function(
 
         # Build diagnostics NamedTuple for minibatch (phi, h, a, z, w, c)
         if prediction isa NamedTuple
-            diag = (;
-                phi = Φ_row,
-                h = h_row,
-                a = a,
-                z = settings.has_shocks ? z : nothing,
-                w = w,
-                c = c_pred,
-            )
+            diag = (; phi = Φ_row, h = h_row, y = y, w = w, c = c_vec, a = w .- c_vec)
         else
-            # fallback diagnostics when model returned c directly
-            # compute a,z,w for diagnostics
-            a = ((X[1, :] .+ 1.0f0) ./ 2.0f0) .* scaler.a_range .+ scaler.a_min
-            if scaler.has_shocks
-                z = ((X[2, :] .+ 1.0f0) ./ 2.0f0) .* scaler.z_range .+ scaler.z_min
-            else
-                z = nothing
-            end
-            w =
-                scaler.has_shocks ? cash_on_hand(a, z, P_resid, scaler.has_shocks) :
-                cash_on_hand(a, 0.0f0, P_resid, false)
-            diag = (;
-                phi = nothing,
-                h = nothing,
-                a = a,
-                z = settings.has_shocks ? z : nothing,
-                w = w,
-                c = c_pred,
-            )
+            diag = (; phi = nothing, h = nothing, y = y, w = w, c = c_vec, a = w .- c_vec)
         end
 
         return loss, st_out, diag
@@ -220,7 +300,9 @@ function flatten_sum_squares(x)
     elseif x isa Number
         return float(x)^2
     elseif x isa AbstractArray
-        return sum(abs2, Float64.(x))
+        # Avoid unnecessary host transfers: compute reductions on-device when possible.
+        s = sum(abs2, x)
+        return Float64(s)
     elseif x isa NamedTuple || x isa Tuple || x isa Vector || x isa Dict
         s = 0.0
         for v in x
@@ -246,64 +328,65 @@ function create_training_batch(
     scaler::FeatureScaler;
     mode = :rand,
     nsamples::Int = 4096,
-    rng = Random.GLOBAL_RNG,
+    rng::AbstractRNG,
     P_resid = nothing,
     settings::Union{NNSolverSettings,Nothing} = nothing,
 )
     want =
         nsamples > 0 ? nsamples :
         (isnothing(S) ? length(G[:a].grid) : length(G[:a].grid) * length(S.zgrid))
-
-    # deterministic full grid path unchanged
     if mode == :full
-        X, _ = generate_dataset(G, S; mode = :full)
+        @assert P_resid !== nothing
+        X, _ = generate_dataset(G, S, P_resid; mode = :full)
         normalize_samples!(scaler, X)
-        return prepare_training_batch(X), size(X, 1)
+        return prepare_training_batch(X, Val(settings.use_cuda)), size(X, 1)
     end
 
     @assert P_resid !== nothing && settings !== nothing
+    @assert want > 0 "create_training_batch requires a positive sample count"
+    w_lo = settings.w_min
+    w_hi = settings.w_max
+    @assert w_hi > w_lo "Require w_max > w_min for cash-on-hand sampling"
+
     Rg = 1.0f0 + Float32(P_resid.r)
     μ = Float32(P_resid.y)
     a_min = Float32(G[:a].min)
     a_max = Float32(G[:a].max)
-    z_min = scaler.z_min
-    z_max = scaler.z_min + scaler.z_range
-    w_lo = settings.w_min
-    w_hi = settings.w_max
+    if settings.has_shocks && !isnothing(S)
+        z_min = Float32(minimum(S.zgrid))
+        z_max = Float32(maximum(S.zgrid))
+    else
+        z_min = 0.0f0
+        z_max = 0.0f0
+    end
 
-    A = Vector{Float32}(undef, want)
-    Z = settings.has_shocks ? Vector{Float32}(undef, want) : Float32[]
+    Y = Vector{Float32}(undef, want)
+    W = Vector{Float32}(undef, want)
     filled = 0
-    max_tries = 1000
     tries = 0
+    max_tries = 1000
     while filled < want && tries < max_tries
-        # draw in bulk
         m = max(want - filled, 4096)
-        a = rand(rng, Float32, m) .* (a_max - a_min) .+ a_min
-        z =
-            settings.has_shocks ? rand(rng, Float32, m) .* (z_max - z_min) .+ z_min :
-            fill(0.0f0, m)
-        # lognormal income
-        inc = @. exp(μ + z)
-        w = @. Rg * a + inc
-        keep = (w .>= w_lo) .& (w .<= w_hi)
+        a_draw = rand(rng, Float32, m) .* (a_max - a_min) .+ a_min
+        z_draw = rand(rng, Float32, m) .* (z_max - z_min) .+ z_min
+        y_draw = @. exp(μ + z_draw)
+        w_draw = @. Rg * a_draw + y_draw
+        keep = (w_draw .>= w_lo) .& (w_draw .<= w_hi)
         k = count(keep)
         if k > 0
             idx = findall(keep)
             take = min(k, want - filled)
-            A[filled+1:filled+take] .= a[idx[1:take]]
-            if settings.has_shocks
-                Z[filled+1:filled+take] .= z[idx[1:take]]
-            end
+            Y[filled+1:filled+take] .= y_draw[idx[1:take]]
+            W[filled+1:filled+take] .= w_draw[idx[1:take]]
             filled += take
         end
         tries += 1
     end
-    @assert filled == want "Sampler could not hit the w-window; widen [w_min,w_max] or raise nsamples."
+    @assert filled == want "Sampler could not hit the w-window; widen [w_min, w_max] or increase nsamples"
 
-    X = settings.has_shocks ? hcat(A, Z) : reshape(A, :, 1)
+    X = hcat(Y, W)
     normalize_samples!(scaler, X)
-    batch = prepare_training_batch(X)
+    batch = prepare_training_batch(X, Val(settings.use_cuda))
     return batch, want
 end
 
@@ -347,24 +430,30 @@ function train_consumption_network!(
     P_resid,
     G,
     S,
+    rng::AbstractRNG,
     model_cfg = nothing,
-    rng = Random.GLOBAL_RNG,
 )
-    ps, st = Lux.setup(Random.GLOBAL_RNG, chain)
+    ps, st = Lux.setup(rng, chain)
+    if settings.use_cuda
+        ps = fmap(cu, ps)
+        st = fmap(cu, st)
+    else
+        ps = fmap(identity, ps)
+        st = fmap(identity, st)
+    end
     opt = create_optimizer(settings)
     train_state = Lux.Training.TrainState(chain, ps, st, opt)
     # build loss with scaler so we can compute cash-on-hand inside the loss
-    loss_function = build_loss_function(P_resid, G, S, scaler, settings, model_cfg, rng)
-    # use the strict rejection sampler to build an initial training pool large enough
-    init_nsamples =
-        min(settings.batch_choice === nothing ? 64 : settings.batch_choice, 4096)
+    loss_function = build_loss_function(P_resid, G, S, scaler, settings, rng, model_cfg)
+    # draw uniform cash-on-hand samples for the initial training batch
+    samples_per_epoch = settings.samples_per_epoch
     batch, sample_count = create_training_batch(
         G,
         S,
         scaler;
         mode = :rand,
-        nsamples = init_nsamples,
-        rng = Random.GLOBAL_RNG,
+        nsamples = samples_per_epoch,
+        rng = rng,
         P_resid = P_resid,
         settings = settings,
     )
@@ -382,6 +471,10 @@ function train_consumption_network!(
     )
     total_samples = size(batch, 2)
     batch_size = compute_batch_size(total_samples, settings.batch_choice)
+    if settings.use_cuda
+        batch_size = total_samples        # 100% batch
+        batches_per_epoch = 1
+    end
     # For stochastic problems we require predictions on the full grid
     # (Na * Nz) so force full-batch training when shocks are present.
     if !isnothing(S) && batch_size < total_samples
@@ -390,7 +483,6 @@ function train_consumption_network!(
     batches_per_epoch = cld(total_samples, batch_size)
     best_state = train_state
     best_loss = Inf
-    rng = Random.default_rng()
     stall_epochs = 0
     for epoch = 1:settings.epochs
         if settings.resample_interval > 0 && epoch % settings.resample_interval == 0
@@ -399,11 +491,12 @@ function train_consumption_network!(
                 S,
                 scaler;
                 mode = :rand,
-                nsamples = sample_count,
+                nsamples = samples_per_epoch,
                 rng = rng,
                 P_resid = P_resid,
                 settings = settings,
             )
+            batch = maybe_to_device(batch, settings)
             total_samples = size(batch, 2)
             batch_size = compute_batch_size(total_samples, settings.batch_choice)
             # same rule: force full-batch when stochastic
@@ -412,13 +505,13 @@ function train_consumption_network!(
             end
             batches_per_epoch = cld(total_samples, batch_size)
         end
-        shuffled = batch[:, randperm(rng, total_samples)]
+        shuffled = settings.use_cuda ? batch : batch[:, randperm(rng, total_samples)]
         epoch_loss = 0.0
         seen = 0
         gradient_norm = NaN
         for start = 1:batch_size:total_samples
             stop = min(start + batch_size - 1, total_samples)
-            data = (view(shuffled, :, start:stop),)
+            data = (shuffled[:, start:stop],)
             ginfo, loss, _, train_state = Lux.Training.single_train_step!(
                 Lux.AutoZygote(),
                 loss_function,
@@ -426,12 +519,17 @@ function train_consumption_network!(
                 train_state,
             )
             nb = size(data[1], 2)
-            epoch_loss += Float64(loss) * nb
+            @assert loss isa Number
+            loss_value = Float64(loss)
+            epoch_loss += Float64(loss_value) * nb
             seen += nb
-            try
-                gradient_norm = sqrt(flatten_sum_squares(ginfo))
-            catch
-                gradient_norm = NaN
+            if !settings.use_cuda
+                try
+                    # on CPU we can compute gradient norm exactly
+                    gradient_norm = sqrt(flatten_sum_squares(ginfo))
+                catch
+                    gradient_norm = NaN
+                end
             end
         end
         average_loss = epoch_loss / max(seen, 1)
@@ -442,7 +540,7 @@ function train_consumption_network!(
         else
             stall_epochs += 1
         end
-        if settings.verbose && (epoch % 10 == 0 || epoch == settings.epochs)
+        if settings.verbose && (epoch % 100 == 0 || epoch == settings.epochs)
             @printf "Epoch: %3d \t Loss: %.5g \t GradNorm: %.5g\n" epoch average_loss gradient_norm
         end
         # periodic validation logging every 100 epochs
@@ -483,8 +581,9 @@ function train_consumption_network!(
             end
         end
         if best_loss ≤ settings.target_loss && stall_epochs ≥ settings.patience
+            stored_state = maybe_to_host(best_state, settings)
             return TrainingResult(
-                best_state,
+                stored_state,
                 best_loss,
                 epoch,
                 batch_size,
@@ -492,8 +591,9 @@ function train_consumption_network!(
             )
         end
     end
+    stored_state = maybe_to_host(best_state, settings)
     return TrainingResult(
-        best_state,
+        stored_state,
         best_loss,
         settings.epochs,
         batch_size,

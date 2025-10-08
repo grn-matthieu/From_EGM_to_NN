@@ -9,10 +9,85 @@ module PerturbationKernel
 using ..EulerResiduals:
     euler_resid_det, euler_resid_stoch, euler_resid_det_grid, euler_resid_stoch_grid
 using ..CommonInterp: InterpKind, LinearInterp
+using ..PolicyUtils: clamp_policy!, compute_binding_tolerance, rmse_nonbinding
 using ForwardDiff
 using LinearAlgebra
 
 export solve_perturbation_det, solve_perturbation_stoch
+
+const DEFAULT_BINDING_TOL = 1e-12
+
+"""
+    _steady_state_asset(p, g)
+
+Compute the deterministic steady-state asset level implied by the model
+parameters `p` and grid descriptor `g`. For the baseline consumer-savings
+model the steady state is pinned to the borrowing bound when `β(1 + r) ≤ 1`
+and to the upper bound otherwise. This mirrors `SteadyState.steady_state_analytic`
+but keeps the kernel self-contained.
+"""
+function _steady_state_asset(p, g)
+    a_min = g[:a].min
+    a_max = g[:a].max
+    βR = p.β * (1 + p.r)
+    if βR ≤ 1 + 1e-12
+        return a_min
+    else
+        return a_max
+    end
+end
+
+"""
+    _shock_moments(S)
+
+Return `(ρ, μ, σ2, σε2)` for the AR(1) Gaussian shock encoded in `S`. When
+diagnostics are unavailable we fall back to iid, zero-mean shocks.
+"""
+function _shock_moments(S)
+    if S === nothing
+        return 0.0, 0.0, 0.0, 0.0
+    end
+    ρ = 0.0
+    μ = 0.0
+    σ2 = 0.0
+    if hasproperty(S, :diagnostics) && S.diagnostics !== nothing && !isempty(S.diagnostics)
+        diag = S.diagnostics
+        if length(diag) ≥ 3
+            μ = diag[1]
+            σ2 = max(diag[2], 0.0)
+            ρ = diag[3]
+        elseif length(diag) == 2
+            μ = diag[1]
+            σ2 = max(diag[2], 0.0)
+        else
+            ρ = diag[end]
+        end
+    end
+    σε2 = σ2 * max(1 - ρ^2, 0.0)
+    return ρ, μ, σ2, σε2
+end
+
+"""
+    _gaussian_ratio_expectation(c0, cp0, cp1, cp2, σ; μ = 0.0, σϵ2 = 0.0)
+
+Second-order approximation to `E[(c0 / cp(z'))^σ]` where `cp(z') ≈ cp0 + cp1 z' +
+0.5 * cp2 z'^2` and the innovation `z'` is Gaussian with mean `μ` and variance
+`σϵ2`. The expansion is taken around the deterministic steady state and keeps
+terms up to second order in `(cp1/cp0)` and `(cp2/cp0)`.
+"""
+function _gaussian_ratio_expectation(c0, cp0, cp1, cp2, σ; μ = 0.0, σϵ2 = 0.0)
+    ϵ = 1e-12
+    c0 = c0 ≤ ϵ ? ϵ : c0
+    cp0 = cp0 ≤ ϵ ? ϵ : cp0
+    x1 = cp1 / cp0
+    x2 = 0.5 * cp2 / cp0
+    G0 = (c0 / cp0)^σ
+    A = -σ * x1
+    B = -σ * x2 + 0.5 * σ * x1^2
+    μ1 = μ
+    μ2 = μ^2 + σϵ2
+    return G0 * (1 + A * μ1 + B * μ2 + 0.5 * A^2 * μ2)
+end
 
 """
 Gauss–Newton for small nonlinear least squares over coefficients θ using AD Jacobian.
@@ -113,10 +188,11 @@ function solve_perturbation_det(
     a_min = g[:a].min
     a_max = g[:a].max
     Na = g[:a].N
+    bind_tol = compute_binding_tolerance(a_min, a_max, Na; floor = DEFAULT_BINDING_TOL)
     R = 1 + p.r
     ȳ = p.y
 
-    ā = a_bar === nothing ? 0.5 * (a_min + a_max) : a_bar
+    ā = a_bar === nothing ? _steady_state_asset(p, g) : a_bar
     c̄ = ȳ + p.r * ā
     Fa, Fz = _coefficients_first_order(p; ρ = 0.0, ȳ = ȳ, R = R)
 
@@ -155,17 +231,15 @@ function solve_perturbation_det(
     c = @. c̄ + Fa * (a_grid - ā) + 0.5 * C2 * (a_grid - ā)^2
     cmin = 1e-12
     cmax = @. ȳ + R * a_grid - a_min
-    @. c = clamp(c, cmin, cmax)
+    clamp_policy!(c, cmin, cmax)
     a_next = @. R * a_grid + ȳ - c
     @. a_next = clamp(a_next, a_min, a_max)
 
     resid = euler_resid_det_grid(p, a_grid, c)
     iters = 1
     converged = true
-    # prune boundaries when assessing accuracy
-    lo = Na > 2 ? 2 : 1
-    hi = Na > 2 ? Na - 1 : Na
-    max_resid = maximum(view(resid, lo:hi))
+    # RMSE on non-binding points (where a' > a_min + tol)
+    max_resid = rmse_nonbinding(resid, a_next, a_min, bind_tol)
     opts = (;
         maxit = iters,
         runtime = (time_ns() - t0) / 1e9,
@@ -178,6 +252,8 @@ function solve_perturbation_det(
         order = order,
         fit_ok = fit_ok,
         quad_coeffs = (C2 = C2,),
+        expansion_point = (ā = ā, z̄ = 0.0),
+        resid_metric = :rmse,
     )
     return (
         a_grid = a_grid,
@@ -187,6 +263,7 @@ function solve_perturbation_det(
         iters = iters,
         converged = converged,
         max_resid = max_resid,
+        rmse = max_resid,
         model_params = p,
         opts = opts,
     )
@@ -215,27 +292,16 @@ function solve_perturbation_stoch(
     a_min = g[:a].min
     a_max = g[:a].max
     Na = g[:a].N
+    bind_tol = compute_binding_tolerance(a_min, a_max, Na; floor = DEFAULT_BINDING_TOL)
     z_grid = S.zgrid
     Π = S.Π
     Nz = length(z_grid)
     R = 1 + p.r
-    # For stochastic residuals, income uses exp(z) in current codebase
-    ȳ = 1.0
-    ρ = begin
-        # Recover AR(1) persistence from discretization diagnostics if available
-        # Fall back to 0.0 if not provided
-        if hasproperty(S, :diagnostics)
-            try
-                S.diagnostics[end]
-            catch
-                0.0
-            end
-        else
-            0.0
-        end
-    end
+    # Use model mean income
+    ȳ = p.y
+    ρ, _, _, σε2 = _shock_moments(S)
 
-    ā = a_bar === nothing ? 0.5 * (a_min + a_max) : a_bar
+    ā = a_bar === nothing ? _steady_state_asset(p, g) : a_bar
     c̄ = ȳ + p.r * ā
     Fa, Fz = _coefficients_first_order(p; ρ = ρ, ȳ = ȳ, R = R)
 
@@ -268,15 +334,11 @@ function solve_perturbation_stoch(
                 c0 = max(c0, Tθ(1e-12))
                 a1 = clamp(R * a0 + exp(z) - c0, a_min, a_max)
                 da1 = a1 - ā
-                # Expectation over next shock using row j of Π
-                Emu = 0.0
-                for jp = 1:Nz
-                    zp = z_grid[jp]
-                    cp =
-                        c̄ + A * da1 + B * zp + 0.5 * (C * da1^2 + 2D * da1 * zp + E * zp^2)
-                    cp = max(cp, Tθ(1e-12))
-                    Emu += Π[j, jp] * (c0 / cp)^(p.σ)
-                end
+                cp0 = c̄ + A * da1 + 0.5 * C * da1^2
+                cp1 = B + D * da1
+                cp2 = E
+                μ = ρ * z
+                Emu = _gaussian_ratio_expectation(c0, cp0, cp1, cp2, p.σ; μ = μ, σϵ2 = σε2)
                 r[k] = one(Tθ) - p.β * R * Emu
             end
             return r
@@ -292,25 +354,26 @@ function solve_perturbation_stoch(
     c = Array{Float64}(undef, Na, Nz)
     a_next = similar(c)
     cmin = 1e-12
+    available = similar(a_grid)
     @inbounds for j = 1:Nz
         z = z_grid[j]
+        col = view(c, :, j)
         for i = 1:Na
             ai = a_grid[i]
             da = ai - ā
-            cij = c̄ + Fa * da + Fz * z + 0.5 * (C2 * da^2 + 2D2 * da * z + E2 * z^2)
-            cij = clamp(cij, cmin, exp(z) + R * ai - a_min)
-            c[i, j] = cij
-            a_next[i, j] = clamp(R * ai + exp(z) - cij, a_min, a_max)
+            col[i] = c̄ + Fa * da + Fz * z + 0.5 * (C2 * da^2 + 2D2 * da * z + E2 * z^2)
+            available[i] = exp(z) + R * ai - a_min
         end
+        clamp_policy!(col, cmin, available)
+        a_col = view(a_next, :, j)
+        @. a_col = clamp(R * a_grid + exp(z) - col, a_min, a_max)
     end
 
     resid = euler_resid_stoch_grid(p, a_grid, z_grid, Π, c)
     iters = 1
     converged = true
-    # prune boundary asset points when computing maximum residual
-    lo = Na > 2 ? 2 : 1
-    hi = Na > 2 ? Na - 1 : Na
-    max_resid = maximum(view(resid, lo:hi, :))
+    # RMSE on non-binding entries
+    max_resid = rmse_nonbinding(resid, a_next, a_min, bind_tol)
     opts = (;
         maxit = iters,
         runtime = (time_ns() - t0) / 1e9,
@@ -323,15 +386,19 @@ function solve_perturbation_stoch(
         order = order,
         fit_ok = fit_ok,
         quad_coeffs = (C2 = C2, D2 = D2, E2 = E2),
+        expansion_point = (ā = ā, z̄ = 0.0),
+        resid_metric = :rmse,
     )
     return (
         a_grid = a_grid,
+        z_grid = z_grid,
         c = c,
         a_next = a_next,
         resid = resid,
         iters = iters,
         converged = converged,
         max_resid = max_resid,
+        rmse = max_resid,
         model_params = p,
         opts = opts,
     )
