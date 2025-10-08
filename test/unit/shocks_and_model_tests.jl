@@ -1,6 +1,7 @@
 const Shocks = ThesisProject.Shocks
 const ConsumerSaving = ThesisProject.ConsumerSaving
 const ModelFactory = ThesisProject.ModelFactory
+const ConsumerSavingVAR = ThesisProject.ConsumerSavingVAR
 
 @testset "Shock discretization" begin
     shocks =
@@ -37,6 +38,28 @@ end
     @test model_shock.shocks !== nothing
     @test hasproperty(model_shock.params, :ρ_shock)
     @test hasproperty(model_shock.params, :σ_shock)
+end
+
+@testset "Consumer saving vector-income model" begin
+    cfg = deterministic_config()
+    vec_params = (
+        model = (name = :cs_vec,),
+        params = (
+            y = [1.0, 1.1],
+            A = [[0.9, 0.1], [0.05, 0.95]],
+            Σ = [[0.1, 0.0], [0.0, 0.1]],
+        ),
+    )
+    cfg_vec = deep_merge(cfg, vec_params)
+
+    model_vec = ConsumerSavingVAR.build_cs_var_model(cfg_vec)
+    @test model_vec isa ConsumerSavingVAR.ConsumerSavingVARModel
+    @test model_vec.params.y_dim == 2
+    @test size(model_vec.params.A) == (2, 2)
+    @test model_vec.shocks.ε_dim == 2
+
+    model_factory_vec = ModelFactory.build_model(cfg_vec)
+    @test model_factory_vec isa ConsumerSavingVAR.ConsumerSavingVARModel
 end
 
 @testset "Model factory" begin

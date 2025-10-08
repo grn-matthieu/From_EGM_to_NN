@@ -25,6 +25,7 @@ include("utils/Diagnostics.jl")
 # 3) shared + models + model builder
 include("models/shared/Shocks.jl")
 include("models/baseline/ConsumerSaving.jl")
+include("models/baseline/ConsumerSavingVAR.jl")
 include("core/model_factory.jl")
 
 # 4) solvers (pure kernels)

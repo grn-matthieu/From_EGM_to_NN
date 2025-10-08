@@ -71,6 +71,43 @@ function validate_config(cfg::NamedTuple)
         return v
     end
 
+    function _check_numeric_vector(vec; name::AbstractString)
+        vec isa AbstractVector || error("$(name) must be a vector")
+        length(vec) > 0 || error("$(name) must not be empty")
+        for (i, val) in enumerate(vec)
+            val isa Real || error("$(name)[$i] not numeric")
+        end
+        return length(vec)
+    end
+
+    function _check_numeric_matrix_repr(mat; name::AbstractString)
+        if mat isa AbstractMatrix
+            size(mat, 1) > 0 || error("$(name) must have at least one row")
+            size(mat, 2) > 0 || error("$(name) must have at least one column")
+            for (idx, val) in enumerate(mat)
+                val isa Real || error("$(name) entry $idx not numeric")
+            end
+            return size(mat, 1), size(mat, 2)
+        elseif mat isa AbstractVector
+            rows = length(mat)
+            rows > 0 || error("$(name) must have at least one row")
+            first_row = mat[1]
+            first_row isa AbstractVector || error("$(name) rows must be vectors")
+            cols = length(first_row)
+            cols > 0 || error("$(name) must have at least one column")
+            for (i, row) in enumerate(mat)
+                row isa AbstractVector || error("$(name) rows must be vectors")
+                length(row) == cols || error("$(name) rows must have equal length")
+                for (j, val) in enumerate(row)
+                    val isa Real || error("$(name)[$i,$j] not numeric")
+                end
+            end
+            return rows, cols
+        else
+            error("$(name) must be a matrix or a vector of vectors")
+        end
+    end
+
     # top-level
     for sect in (:model, :params, :grids, :solver)
         hasproperty(cfg, sect) || error("missing $sect")
@@ -79,6 +116,7 @@ function validate_config(cfg::NamedTuple)
 
     # model
     hasproperty(cfg.model, :name) || error("missing model.name")
+    model_name = Symbol(cfg.model.name)
 
     # params
     p = cfg.params
@@ -98,8 +136,40 @@ function validate_config(cfg::NamedTuple)
         getproperty(p, :r) > -1 || error("r ≤ -1")
     end
     if hasproperty(p, :y)
-        getproperty(p, :y) isa Real || error("params.y not numeric")
-        getproperty(p, :y) > 0 || error("y ≤ 0")
+        y_val = getproperty(p, :y)
+        if model_name == :cs_vec
+            len =
+                y_val isa AbstractVector ? _check_numeric_vector(y_val; name = "params.y") :
+                begin
+                    y_val isa Real || error("params.y not numeric")
+                    y_val > 0 || error("y ≤ 0")
+                    1
+                end
+            len > 0 || error("params.y must not be empty")
+        else
+            y_val isa Real || error("params.y not numeric")
+            y_val > 0 || error("y ≤ 0")
+        end
+    end
+
+    if model_name == :cs_vec
+        hasproperty(p, :A) || error("missing params.A")
+        hasproperty(p, :Epsilon) || error("missing params.Epsilon")
+        Ay = getproperty(p, :A)
+        rows_A, cols_A = _check_numeric_matrix_repr(Ay; name = "params.A")
+        rows_A == cols_A || error("params.A must be square")
+
+        Ey = getproperty(p, :Epsilon)
+        rows_E, _ = _check_numeric_matrix_repr(Ey; name = "params.Epsilon")
+        rows_E == rows_A ||
+            error("params.Epsilon must have the same number of rows as params.A")
+
+        if hasproperty(p, :y)
+            y_val = getproperty(p, :y)
+            y_len = y_val isa AbstractVector ? length(y_val) : 1
+            y_len == rows_A ||
+                error("params.y length must match dimension implied by params.A")
+        end
     end
 
     # grids
