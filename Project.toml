@@ -1,7 +1,7 @@
 name = "ThesisProject"
 uuid = "858fd8f9-c2bb-462a-9462-edbfec3d0185"
 authors = ["Matthieu Grenier <matthieu.grenier@ensae.fr>"]
-version = "0.6.0"
+version = "0.7.0"
 
 [deps]
 Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
