@@ -24,7 +24,7 @@ solver:
   tol: 1.0e-3
   tol_pol: 1.0e-6
   maxit: 10000
-  verbose: true
+  verbose: false
   relax: 0.5
   warm_start: default
   egm:

@@ -124,6 +124,7 @@ function validate_config(cfg::NamedTuple)
 
     # solver
     s = cfg.solver
+    # required_common should be Symbols because we validate NamedTuples
     required_common = (:method, :tol, :tol_pol, :maxit, :verbose, :relax, :warm_start)
     for key in required_common
         hasproperty(s, key) || error("missing solver.$key")

@@ -36,7 +36,7 @@ deep_merge(a::NamedTuple, b) = merge(a, b)
 
 deep_merge(a, b) = b
 
-function _base_solver_block(; method::Symbol = :EGM)
+function _base_solver_block(; method::String = "EGM")
     return (
         method = method,
         tol = 1.0e-5,
@@ -75,7 +75,7 @@ function _base_solver_block(; method::Symbol = :EGM)
 end
 
 function deterministic_config(;
-    method::Symbol = :EGM,
+    method::String = "EGM",
     Na::Int = 21,
     a_min::Real = 0.0,
     a_max::Real = 5.0,
@@ -95,7 +95,7 @@ function deterministic_config(;
     random_cfg = (seed = UInt64(random_seed), master_rng = master_rng(random_seed))
 
     cfg = (
-        model = (name = :cs,),
+        model = (name = "cs",),
         params = (β = β, σ = σ, r = r, y = y),
         grids = (Na = Na, a_min = a_min, a_max = a_max),
         utility = (u_type = utility_type,),
@@ -111,12 +111,12 @@ function deterministic_config(;
 end
 
 function stochastic_config(;
-    method::Symbol = :EGM,
+    method::String = "EGM",
     shock_overrides::NamedTuple = NamedTuple(),
     kwargs...,
 )
     base_shocks =
-        (active = true, method = :tauchen, ρ_shock = 0.9, σ_shock = 0.05, Nz = 3, m = 1.5)
+        (active = true, method = "tauchen", ρ_shock = 0.9, σ_shock = 0.05, Nz = 3, m = 1.5)
     shocks = deep_merge(base_shocks, shock_overrides)
     return deterministic_config(; method = method, shocks = shocks, kwargs...)
 end

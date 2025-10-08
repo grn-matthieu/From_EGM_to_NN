@@ -263,10 +263,8 @@ function loss_euler_fb_aio!(chain, ps, st, batch, model_cfg, rng)
     h = T.(vec(ensure_row(out[:h])))
     a_term = @. one(T) - c0 / w0
 
-    ρ = T(P.ρ)
-    σ_shocks =
-        hasproperty(model_cfg, :sigma_shocks) && model_cfg.sigma_shocks !== nothing ?
-        T(model_cfg.sigma_shocks) : T(P.σ_shocks)
+    ρ = T(P.ρ_shock)
+    σ_shocks = T(P.σ_shock)
     ε1 = randn_like(rng, z0)
     ε2 = randn_like(rng, z0)
     z1 = @. ρ * z0 + σ_shocks * ε1

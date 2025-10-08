@@ -10,7 +10,6 @@ using ..Determinism:
 using ..API:
     Solution, AbstractModel, AbstractMethod, get_params, get_grids, get_shocks, solve
 using ..CommonInterp: interp_linear!
-using ..UtilsConfig: maybe
 
 
 """
@@ -18,8 +17,7 @@ using ..UtilsConfig: maybe
 
 Simulates a panel of N agents for T periods using a solved policy from `method`
 on `model`. Randomness is driven by a master RNG: prefer `cfg.random.master_rng`
-when present, otherwise fall back to the `rng` keyword (which can be either a
-`MasterRNG` or any `AbstractRNG`). The master RNG itself is never mutated;
+when present. The master RNG itself is never mutated;
 instead deterministic sub-generators are derived for the solver call and each
 agent.
 
@@ -32,17 +30,13 @@ function simulate_panel(
     cfg::NamedTuple;
     N::Int = 1_000,
     T::Int = 200,
-    rng = nothing,
+    master_rng = nothing,
 )
-    # Solve once and for all to get the optimal policy fun and grids
-    cfg_master =
-        hasproperty(cfg, :random) && hasproperty(cfg.random, :master_rng) ?
-        promote_master_rng(cfg.random.master_rng) : nothing
-    master = rng === nothing ? cfg_master : promote_master_rng(rng)
-    master === nothing &&
-        error("No master RNG available; pass `rng` or ensure cfg.random.seed is set")
+    cand = master_rng !== nothing ? master_rng : make_master_rng(cfg.random.seed)
+    resolved_master = promote_master_rng(cand)
 
-    solve_rng = derive_rng(master, :panel_solve)
+    # Solve once and for all to get the optimal policy fun and grids
+    solve_rng = derive_rng(resolved_master, :panel_solve)
     sol = solve(model, method, cfg; rng = solve_rng)
 
     p = get_params(model)
@@ -67,11 +61,6 @@ function simulate_panel(
 
 
     # --- Seed handling ---
-    # Derive a panel-specific master seed from the base master RNG. Individual
-    # agent RNGs are in turn derived from this panel master.
-    panel_master_seed = derive_seed(master, :panel)
-    panel_master = make_master_rng(panel_master_seed)
-
     if S === nothing
         # Deterministic model: document shocks as zeros in the output
         zdraws .= 0.0
@@ -98,7 +87,7 @@ function simulate_panel(
 
     @inbounds for n in axes(assets, 1)
         # independent rng per agent derived from the panel master rng
-        agent_seed = derive_seed(panel_master, n)
+        agent_seed = derive_seed(master_rng, n)
         seeds[n] = agent_seed
         arng = make_rng(agent_seed)
 
@@ -153,8 +142,8 @@ function simulate_panel(
     final_asset_std = std(final_assets)
 
     diagnostics = (
-        rng_kind = string(typeof(panel_master)),
-        master_seed = master_seed(panel_master),
+        rng_kind = string(typeof(master_rng)),
+        master_seed = master_seed(master_rng),
         mean_log_c_growth = mean_log_c_growth,
         final_asset_mean = final_asset_mean,
         final_asset_std = final_asset_std,

@@ -11,12 +11,12 @@
         ),
         maxit = 50,
     )
-    cfg = deterministic_config(method = :NN, Na = 12, solver_overrides = nn_overrides)
+    cfg = stochastic_config(method = "NN", Na = 12, solver_overrides = nn_overrides)
     model, method = build_model_and_method(cfg)
-    sol = ThesisProject.solve(model, method, cfg; rng = derive_solver_rng(cfg, :NN))
+    sol = ThesisProject.solve(model, method, cfg; rng = derive_solver_rng(cfg, "NN"))
     @test sol isa ThesisProject.Solution
     @test haskey(sol.policy, :c)
-    @test sol.diagnostics.method == :NN
+    @test sol.diagnostics.method == "NN"
     @test sol.metadata[:max_it] == method.opts.epochs
 
     sol_cfg = ThesisProject.solve(cfg; rng = cfg.random.master_rng)

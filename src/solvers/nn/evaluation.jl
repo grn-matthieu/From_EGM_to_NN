@@ -237,7 +237,7 @@ function eval_euler_residuals_mc(
 
     μ = Float32(P_resid.y)
     z0 = log.(y0) .- μ
-    ρ = Float32(P.ρ)
+    ρ = Float32(P.ρ_shock)
     σϵ =
         settings.sigma_shocks === nothing ? Float32(P.σ_shock) :
         Float32(settings.sigma_shocks)
@@ -361,7 +361,7 @@ function eval_euler_residuals_gh(
 
     μ = Float32(P_resid.y)
     z0 = log.(y0) .- μ
-    ρ = Float32(P.ρ)
+    ρ = Float32(P.ρ_shock)
     σϵ =
         settings.sigma_shocks === nothing ? Float32(P.σ_shock) :
         Float32(settings.sigma_shocks)

@@ -65,12 +65,7 @@ function solve(
     S = get_shocks(model)
     U = get_utility(model)
 
-    cfg_master =
-        hasproperty(cfg, :random) && hasproperty(cfg.random, :master_rng) ?
-        promote_master_rng(cfg.random.master_rng) : nothing
-    master = rng === nothing ? cfg_master : promote_master_rng(rng)
-    master === nothing &&
-        error("No master RNG available; pass `rng` or ensure cfg.random.seed is set")
+    master = rng !== nothing ? cfg.random.master_rng : make_master_rng(rng)
 
     # Call the NN kernel to solve the model and return the solution struct
     sol = solve_nn(model; opts = method.opts, rng = derive_rng(master, :nn_kernel))

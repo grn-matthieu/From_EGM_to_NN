@@ -10,13 +10,14 @@ const Chebyshev = ThesisProject.Chebyshev
     y = x .^ 2
     out = similar(x)
     CommonInterp.interp_linear!(out, x, y, [0.5, 1.5])
-    @test isapprox(out[1], 0.25; atol = 1e-12)
-    @test isapprox(out[2], 2.25; atol = 1e-12)
-    @test CommonInterp.interp_linear(x, y, 2.5) ≈ 6.25
+    @test isapprox(out[1], 0.5; atol = 1e-12)
+    @test isapprox(out[2], 2.5; atol = 1e-12)
+    @test CommonInterp.interp_linear(x, y, 2.5) ≈ 6.5
 
     monotone_y = cumsum(fill(1.0, length(x)))
-    pchip_out = similar(x)
-    CommonInterp.interp_pchip!(pchip_out, x, monotone_y, [1.0, 2.0, 3.5])
+    xq = [1.0, 2.0, 3.5]
+    pchip_out = similar(xq)
+    CommonInterp.interp_pchip!(pchip_out, x, monotone_y, xq)
     @test all(diff(pchip_out) .>= 0)
 end
 
@@ -36,8 +37,8 @@ end
     PolicyUtils.clamp_policy!(arr, 0.2, 1.0)
     @test maximum(arr) <= 1.0
 
-    a_endo = [-1.0, 0.2, 0.5]
-    c_endo = [0.1, 0.2, 0.3]
+    a_endo = [-1.0, 0.2, 0.5, 0.8, 1.0]
+    c_endo = [0.1, 0.2, 0.3, 0.4, 0.5]
     PolicyUtils.enforce_borrowing_constraint!(a_endo, c_endo, 0.0, 1.0, 1.01, a_grid)
     @test minimum(a_endo) >= 0.0
 
@@ -112,7 +113,7 @@ end
     @test length(V) == g[:a].N
 
     cfg_s = stochastic_config()
-    model_s = ThesisProject.build_model(cfg_s)
+    model_s = ThesisProject.build_model(cfg_s)  
     ps = ThesisProject.get_params(model_s)
     gs = ThesisProject.get_grids(model_s)
     Ss = ThesisProject.get_shocks(model_s)

@@ -79,6 +79,26 @@ const SUPPORTED_METHODS = (:TimeIteration, :EGM, :Projection, :Perturbation, :NN
 
 using ..Determinism: derive_rng, promote_master_rng, MasterRNG, make_master_rng
 
+# Recursively merge two NamedTuples: keys in `b` override or are merged
+# into `a` without erasing nested fields not mentioned in `b`.
+function deep_merge(a::NamedTuple, b::NamedTuple)
+    res = a
+    for k in keys(b)
+        vb = getproperty(b, k)
+        if hasproperty(res, k)
+            va = getproperty(res, k)
+            if va isa NamedTuple && vb isa NamedTuple
+                res = merge(res, (k => deep_merge(va, vb),))
+            else
+                res = merge(res, (k => vb,))
+            end
+        else
+            res = merge(res, (k => vb,))
+        end
+    end
+    return res
+end
+
 """
     solve(model::AbstractModel, cfg::NamedTuple)
 
@@ -109,12 +129,7 @@ function solve(model::AbstractModel, cfg::NamedTuple; rng = nothing)
 
     solutions = Vector{Solution}(undef, length(methods))
 
-    cfg_master =
-        hasproperty(cfg, :random) && hasproperty(cfg.random, :master_rng) ?
-        promote_master_rng(cfg.random.master_rng) : nothing
-    master = rng === nothing ? cfg_master : promote_master_rng(rng)
-    master === nothing &&
-        error("No master RNG available; pass `rng` or ensure config.random.seed is set.")
+    master = cfg.random.master_rng
 
     for (i, mname) in enumerate(methods)
         # create a cfg copy with solver.method set to the single method name
@@ -172,23 +187,12 @@ function solve(cfg::NamedTuple; rng = nothing)
     validate_config(cfg)
 
     # Enrich cfg with a MasterRNG if a seed is available and a master isn't
-    local_cfg = cfg
-    if hasproperty(cfg, :random)
-        r = cfg.random
-        has_master = hasproperty(r, :master_rng) && r.master_rng isa MasterRNG
-        if !has_master && hasproperty(r, :seed) && r.seed !== nothing
-            master = make_master_rng(r.seed)
-            # normalize seed to UInt64 for consistency with loader
-            seed_uint = UInt64(r.seed)
-            r2 = merge(r, (seed = seed_uint, master_rng = master))
-            local_cfg = merge(cfg, (random = r2,))
-        end
-    end
+    master = rng !== nothing ? cfg.random.master_rng : make_master_rng(rng)
 
     # Decide if a single method is requested to return a single Solution
-    requested = local_cfg.solver.method
+    requested = cfg.solver.method
     single = false
-    if requested === :all || requested == "all"
+    if requested == "all"
         single = false
     elseif requested isa AbstractVector
         single = length(requested) == 1
@@ -196,23 +200,12 @@ function solve(cfg::NamedTuple; rng = nothing)
         single = true
     end
 
-    model = build_model(local_cfg)
+    model = build_model(cfg)
     if single
-        # Normalize the single method symbol and call the per-method solve
-        mname =
-            requested isa AbstractVector ?
-            (requested[1] isa Symbol ? requested[1] : Symbol(requested[1])) :
-            (requested isa Symbol ? requested : Symbol(requested))
-        solver_nt = merge(local_cfg.solver, (method = mname,))
-        cfg_m = merge(local_cfg, (solver = solver_nt,))
-        method_m = build_method(cfg_m)
-        local_master =
-            rng === nothing &&
-            hasproperty(local_cfg, :random) &&
-            hasproperty(local_cfg.random, :master_rng) ? local_cfg.random.master_rng : rng
-        return solve(model, method_m, cfg_m; rng = local_master)
+        method = build_method(cfg)
+        return solve(model, method, cfg; rng = master)
     else
-        return solve(model, local_cfg; rng = rng)
+        return solve(model, cfg; rng = master)
     end
 end
 
@@ -243,7 +236,12 @@ function solve(
             solver_nt = merge(solver_nt, (nn = nn_nt,))
             cfg = merge(cfg, (solver = solver_nt,))
         end
-        cfg = merge(cfg, opts)
+        # Merge opts into cfg without erasing nested data not mentioned in opts
+        if opts isa NamedTuple
+            cfg = deep_merge(cfg, opts)
+        else
+            cfg = merge(cfg, opts)
+        end
     end
     return solve(cfg; rng = rng)
 end
