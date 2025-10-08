@@ -113,7 +113,7 @@ end
     @test length(V) == g[:a].N
 
     cfg_s = stochastic_config()
-    model_s = ThesisProject.build_model(cfg_s)  
+    model_s = ThesisProject.build_model(cfg_s)
     ps = ThesisProject.get_params(model_s)
     gs = ThesisProject.get_grids(model_s)
     Ss = ThesisProject.get_shocks(model_s)
