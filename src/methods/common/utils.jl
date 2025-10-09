@@ -3,7 +3,8 @@ module MethodUtils
 using Base: @views
 using ..CommonValidators: is_nondec, is_positive, respects_amin
 
-export build_consumption_initializer, validate_policy!, DEFAULT_VALIDATION_CHECKS
+export build_consumption_initializer,
+    validate_policy!, DEFAULT_VALIDATION_CHECKS, is_csvar_model
 
 const BASIC_WARM_STARTS = (:default, :half_resources, :none)
 const DEFAULT_VALIDATION_CHECKS =
@@ -56,6 +57,10 @@ function _build_c_init_det(p, g, warm::Symbol, custom_c)
             error("custom deterministic warm-start must be a vector")
         end
     end
+end
+
+@inline function is_csvar_model(params)
+    hasproperty(params, :y_dim) && getproperty(params, :y_dim) > 1
 end
 
 function _build_c_init_stoch(p, g, shocks, warm::Symbol, custom_c)

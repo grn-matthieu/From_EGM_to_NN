@@ -24,9 +24,10 @@ using ..PolicyUtils:
     init_consumption_det,
     relaxation_step!,
     rmse_nonbinding
+using ..SolverPlaceholders: build_placeholder_solution
 using Printf
 
-export solve_ti_det, solve_ti_stoch
+export solve_ti_det, solve_ti_stoch, solve_ti_placeholder
 
 """
     solve_consumption_root(euler_gap, c_lo, c_hi, root_tol, max_root_iter)
@@ -224,6 +225,39 @@ function solve_ti_det_impl(
         model_params,
         opts,
         delta_pol = Δpol,
+    )
+end
+
+function solve_ti_placeholder(
+    model_params,
+    model_grids,
+    model_shocks,
+    model_utility;
+    tol::Real = NaN,
+    tol_pol::Real = NaN,
+    maxit::Int = 0,
+    interp_kind::InterpKind = LinearInterp(),
+    relax::Real = 0.0,
+    verbose::Bool = false,
+    c_init = nothing,
+)
+    opts = (;
+        tol = tol,
+        tol_pol = tol_pol,
+        maxit = maxit,
+        interp_kind = interp_kind,
+        relax = relax,
+        verbose = verbose,
+        resid_metric = :placeholder,
+        c_init = c_init,
+    )
+    return build_placeholder_solution(
+        :TimeIteration,
+        model_params,
+        model_grids,
+        model_shocks;
+        opts = opts,
+        note = "placeholder TimeIteration solution",
     )
 end
 

@@ -10,10 +10,11 @@ using ..EulerResiduals:
     euler_resid_det, euler_resid_stoch, euler_resid_det_grid, euler_resid_stoch_grid
 using ..CommonInterp: InterpKind, LinearInterp
 using ..PolicyUtils: clamp_policy!, compute_binding_tolerance, rmse_nonbinding
+using ..SolverPlaceholders: build_placeholder_solution
 using ForwardDiff
 using LinearAlgebra
 
-export solve_perturbation_det, solve_perturbation_stoch
+export solve_perturbation_det, solve_perturbation_stoch, solve_perturbation_placeholder
 
 const DEFAULT_BINDING_TOL = 1e-12
 
@@ -401,6 +402,38 @@ function solve_perturbation_stoch(
         rmse = max_resid,
         model_params = p,
         opts = opts,
+    )
+end
+
+function solve_perturbation_placeholder(
+    model_params,
+    model_grids,
+    model_shocks,
+    model_utility;
+    a_bar = nothing,
+    order::Int = 1,
+    h_a = nothing,
+    h_z = nothing,
+    tol_fit::Real = NaN,
+    maxit_fit::Int = 0,
+)
+    opts = (;
+        maxit = maxit_fit,
+        runtime = 0.0,
+        seed = nothing,
+        order = order,
+        tol_fit = tol_fit,
+        h_a = h_a,
+        h_z = h_z,
+        a_bar = a_bar,
+    )
+    return build_placeholder_solution(
+        :Perturbation,
+        model_params,
+        model_grids,
+        model_shocks;
+        opts = opts,
+        note = "placeholder perturbation solution",
     )
 end
 

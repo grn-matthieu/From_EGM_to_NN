@@ -9,12 +9,13 @@ module Perturbation
 using ..API
 import ..API: solve
 
-using ..PerturbationKernel: solve_perturbation_det, solve_perturbation_stoch
+using ..PerturbationKernel:
+    solve_perturbation_det, solve_perturbation_stoch, solve_perturbation_placeholder
 using ..ValueFunction: compute_value_policy
 using ..Determinism: canonicalize_cfg, hash_hex
 using ..UtilsConfig: maybe
 using ..UtilsDiagnostics: mean_abs_error
-using ..MethodUtils: validate_policy!
+using ..MethodUtils: validate_policy!, is_csvar_model
 
 export PerturbationMethod, build_perturbation_method
 
@@ -55,8 +56,23 @@ function solve(
     S = get_shocks(model)
     U = get_utility(model)
 
-    sol =
-        S === nothing ?
+    csvar = is_csvar_model(p)
+    shocks_for_solver = csvar ? nothing : S
+
+    sol = if csvar
+        solve_perturbation_placeholder(
+            p,
+            g,
+            shocks_for_solver,
+            U;
+            a_bar = method.opts.a_bar,
+            order = method.opts.order,
+            h_a = method.opts.h_a,
+            h_z = method.opts.h_z,
+            tol_fit = method.opts.tol_fit,
+            maxit_fit = method.opts.maxit_fit,
+        )
+    elseif S === nothing
         solve_perturbation_det(
             p,
             g,
@@ -66,7 +82,8 @@ function solve(
             h_a = method.opts.h_a,
             tol_fit = method.opts.tol_fit,
             maxit_fit = method.opts.maxit_fit,
-        ) :
+        )
+    else
         solve_perturbation_stoch(
             p,
             g,
@@ -79,6 +96,7 @@ function solve(
             tol_fit = method.opts.tol_fit,
             maxit_fit = method.opts.maxit_fit,
         )
+    end
 
     ee = sol.resid
     ee_vec = ee isa AbstractMatrix ? vec(maximum(ee, dims = 2)) : ee
@@ -96,7 +114,8 @@ function solve(
         :a => (; value = sol.a_next, grid = sol.a_grid),
     )
 
-    value = compute_value_policy(p, g, S, U, policy)
+    shocks_for_value = csvar ? nothing : S
+    value = compute_value_policy(p, g, shocks_for_value, U, policy)
 
     model_id = hash_hex(canonicalize_cfg(cfg))
     diagnostics = (;
@@ -132,6 +151,13 @@ function solve(
         verbose = method.opts.verbose,
         checks = (:c_positive, :a_above_min),
     )
+
+    if hasproperty(sol, :placeholder) && sol.placeholder
+        metadata[:placeholder] = true
+        if hasproperty(sol.opts, :note)
+            metadata[:placeholder_note] = sol.opts.note
+        end
+    end
 
     return Solution(
         policy = policy,

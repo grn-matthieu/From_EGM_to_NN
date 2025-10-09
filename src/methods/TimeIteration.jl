@@ -9,14 +9,17 @@ module TimeIteration
 using ..API
 import ..API: solve
 
-using ..TimeIterationKernel: solve_ti_det, solve_ti_stoch
+using ..TimeIterationKernel: solve_ti_det, solve_ti_stoch, solve_ti_placeholder
 using ..ValueFunction: compute_value_policy
 using ..Determinism: canonicalize_cfg, hash_hex
 using ..CommonInterp: LinearInterp, MonotoneCubicInterp
 using ..UtilsConfig: maybe
 using ..UtilsDiagnostics: mean_abs_error
 using ..MethodUtils:
-    build_consumption_initializer, validate_policy!, DEFAULT_VALIDATION_CHECKS
+    build_consumption_initializer,
+    validate_policy!,
+    DEFAULT_VALIDATION_CHECKS,
+    is_csvar_model
 
 export TimeIterationMethod, build_timeiteration_method
 
@@ -58,28 +61,39 @@ function solve(
     custom_c_vec = custom_c_data isa AbstractVector ? custom_c_data : nothing
     custom_c_mat = custom_c_data isa AbstractMatrix ? custom_c_data : nothing
 
-    c_init =
-        S === nothing ?
-        build_consumption_initializer(
+    csvar = is_csvar_model(p)
+    shocks_for_solver = csvar ? nothing : S
+
+    c_init = nothing
+    if !csvar
+        custom_c = shocks_for_solver === nothing ? custom_c_vec : custom_c_mat
+        c_init = build_consumption_initializer(
             p,
             g;
-            shocks = nothing,
+            shocks = shocks_for_solver,
             warm_start = method.opts.warm_start,
-            custom_c = custom_c_vec,
-        ) :
-        build_consumption_initializer(
-            p,
-            g;
-            shocks = S,
-            warm_start = method.opts.warm_start,
-            custom_c = custom_c_mat,
+            custom_c = custom_c,
         )
+    end
 
     ik = method.opts.interp_kind
     interp = ik == :linear ? LinearInterp() : MonotoneCubicInterp()
 
-    sol =
-        S === nothing ?
+    sol = if csvar
+        solve_ti_placeholder(
+            p,
+            g,
+            shocks_for_solver,
+            U;
+            tol = method.opts.tol,
+            tol_pol = method.opts.tol_pol,
+            maxit = method.opts.maxit,
+            interp_kind = interp,
+            relax = method.opts.relax,
+            verbose = method.opts.verbose,
+            c_init = c_init,
+        )
+    elseif S === nothing
         solve_ti_det(
             p,
             g,
@@ -91,7 +105,8 @@ function solve(
             relax = method.opts.relax,
             verbose = method.opts.verbose,
             c_init = c_init,
-        ) :
+        )
+    else
         solve_ti_stoch(
             p,
             g,
@@ -105,6 +120,7 @@ function solve(
             verbose = method.opts.verbose,
             c_init = c_init,
         )
+    end
 
     ee = sol.resid
     # For stochastic solutions `ee` is a Na x Nz matrix (Euler residuals per a,z).
@@ -136,7 +152,8 @@ function solve(
         :a => (; value = sol.a_next, grid = g[:a].grid),
     )
 
-    value = compute_value_policy(p, g, S, U, policy)
+    shocks_for_value = csvar ? nothing : S
+    value = compute_value_policy(p, g, shocks_for_value, U, policy)
     model_id = hash_hex(canonicalize_cfg(cfg))
 
     metadata = Dict{Symbol,Any}(
@@ -157,8 +174,6 @@ function solve(
     )
 
     # Validation
-    c_val = policy[:c].value
-    a_val = policy[:a].value
     amin = g[:a].min
 
     validate_policy!(
@@ -169,6 +184,13 @@ function solve(
         verbose = method.opts.verbose,
         checks = DEFAULT_VALIDATION_CHECKS,
     )
+
+    if hasproperty(sol, :placeholder) && sol.placeholder
+        metadata[:placeholder] = true
+        if hasproperty(sol.opts, :note)
+            metadata[:placeholder_note] = sol.opts.note
+        end
+    end
 
     diagnostics = (;
         model_id = model_id,
