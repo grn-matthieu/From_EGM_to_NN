@@ -70,7 +70,10 @@ end
         method_obj = ThesisProject.build_method(cfg_method)
         sol = ThesisProject.solve(model_obj, method_obj, cfg_method)
         @test sol isa ThesisProject.Solution
-        @test get(sol.metadata, :placeholder, false)
+        expected_placeholder = method_name != :EGM
+        @test get(sol.metadata, :placeholder, false) == expected_placeholder
+        @test haskey(sol.metadata, :valid)
+        @test sol.metadata[:valid] isa Bool
     end
 end
 

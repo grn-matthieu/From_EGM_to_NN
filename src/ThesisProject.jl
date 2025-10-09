@@ -37,6 +37,7 @@ include("solvers/common/chebyshev.jl")
 include("solvers/common/residuals.jl")
 include("solvers/common/placeholders.jl")
 include("solvers/common/csvar_utils.jl")
+include("solvers/common/integration.jl")
 include("solvers/common/validators.jl")
 
 # projection solver

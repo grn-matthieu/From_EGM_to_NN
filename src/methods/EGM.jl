@@ -8,7 +8,7 @@ module EGM
 using ..API
 import ..API: solve
 
-using ..EGMKernel: solve_egm_det, solve_egm_stoch, solve_egm_placeholder
+using ..EGMKernel: solve_egm_det, solve_egm_stoch
 using ..ValueFunction: compute_value_policy
 using ..Determinism: canonicalize_cfg, hash_hex
 using ..CommonInterp: LinearInterp, MonotoneCubicInterp
@@ -37,6 +37,8 @@ function build_egm_method(cfg::NamedTuple)
     ik_raw = egm_cfg.interp_kind
     ik_sym = Symbol(lowercase(string(ik_raw)))
     warm_start = Symbol(lowercase(string(solver_cfg.warm_start)))
+    integration_raw = maybe(egm_cfg, :integration, :gh)
+    integration_sym = Symbol(lowercase(string(integration_raw)))
     return EGMMethod((
         name = maybe(cfg, :method, solver_cfg.method),
         tol = solver_cfg.tol,
@@ -46,6 +48,7 @@ function build_egm_method(cfg::NamedTuple)
         verbose = solver_cfg.verbose,
         warm_start = warm_start,
         relax = solver_cfg.relax,
+        integration = integration_sym,
     ))
 end
 
@@ -73,38 +76,26 @@ function solve(
     custom_c_mat = custom_c_data isa AbstractMatrix ? custom_c_data : nothing
 
     csvar = is_csvar_model(p)
-    shocks_for_solver = csvar ? nothing : S
-
-    c_init = nothing
-    if !csvar
-        custom_c = shocks_for_solver === nothing ? custom_c_vec : custom_c_mat
-        c_init = build_consumption_initializer(
-            p,
-            g;
-            shocks = shocks_for_solver,
-            warm_start = method.opts.warm_start,
-            custom_c = custom_c,
-        )
+    custom_c = if S === nothing
+        custom_c_vec
+    elseif csvar
+        custom_c_vec
+    else
+        custom_c_mat
     end
+
+    c_init = build_consumption_initializer(
+        p,
+        g;
+        shocks = S,
+        warm_start = method.opts.warm_start,
+        custom_c = custom_c,
+    )
 
     # --- Solution ---
     ik = method.opts.interp_kind
     interp = ik == :linear ? LinearInterp() : MonotoneCubicInterp()
-    sol = if csvar
-        solve_egm_placeholder(
-            p,
-            g,
-            shocks_for_solver,
-            U;
-            tol = method.opts.tol,
-            tol_pol = method.opts.tol_pol,
-            maxit = method.opts.maxit,
-            interp_kind = interp,
-            relax = method.opts.relax,
-            verbose = method.opts.verbose,
-            c_init = c_init,
-        )
-    elseif S === nothing
+    sol = if S === nothing
         solve_egm_det(
             p,
             g,
@@ -116,6 +107,7 @@ function solve(
             relax = method.opts.relax,
             verbose = method.opts.verbose,
             c_init = c_init,
+            integration_method = method.opts.integration,
         )
     else
         solve_egm_stoch(
@@ -130,6 +122,7 @@ function solve(
             relax = method.opts.relax,
             verbose = method.opts.verbose,
             c_init = c_init,
+            integration_method = method.opts.integration,
         )
     end
 
@@ -179,13 +172,6 @@ function solve(
         verbose = method.opts.verbose,
         checks = DEFAULT_VALIDATION_CHECKS,
     )
-
-    if hasproperty(sol, :placeholder) && sol.placeholder
-        metadata[:placeholder] = true
-        if hasproperty(sol.opts, :note)
-            metadata[:placeholder_note] = sol.opts.note
-        end
-    end
 
     # Model ID
     model_id = hash_hex(canonicalize_cfg(cfg))

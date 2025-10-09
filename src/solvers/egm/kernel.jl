@@ -20,6 +20,8 @@ using ..PolicyUtils:
     relaxation_step!,
     rmse_nonbinding,
     sort_policy_pairs!
+using ..CSVarUtils: csvar_income
+using ..SolverIntegration: integrate_expectation
 using ..SolverPlaceholders: build_placeholder_solution
 using Printf
 
@@ -46,6 +48,7 @@ function solve_egm_det(
     relax::Real = 0.5,
     verbose::Bool = false,
     c_init = nothing,
+    integration_method::Symbol = :none,
 )::NamedTuple
     return solve_egm_det_impl(
         interp_kind,
@@ -58,6 +61,7 @@ function solve_egm_det(
         relax = relax,
         verbose = verbose,
         c_init = c_init,
+        integration_method = integration_method,
     )
 end
 
@@ -75,6 +79,7 @@ function solve_egm_det_impl(
     relax::Real = 0.5,
     verbose::Bool = false,
     c_init = nothing,
+    integration_method::Symbol = :none,
 )::NamedTuple
     start_time = time_ns()
 
@@ -88,8 +93,10 @@ function solve_egm_det_impl(
     R = 1 + model_params.r
     γ = model_params.γ
     cmin = 1e-12
+    income =
+        hasproperty(model_params, :y_dim) ? csvar_income(model_params.y) : model_params.y
 
-    c = init_consumption_det(a_grid, a_min, R, model_params.y; c_init = c_init, cmin = cmin)
+    c = init_consumption_det(a_grid, a_min, R, income; c_init = c_init, cmin = cmin)
 
     cnew = similar(c)
     cnext = similar(c)
@@ -114,27 +121,34 @@ function solve_egm_det_impl(
         copyto!(c_prime, cold)
         ensure_minimum!(c_prime, cmin)
 
-        @. c_endo = model_utility.u_prime_inv(β * R * c_prime^(-γ))
-        @. a_endo = (a_grid - model_params.y + c_endo) / R
+        if hasproperty(model_params, :y_dim) && model_params.y_dim > 1
+            @inbounds for idx in eachindex(c_prime)
+                cval = c_prime[idx] <= cmin ? cmin : c_prime[idx]
+                integrand = _ -> model_utility.u_prime(cval)
+                EU = integrate_expectation(
+                    integration_method === :none ? :gh : integration_method,
+                    integrand,
+                    model_params,
+                    nothing,
+                    model_params.y,
+                )
+                c_endo[idx] = model_utility.u_prime_inv(β * R * EU)
+            end
+        else
+            @. c_endo = model_utility.u_prime_inv(β * R * c_prime^(-γ))
+        end
+        @. a_endo = (a_grid - income + c_endo) / R
 
-        enforce_borrowing_constraint!(
-            a_endo,
-            c_endo,
-            a_min,
-            model_params.y,
-            R,
-            a_grid;
-            cmin = cmin,
-        )
+        enforce_borrowing_constraint!(a_endo, c_endo, a_min, income, R, a_grid; cmin = cmin)
         sort_policy_pairs!(a_sorted, c_sorted, a_endo, c_endo)
 
         interp_linear!(cnew, a_sorted, c_sorted, a_grid)
-        cmax = @. model_params.y + R * a_grid - a_min
+        cmax = @. income + R * a_grid - a_min
         clamp_policy!(cnew, cmin, cmax)
 
         Δpol = relaxation_step!(c, cold, cnew, relax)
 
-        @. a_next = clamp(model_params.y + R * a_grid - c, a_min, a_max)
+        @. a_next = clamp(income + R * a_grid - c, a_min, a_max)
         interp_linear!(cnext, a_grid, c, a_next)
         ensure_minimum!(cnext, cmin)
         euler_resid_det!(resid, model_params, c, cnext)
@@ -152,7 +166,7 @@ function solve_egm_det_impl(
         end
     end
 
-    @. a_next = clamp(R * a_grid + model_params.y - c, a_min, a_max)
+    @. a_next = clamp(R * a_grid + income - c, a_min, a_max)
     interp_linear!(cnext, a_grid, c, a_next)
     ensure_minimum!(cnext, cmin)
     euler_resid_det!(resid, model_params, c, cnext)
@@ -169,6 +183,7 @@ function solve_egm_det_impl(
         resid_metric = :rmse,
         seed = nothing,
         runtime,
+        integration_method = integration_method,
     )
 
     return (;
@@ -243,8 +258,10 @@ function solve_egm_det_impl(
     R = 1 + model_params.r
     γ = model_params.γ
     cmin = 1e-12
+    income =
+        hasproperty(model_params, :y_dim) ? csvar_income(model_params.y) : model_params.y
 
-    c = init_consumption_det(a_grid, a_min, R, model_params.y; c_init = c_init, cmin = cmin)
+    c = init_consumption_det(a_grid, a_min, R, income; c_init = c_init, cmin = cmin)
 
     cnew = similar(c)
     cnext = similar(c)
@@ -269,28 +286,20 @@ function solve_egm_det_impl(
         ensure_minimum!(c_prime, cmin)
 
         @. c_endo = model_utility.u_prime_inv(β * R * c_prime^(-γ))
-        @. a_endo = (a_grid - model_params.y + c_endo) / R
+        @. a_endo = (a_grid - income + c_endo) / R
 
-        enforce_borrowing_constraint!(
-            a_endo,
-            c_endo,
-            a_min,
-            model_params.y,
-            R,
-            a_grid;
-            cmin = cmin,
-        )
+        enforce_borrowing_constraint!(a_endo, c_endo, a_min, income, R, a_grid; cmin = cmin)
         sort_policy_pairs!(a_sorted, c_sorted, a_endo, c_endo)
         enforce_strict_increase!(a_sorted)
 
         interp_pchip!(cnew, a_sorted, c_sorted, a_grid)
-        cmax = @. model_params.y + R * a_grid - a_min
+        cmax = @. income + R * a_grid - a_min
         clamp_policy!(cnew, cmin, cmax)
         enforce_monotone!(cnew)
 
         Δpol = relaxation_step!(c, cold, cnew, relax)
 
-        @. a_next = clamp(model_params.y + R * a_grid - c, a_min, a_max)
+        @. a_next = clamp(income + R * a_grid - c, a_min, a_max)
         interp_pchip!(cnext, a_grid, c, a_next)
         ensure_minimum!(cnext, cmin)
         euler_resid_det!(resid, model_params, c, cnext)
@@ -308,7 +317,7 @@ function solve_egm_det_impl(
         end
     end
 
-    @. a_next = clamp(R * a_grid + model_params.y - c, a_min, a_max)
+    @. a_next = clamp(R * a_grid + income - c, a_min, a_max)
     interp_pchip!(cnext, a_grid, c, a_next)
     ensure_minimum!(cnext, cmin)
     euler_resid_det!(resid, model_params, c, cnext)
@@ -325,6 +334,7 @@ function solve_egm_det_impl(
         resid_metric = :rmse,
         seed = nothing,
         runtime,
+        integration_method = integration_method,
     )
 
     return (;
@@ -361,6 +371,7 @@ function solve_egm_stoch(
     relax::Real = 0.5,
     verbose::Bool = false,
     c_init = nothing,
+    integration_method::Symbol = :gh,
 )::NamedTuple
     return solve_egm_stoch_impl(
         interp_kind,
@@ -374,6 +385,7 @@ function solve_egm_stoch(
         relax = relax,
         verbose = verbose,
         c_init = c_init,
+        integration_method = integration_method,
     )
 end
 
@@ -392,7 +404,25 @@ function solve_egm_stoch_impl(
     relax::Real = 0.5,
     verbose::Bool = false,
     c_init = nothing,
+    integration_method::Symbol = :gh,
 )::NamedTuple
+    if hasproperty(model_shocks, :process) &&
+       get(model_shocks, :process, nothing) == :gaussian_linear
+        return solve_egm_det(
+            model_params,
+            model_grids,
+            model_utility;
+            tol = tol,
+            tol_pol = tol_pol,
+            maxit = maxit,
+            interp_kind = LinearInterp(),
+            relax = relax,
+            verbose = verbose,
+            c_init = c_init isa AbstractArray ?
+                     (c_init isa AbstractVector ? c_init : nothing) : c_init,
+            integration_method = integration_method,
+        )
+    end
     start_time = time_ns()
 
     a_grid = model_grids[:a].grid
@@ -498,6 +528,7 @@ function solve_egm_stoch_impl(
         verbose,
         seed = nothing,
         runtime,
+        integration_method = integration_method,
     )
 
     return (;
@@ -527,6 +558,7 @@ function solve_egm_stoch_impl(
     relax::Real = 0.5,
     verbose::Bool = false,
     c_init = nothing,
+    integration_method::Symbol = :gh,
 )::NamedTuple
     start_time = time_ns()
 
@@ -647,6 +679,7 @@ function solve_egm_stoch_impl(
         resid_metric = :rmse,
         seed = nothing,
         runtime,
+        integration_method = integration_method,
     )
 
     return (;

@@ -2,6 +2,7 @@ module MethodUtils
 
 using Base: @views
 using ..CommonValidators: is_nondec, is_positive, respects_amin
+using ..CSVarUtils: csvar_income
 
 export build_consumption_initializer,
     validate_policy!, DEFAULT_VALIDATION_CHECKS, is_csvar_model
@@ -37,12 +38,13 @@ function _build_c_init_det(p, g, warm::Symbol, custom_c)
     a_grid = g[:a].grid
     a_min = g[:a].min
     R = 1 + p.r
+    income = is_csvar_model(p) ? csvar_income(p.y) : p.y
 
     if warm == :steady_state
         c = similar(a_grid, Float64)
         @inbounds for (i, a) in enumerate(a_grid)
-            cval = p.y + R * a - a
-            cmax = p.y + R * a - a_min
+            cval = income + R * a - a
+            cmax = income + R * a - a_min
             c[i] = clamp(cval, 1e-12, cmax)
         end
         return c
@@ -68,7 +70,9 @@ function _build_c_init_stoch(p, g, shocks, warm::Symbol, custom_c)
     a_min = g[:a].min
     R = 1 + p.r
 
-    if warm == :steady_state
+    if is_csvar_model(p)
+        return _build_c_init_det(p, g, warm, custom_c)
+    elseif warm == :steady_state
         z_grid = shocks.zgrid
         Na = length(a_grid)
         Nz = length(z_grid)
