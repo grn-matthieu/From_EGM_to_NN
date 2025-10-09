@@ -63,6 +63,15 @@ end
 
     model_factory_vec = ModelFactory.build_model(cfg_vec)
     @test model_factory_vec isa ConsumerSavingVAR.ConsumerSavingVARModel
+
+    for method_name in (:EGM, :TimeIteration, :Perturbation)
+        cfg_method = deep_merge(cfg_vec, (solver = (method = method_name,),))
+        model_obj = ThesisProject.build_model(cfg_method)
+        method_obj = ThesisProject.build_method(cfg_method)
+        sol = ThesisProject.solve(model_obj, method_obj, cfg_method)
+        @test sol isa ThesisProject.Solution
+        @test get(sol.metadata, :placeholder, false)
+    end
 end
 
 @testset "Model factory" begin
