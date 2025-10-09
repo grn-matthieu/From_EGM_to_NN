@@ -12,9 +12,9 @@ import ..API: solve
 using ..PerturbationKernel: solve_perturbation_det, solve_perturbation_stoch
 using ..ValueFunction: compute_value_policy
 using ..Determinism: canonicalize_cfg, hash_hex
-using ..CommonValidators: is_nondec, is_positive, respects_amin
 using ..UtilsConfig: maybe
 using ..UtilsDiagnostics: mean_abs_error
+using ..MethodUtils: validate_policy!
 
 export PerturbationMethod, build_perturbation_method
 
@@ -124,23 +124,14 @@ function solve(
     )
 
     # Basic validations
-    amin = g[:a].min
-    c_val = policy[:c].value
-    a_val = policy[:a].value
-    violations = Dict{Symbol,Any}()
-    valid = true
-    if !is_positive(c_val)
-        violations[:c_positive] = false
-        valid = false
-    end
-    if !respects_amin(a_val, amin)
-        violations[:a_above_min] = false
-        valid = false
-    end
-    metadata[:valid] = valid
-    if !isempty(violations)
-        metadata[:validation] = violations
-    end
+    validate_policy!(
+        metadata,
+        policy,
+        g[:a].min;
+        method_name = "Perturbation",
+        verbose = method.opts.verbose,
+        checks = (:c_positive, :a_above_min),
+    )
 
     return Solution(
         policy = policy,

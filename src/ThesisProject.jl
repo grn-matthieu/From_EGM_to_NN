@@ -52,6 +52,7 @@ include("solvers/nn/data_nn.jl")
 include("solvers/nn/kernel.jl")
 
 # 5) methods (adapters)
+include("methods/common/utils.jl")
 include("methods/EGM.jl")
 include("methods/Projection.jl")
 include("methods/Perturbation.jl")
