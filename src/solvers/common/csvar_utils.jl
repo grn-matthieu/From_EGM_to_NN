@@ -21,7 +21,7 @@ export csvar_income,
     csvar_income(y)
 
 Return current-period income implied by state `y`. For vector states the income
-is the mean of the exponential of its components. Batched states (one per column) are handled when
+is the mean of the components. Batched states (one per column) are handled when
 `y` is a matrix, returning the corresponding income for each column.
 """
 csvar_income(y::Number) = float(y)
@@ -30,14 +30,14 @@ function csvar_income(y::AbstractVector)
     n = length(y)
     n > 0 ||
         throw(ArgumentError("csvar_income requires a non-empty state vector, got length 0"))
-    return sum(exp.(y)) / n
+    return sum(y) / n
 end
 
 function csvar_income(y::AbstractMatrix)
     d = size(y, 1)
     d > 0 ||
         throw(ArgumentError("csvar_income requires at least one state dimension, got 0"))
-    totals = sum(exp.(y); dims = 1)
+    totals = sum(y; dims = 1)
     return vec(totals) ./ d
 end
 
