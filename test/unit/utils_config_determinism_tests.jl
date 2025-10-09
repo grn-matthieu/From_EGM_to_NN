@@ -31,7 +31,18 @@ end
 
 @testset "Config helpers" begin
     cfg = deterministic_config()
-    @test UtilsConfig.validate_config(cfg)
+    cfg_validated = UtilsConfig.validate_config(cfg)
+    @test cfg_validated == cfg
+    @test hasproperty(cfg_validated.params, :γ)
+
+    legacy_cfg = deterministic_config()
+    legacy_params = legacy_cfg.params
+    legacy_params_sigma =
+        (β = legacy_params.β, σ = legacy_params.γ, r = legacy_params.r, y = legacy_params.y)
+    cfg_sigma = merge(legacy_cfg, (params = legacy_params_sigma,))
+    cfg_sigma_validated = UtilsConfig.validate_config(cfg_sigma)
+    @test hasproperty(cfg_sigma_validated.params, :γ)
+    @test cfg_sigma_validated.params.γ == legacy_params.γ
 
     enriched = UtilsConfig.ensure_master_rng((random = (seed = 99,),))
     @test hasproperty(enriched.random, :master_rng)
@@ -43,5 +54,6 @@ end
     @test_throws ErrorException UtilsConfig.validate_config(bad_cfg)
 
     cfg_all = deterministic_config(solver_overrides = (; method = [:EGM, :Projection]))
-    @test UtilsConfig.validate_config(cfg_all)
+    cfg_all_validated = UtilsConfig.validate_config(cfg_all)
+    @test cfg_all_validated == cfg_all
 end

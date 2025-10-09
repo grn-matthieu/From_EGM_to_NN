@@ -29,17 +29,17 @@ end
 end
 
 function _build_crra_utility(params::NamedTuple)
-    σ = params.σ
-    if isapprox(σ, 1.0; atol = 1e-8)
+    γ = params.γ
+    if isapprox(γ, 1.0; atol = 1e-8)
         u = (c -> log.(c))
         u_prime = (c -> 1.0 ./ c)
         u_prime_inv = (up -> 1.0 ./ up)
     else
-        u = (c -> (c .^ (1 - σ) .- 1.0) ./ (1.0 - σ))
-        u_prime = (c -> c .^ (-σ))
-        u_prime_inv = (up -> up .^ (-1.0 / σ))
+        u = (c -> (c .^ (1 - γ) .- 1.0) ./ (1.0 - γ))
+        u_prime = (c -> c .^ (-γ))
+        u_prime_inv = (up -> up .^ (-1.0 / γ))
     end
-    return (; u, u_prime, u_prime_inv, σ)
+    return (; u, u_prime, u_prime_inv, γ)
 end
 
 function _maybe_discretize_shocks(cfg::NamedTuple)

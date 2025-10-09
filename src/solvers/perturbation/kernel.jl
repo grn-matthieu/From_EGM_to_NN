@@ -68,22 +68,22 @@ function _shock_moments(S)
 end
 
 """
-    _gaussian_ratio_expectation(c0, cp0, cp1, cp2, σ; μ = 0.0, σϵ2 = 0.0)
+    _gaussian_ratio_expectation(c0, cp0, cp1, cp2, γ; μ = 0.0, σϵ2 = 0.0)
 
-Second-order approximation to `E[(c0 / cp(z'))^σ]` where `cp(z') ≈ cp0 + cp1 z' +
+Second-order approximation to `E[(c0 / cp(z'))^γ]` where `cp(z') ≈ cp0 + cp1 z' +
 0.5 * cp2 z'^2` and the innovation `z'` is Gaussian with mean `μ` and variance
 `σϵ2`. The expansion is taken around the deterministic steady state and keeps
 terms up to second order in `(cp1/cp0)` and `(cp2/cp0)`.
 """
-function _gaussian_ratio_expectation(c0, cp0, cp1, cp2, σ; μ = 0.0, σϵ2 = 0.0)
+function _gaussian_ratio_expectation(c0, cp0, cp1, cp2, γ; μ = 0.0, σϵ2 = 0.0)
     ϵ = 1e-12
     c0 = c0 ≤ ϵ ? ϵ : c0
     cp0 = cp0 ≤ ϵ ? ϵ : cp0
     x1 = cp1 / cp0
     x2 = 0.5 * cp2 / cp0
-    G0 = (c0 / cp0)^σ
-    A = -σ * x1
-    B = -σ * x2 + 0.5 * σ * x1^2
+    G0 = (c0 / cp0)^γ
+    A = -γ * x1
+    B = -γ * x2 + 0.5 * γ * x1^2
     μ1 = μ
     μ2 = μ^2 + σϵ2
     return G0 * (1 + A * μ1 + B * μ2 + 0.5 * A^2 * μ2)
@@ -214,7 +214,7 @@ function solve_perturbation_det(
                 da1 = a1 - ā
                 c1 = c̄ + A * da1 + 0.5 * C * da1^2
                 c1 = max(c1, Tθ(1e-12))
-                r[idx] = one(Tθ) - p.β * R * (c0 / c1)^(p.σ)
+                r[idx] = one(Tθ) - p.β * R * (c0 / c1)^(p.γ)
             end
             return r
         end
@@ -338,7 +338,7 @@ function solve_perturbation_stoch(
                 cp1 = B + D * da1
                 cp2 = E
                 μ = ρ * z
-                Emu = _gaussian_ratio_expectation(c0, cp0, cp1, cp2, p.σ; μ = μ, σϵ2 = σε2)
+                Emu = _gaussian_ratio_expectation(c0, cp0, cp1, cp2, p.γ; μ = μ, σϵ2 = σε2)
                 r[k] = one(Tθ) - p.β * R * Emu
             end
             return r

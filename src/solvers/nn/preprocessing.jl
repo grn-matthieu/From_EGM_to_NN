@@ -1,7 +1,7 @@
 import ChainRulesCore: @non_differentiable
 using CUDA: cu, CuArray, CUDA
 struct ScalarParams
-    σ::Float64
+    γ::Float64
     β::Float64
     r::Float64
     y::Float64
@@ -117,7 +117,7 @@ get_param(container, name::Symbol, default) = begin
 end
 
 function scalar_params(P)
-    return ScalarParams(Float64(P.σ), Float64(P.β), Float64(P.r), Float64(P.y))
+    return ScalarParams(Float64(P.γ), Float64(P.β), Float64(P.r), Float64(P.y))
 end
 
 function clamp_to_asset_bounds(values, grid_info)

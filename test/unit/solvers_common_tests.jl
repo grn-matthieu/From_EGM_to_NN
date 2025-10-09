@@ -153,7 +153,7 @@ end
 end
 
 @testset "Euler residuals" begin
-    params = (β = 1 / 1.01, σ = 1.0, r = 0.01, y = 1.0)
+    params = (β = 1 / 1.01, γ = 1.0, r = 0.01, y = 1.0)
     c = fill(1.0, 5)
     resid = EulerResiduals.euler_resid_det(params, c, c)
     @test all(resid .<= 1e-12)

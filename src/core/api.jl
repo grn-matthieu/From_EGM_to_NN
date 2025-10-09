@@ -184,7 +184,7 @@ Returns either a single `Solution` or a vector of `Solution`s depending on
 function solve(cfg::NamedTuple; rng = nothing)
     # validate basic structure; this method doesn't enforce random.seed but
     # will honor `rng` when passed, or enrich from cfg.random.seed when present
-    validate_config(cfg)
+    cfg = validate_config(cfg)
 
     # Enrich cfg with a MasterRNG if a seed is available and a master isn't
     master = rng !== nothing ? cfg.random.master_rng : make_master_rng(rng)

@@ -85,7 +85,7 @@ function solve_egm_det_impl(
 
     β = model_params.β
     R = 1 + model_params.r
-    σ = model_params.σ
+    γ = model_params.γ
     cmin = 1e-12
 
     c = init_consumption_det(a_grid, a_min, R, model_params.y; c_init = c_init, cmin = cmin)
@@ -113,7 +113,7 @@ function solve_egm_det_impl(
         copyto!(c_prime, cold)
         ensure_minimum!(c_prime, cmin)
 
-        @. c_endo = model_utility.u_prime_inv(β * R * c_prime^(-σ))
+        @. c_endo = model_utility.u_prime_inv(β * R * c_prime^(-γ))
         @. a_endo = (a_grid - model_params.y + c_endo) / R
 
         enforce_borrowing_constraint!(
@@ -207,7 +207,7 @@ function solve_egm_det_impl(
 
     β = model_params.β
     R = 1 + model_params.r
-    σ = model_params.σ
+    γ = model_params.γ
     cmin = 1e-12
 
     c = init_consumption_det(a_grid, a_min, R, model_params.y; c_init = c_init, cmin = cmin)
@@ -234,7 +234,7 @@ function solve_egm_det_impl(
         copyto!(c_prime, cold)
         ensure_minimum!(c_prime, cmin)
 
-        @. c_endo = model_utility.u_prime_inv(β * R * c_prime^(-σ))
+        @. c_endo = model_utility.u_prime_inv(β * R * c_prime^(-γ))
         @. a_endo = (a_grid - model_params.y + c_endo) / R
 
         enforce_borrowing_constraint!(
@@ -372,7 +372,7 @@ function solve_egm_stoch_impl(
     Nz = length(z_grid)
 
     β = model_params.β
-    σ = model_params.σ
+    γ = model_params.γ
     R = 1 + model_params.r
     cmin = 1e-12
 
@@ -402,7 +402,7 @@ function solve_egm_stoch_impl(
             fill!(EUprime, 0.0)
             for jp = 1:Nz
                 c_future = view(cold, :, jp)
-                @. EUprime += Π[j, jp] * (max(c_future, cmin)^(-σ))
+                @. EUprime += Π[j, jp] * (max(c_future, cmin)^(-γ))
             end
 
             @. c_endo = model_utility.u_prime_inv(β * R * EUprime)
@@ -507,7 +507,7 @@ function solve_egm_stoch_impl(
     Nz = length(z_grid)
 
     β = model_params.β
-    σ = model_params.σ
+    γ = model_params.γ
     R = 1 + model_params.r
     cmin = 1e-12
 
@@ -537,7 +537,7 @@ function solve_egm_stoch_impl(
             fill!(EUprime, 0.0)
             for jp = 1:Nz
                 c_future = view(cold, :, jp)
-                @. EUprime += Π[j, jp] * (max(c_future, cmin)^(-σ))
+                @. EUprime += Π[j, jp] * (max(c_future, cmin)^(-γ))
             end
 
             @. c_endo = model_utility.u_prime_inv(β * R * EUprime)

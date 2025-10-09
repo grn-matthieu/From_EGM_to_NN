@@ -43,7 +43,7 @@ end
 function load_config(path::AbstractString)
     config = yaml_to_namedtuple(YAML.load_file(path))
     config = ensure_master_rng(config; require = true)
-    validate_config(config)
+    config = validate_config(config)
     return config
 end
 _lower(x) = lowercase(string(x))
@@ -119,17 +119,38 @@ function validate_config(cfg::NamedTuple)
     model_name = Symbol(cfg.model.name)
 
     # params
-    p = cfg.params
+    params_raw = cfg.params
     β_sym = Symbol("β")
-    σ_sym = Symbol("σ")
-    # Require fundamental parameters β and σ. Allow r and y to be optional
-    # because some minimal configs (e.g. used in determinism tests) omit them.
-    for k in (β_sym, σ_sym)
-        hasproperty(p, k) || error("missing params.$k")
-        getproperty(p, k) isa Real || error("params.$k not numeric")
+    γ_candidates = (:γ, :gamma, :σ, :sigma)
+    hasproperty(params_raw, β_sym) || error("missing params.β")
+    getproperty(params_raw, β_sym) isa Real || error("params.β not numeric")
+    β_val = getproperty(params_raw, β_sym)
+    0 < β_val < 1 || error("params.β out of range")
+
+    γ_key = nothing
+    for key in γ_candidates
+        if hasproperty(params_raw, key)
+            γ_key = key
+            break
+        end
     end
-    0 < getproperty(p, β_sym) < 1 || error("params.β out of range")
-    getproperty(p, σ_sym) > 0 || error("σ ≤ 0")
+    γ_key === nothing && error("missing params.γ")
+    γ_val = getproperty(params_raw, γ_key)
+    γ_val isa Real || error("params.$γ_key not numeric")
+    γ_val > 0 || error("γ ≤ 0")
+    if hasproperty(params_raw, :γ)
+        γ_existing = getproperty(params_raw, :γ)
+        γ_existing isa Real || error("params.γ not numeric")
+        γ_existing > 0 || error("γ ≤ 0")
+        if γ_key != :γ && γ_existing != γ_val
+            error("params.γ inconsistent with params.$γ_key")
+        end
+    end
+
+    params_norm = merge(params_raw, (γ = γ_val,))
+    cfg = merge(cfg, (params = params_norm,))
+    p = cfg.params
+
     # Validate r and y only when provided
     if hasproperty(p, :r)
         getproperty(p, :r) isa Real || error("params.r not numeric")
@@ -417,7 +438,7 @@ function validate_config(cfg::NamedTuple)
         error("random.seed not integer")
     end
 
-    true
+    return cfg
 end
 
 maybe(x; default = nothing) = x === nothing ? default : x

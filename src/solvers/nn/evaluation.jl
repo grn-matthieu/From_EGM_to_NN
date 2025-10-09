@@ -50,19 +50,19 @@ function extract_consumption(prediction, w)
     end
 end
 
-@inline function fallback_uprime(c, sigma)
+@inline function fallback_uprime(c, gamma)
     T = typeof(c)
     threshold = T(1e-8)
     value = c <= threshold ? threshold : c
-    return value^(-sigma)
+    return value^(-gamma)
 end
 
 function get_uprime(U, P_resid)
     if U !== nothing && hasproperty(U, :u_prime)
         return U.u_prime
     else
-        σ = Float64(P_resid.σ)
-        return c -> max.(c, 1e-8) .^ (-σ)
+        γ = Float64(P_resid.γ)
+        return c -> max.(c, 1e-8) .^ (-γ)
     end
 end
 

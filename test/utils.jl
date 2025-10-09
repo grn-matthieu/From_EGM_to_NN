@@ -80,7 +80,7 @@ function deterministic_config(;
     a_min::Real = 0.0,
     a_max::Real = 5.0,
     β::Real = 0.96,
-    σ::Real = 2.0,
+    γ::Real = 2.0,
     r::Real = 0.02,
     y::Real = 1.0,
     solver_overrides::NamedTuple = NamedTuple(),
@@ -96,7 +96,7 @@ function deterministic_config(;
 
     cfg = (
         model = (name = "cs",),
-        params = (β = β, σ = σ, r = r, y = y),
+        params = (β = β, γ = γ, r = r, y = y),
         grids = (Na = Na, a_min = a_min, a_max = a_max),
         utility = (u_type = utility_type,),
         solver = solver_cfg,

@@ -32,12 +32,14 @@ end
     @test model isa ConsumerSaving.ConsumerSavingModel
     @test model.shocks === nothing
     @test length(model.grids[:a].grid) == cfg.grids.Na
+    @test hasproperty(model.params, :γ)
 
     cfg_shock = stochastic_config()
     model_shock = ConsumerSaving.build_cs_model(cfg_shock)
     @test model_shock.shocks !== nothing
     @test hasproperty(model_shock.params, :ρ_shock)
     @test hasproperty(model_shock.params, :σ_shock)
+    @test hasproperty(model_shock.params, :γ)
 end
 
 @testset "Consumer saving vector-income model" begin
@@ -57,6 +59,7 @@ end
     @test model_vec.params.y_dim == 2
     @test size(model_vec.params.A) == (2, 2)
     @test model_vec.shocks.ε_dim == 2
+    @test hasproperty(model_vec.params, :γ)
 
     model_factory_vec = ModelFactory.build_model(cfg_vec)
     @test model_factory_vec isa ConsumerSavingVAR.ConsumerSavingVARModel
