@@ -13,6 +13,7 @@ using ..DataNN: generate_dataset
 using ..EulerResiduals: euler_resid_det_grid, euler_resid_stoch_grid
 using ..Determinism: derive_rng, promote_master_rng
 using ..CSVarUtils: csvar_income
+using ChainRulesCore: ignore_derivatives
 using Lux
 using Optimisers
 using Random
@@ -298,24 +299,26 @@ function loss_euler_fb_aio_ar1!(chain, ps, st, batch, model_cfg, rng)
     component_levels =
         hasproperty(P, :y) && P.y isa AbstractVector ? Float32.(exp.(collect(P.y))) :
         Float32[]
-    X1 = Matrix{Float32}(undef, feature_dim, length(y1))
-    X2 = Matrix{Float32}(undef, feature_dim, length(y2))
-    X1[1, :] .= y1
-    X2[1, :] .= y2
-    if feature_dim > 2
-        for j = 1:(feature_dim-2)
-            level = j <= length(component_levels) ? component_levels[j] : Float32(exp(μ))
-            X1[1+j, :] .= level
-            X2[1+j, :] .= level
+    X1n, X2n = ignore_derivatives() do
+        # Build features without in-place slicing; then normalize out-of-place
+        if feature_dim == 2
+            X1 = vcat(reshape(Float32.(y1), 1, :), reshape(Float32.(w1), 1, :))
+            X2 = vcat(reshape(Float32.(y2), 1, :), reshape(Float32.(w2), 1, :))
+            return normalize_feature_batch(scaler, X1), normalize_feature_batch(scaler, X2)
+        else
+            comps = Matrix{Float32}(undef, feature_dim - 2, length(y1))
+            for j = 1:(feature_dim-2)
+                level =
+                    j <= length(component_levels) ? component_levels[j] : Float32(exp(μ))
+                comps[j, :] .= level
+            end
+            X1 = vcat(reshape(Float32.(y1), 1, :), comps, reshape(Float32.(w1), 1, :))
+            X2 = vcat(reshape(Float32.(y2), 1, :), comps, reshape(Float32.(w2), 1, :))
+            return normalize_feature_batch(scaler, X1), normalize_feature_batch(scaler, X2)
         end
     end
-    X1[end, :] .= w1
-    X2[end, :] .= w2
-
-    normalize_feature_batch!(scaler, X1)
-    normalize_feature_batch!(scaler, X2)
-    out1, st1 = Lux.apply(chain, X1, ps, st1)
-    out2, st2 = Lux.apply(chain, X2, ps, st1)
+    out1, st1 = Lux.apply(chain, X1n, ps, st1)
+    out2, st2 = Lux.apply(chain, X2n, ps, st1)
 
     c1 = vec(phi_to_consumption(out1[:Φ], w1; min_c = C_MIN))
     c2 = vec(phi_to_consumption(out2[:Φ], w2; min_c = C_MIN))
@@ -401,8 +404,12 @@ function loss_euler_fb_aio_csvar!(chain, ps, st, batch, model_cfg, rng)
     w1 = @. Rg * a_curr + income1
     w2 = @. Rg * a_curr + income2
 
-    X1 = build_feature_batch_from_states(scaler, y1, w1)
-    X2 = build_feature_batch_from_states(scaler, y2, w2)
+    X1 = ignore_derivatives() do
+        build_feature_batch_from_states(scaler, y1, w1)
+    end
+    X2 = ignore_derivatives() do
+        build_feature_batch_from_states(scaler, y2, w2)
+    end
     out1, st1 = Lux.apply(chain, X1, ps, st1)
     out2, st2 = Lux.apply(chain, X2, ps, st1)
 
