@@ -57,6 +57,7 @@ function solve_projection_det(
     Nval::Int = model_grids[:a].N,
     λ::Real = 0.0,
     tol_pol::Real = tol,
+    rng = nothing,
 )::NamedTuple
     start_time = time_ns()
     local_rng = rng === nothing ? default_rng() : rng
@@ -100,7 +101,6 @@ function solve_projection_det(
         c = init_consumption_det(a_grid, a_min, R, income; cmin = cmin)
         coeffs = solve_coefficients(B, c; λ = λ)
         a_next = similar(c)
-        c_next = similar(c)
         c_new = similar(c)
         converged = false
         iters = 0
@@ -197,6 +197,8 @@ function solve_projection_stoch(
     λ::Real = 0.0,
     tol_pol::Real = tol,
     integration_method::Symbol = :gh,
+    gh_order::Int = 3,
+    nsamples::Int = 128,
     rng = nothing,
 )::NamedTuple
     if hasproperty(model_shocks, :process) && model_shocks.process == :gaussian_linear
@@ -212,6 +214,8 @@ function solve_projection_stoch(
             λ = λ,
             tol_pol = tol_pol,
             integration_method = integration_method,
+            gh_order = gh_order,
+            nsamples = nsamples,
             rng = rng,
         )
     end
@@ -391,9 +395,12 @@ function solve_projection_csvar(
     λ::Real = 0.0,
     tol_pol::Real = tol,
     integration_method::Symbol = :gh,
+    gh_order::Int = 3,
+    nsamples::Int = 128,
     rng = nothing,
 )::NamedTuple
     start_time = time_ns()
+    local_rng = rng === nothing ? default_rng() : rng
 
     a_min = model_grids[:a].min
     a_max = model_grids[:a].max
@@ -444,11 +451,17 @@ function solve_projection_csvar(
         for it = 1:maxit
             iters = it
             @. a_next = clamp(R * a_grid + income - c, a_min, a_max)
-            Bnext = chebyshev_basis(a_next, order, a_min, a_max)
-            c_next .= Bnext * coeffs
-            for idx in eachindex(c_next)
-                cval = c_next[idx] <= cmin ? cmin : c_next[idx]
-                integrand = _ -> model_utility.u_prime(cval)
+            for idx in eachindex(c)
+                a_i = a_grid[idx]
+                c_i = c[idx]
+                integrand = function (y_next)
+                    income_next = csvar_income(y_next)
+                    a_draw = clamp(R * a_i + income_next - c_i, a_min, a_max)
+                    Bdraw = chebyshev_basis([a_draw], order, a_min, a_max)
+                    c1 = dot(Bdraw[1, :], coeffs)
+                    c1 = c1 <= cmin ? cmin : c1
+                    return model_utility.u_prime(c1)
+                end
                 EU = integrate_expectation(
                     integration_method,
                     integrand,
@@ -456,6 +469,8 @@ function solve_projection_csvar(
                     model_shocks,
                     y_state,
                     rng = local_rng,
+                    gh_order = gh_order,
+                    nsamples = nsamples,
                 )
                 c_new[idx] = model_utility.u_prime_inv(β * R * EU)
             end
@@ -476,11 +491,14 @@ function solve_projection_csvar(
         resid_val = Vector{Float64}(undef, length(a_val))
         for (i, a_val_i) in enumerate(a_val)
             c0 = c_val[i] <= cmin ? cmin : c_val[i]
-            a_next_i = clamp(R * a_val_i + income - c_val[i], a_min, a_max)
-            Bnext_val = chebyshev_basis([a_next_i], order, a_min, a_max)
-            c1 = dot(Bnext_val[1, :], coeffs)
-            c1 = c1 <= cmin ? cmin : c1
-            integrand = _ -> model_utility.u_prime(c1)
+            integrand = function (y_next)
+                income_next = csvar_income(y_next)
+                a_next_i = clamp(R * a_val_i + income_next - c0, a_min, a_max)
+                Bnext_val = chebyshev_basis([a_next_i], order, a_min, a_max)
+                c1 = dot(Bnext_val[1, :], coeffs)
+                c1 = c1 <= cmin ? cmin : c1
+                return model_utility.u_prime(c1)
+            end
             EU = integrate_expectation(
                 integration_method,
                 integrand,
@@ -488,8 +506,10 @@ function solve_projection_csvar(
                 model_shocks,
                 y_state,
                 rng = local_rng,
+                gh_order = gh_order,
+                nsamples = nsamples,
             )
-            resid_val[i] = abs(1 - β * R * EU)
+            resid_val[i] = abs(1 - (β * R * EU) / model_utility.u_prime(c0))
         end
         max_resid_val = sqrt(mean(resid_val .^ 2))
 
@@ -516,11 +536,14 @@ function solve_projection_csvar(
     resid_out = Vector{Float64}(undef, length(a_out))
     for (i, a_val_i) in enumerate(a_out)
         c0 = c_out[i] <= cmin ? cmin : c_out[i]
-        a_next_i = clamp(R * a_val_i + income - c_out[i], a_min, a_max)
-        Bnext_val = chebyshev_basis([a_next_i], best_order, a_min, a_max)
-        c1 = dot(Bnext_val[1, :], best_coeffs)
-        c1 = c1 <= cmin ? cmin : c1
-        integrand = _ -> model_utility.u_prime(c1)
+        integrand = function (y_next)
+            income_next = csvar_income(y_next)
+            a_next_i = clamp(R * a_val_i + income_next - c0, a_min, a_max)
+            Bnext_val = chebyshev_basis([a_next_i], best_order, a_min, a_max)
+            c1 = dot(Bnext_val[1, :], best_coeffs)
+            c1 = c1 <= cmin ? cmin : c1
+            return model_utility.u_prime(c1)
+        end
         EU = integrate_expectation(
             integration_method,
             integrand,
@@ -528,8 +551,10 @@ function solve_projection_csvar(
             model_shocks,
             y_state,
             rng = local_rng,
+            gh_order = gh_order,
+            nsamples = nsamples,
         )
-        resid_out[i] = abs(1 - β * R * EU)
+        resid_out[i] = abs(1 - (β * R * EU) / model_utility.u_prime(c0))
     end
     max_resid_out = sqrt(mean(resid_out .^ 2))
 

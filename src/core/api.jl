@@ -187,7 +187,8 @@ function solve(cfg::NamedTuple; rng = nothing)
     cfg = validate_config(cfg)
 
     # Enrich cfg with a MasterRNG if a seed is available and a master isn't
-    master = rng !== nothing ? cfg.random.master_rng : make_master_rng(rng)
+    master =
+        cfg.random.master_rng !== nothing ? cfg.random.master_rng : make_master_rng(rng)
 
     # Decide if a single method is requested to return a single Solution
     requested = cfg.solver.method
