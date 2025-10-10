@@ -80,6 +80,7 @@ function solve(
     interp = ik == :linear ? LinearInterp() : MonotoneCubicInterp()
 
     sol = if csvar
+        @warn "TimeIteration solver is not implemented for CSVar models; returning placeholder solution."
         solve_ti_placeholder(
             p,
             g,
