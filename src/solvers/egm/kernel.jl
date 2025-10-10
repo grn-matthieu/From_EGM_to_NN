@@ -22,6 +22,7 @@ using ..PolicyUtils:
     sort_policy_pairs!
 using ..CSVarUtils: csvar_income
 using ..SolverIntegration: integrate_expectation, discrete_expectation
+using Random: default_rng
 using ..SolverPlaceholders: build_placeholder_solution
 using Printf
 
@@ -49,6 +50,7 @@ function solve_egm_det(
     verbose::Bool = false,
     c_init = nothing,
     integration_method::Symbol = :none,
+    rng = nothing,
 )::NamedTuple
     return solve_egm_det_impl(
         interp_kind,
@@ -62,6 +64,7 @@ function solve_egm_det(
         verbose = verbose,
         c_init = c_init,
         integration_method = integration_method,
+        rng = rng,
     )
 end
 
@@ -80,8 +83,10 @@ function solve_egm_det_impl(
     verbose::Bool = false,
     c_init = nothing,
     integration_method::Symbol = :none,
+    rng = nothing,
 )::NamedTuple
     start_time = time_ns()
+    local_rng = rng === nothing ? default_rng() : rng
 
     a_grid = model_grids[:a].grid
     a_min = model_grids[:a].min
@@ -131,6 +136,7 @@ function solve_egm_det_impl(
                     model_params,
                     nothing,
                     model_params.y,
+                    rng = local_rng,
                 )
                 c_endo[idx] = model_utility.u_prime_inv(β * R * EU)
             end
@@ -245,6 +251,8 @@ function solve_egm_det_impl(
     relax::Real = 0.5,
     verbose::Bool = false,
     c_init = nothing,
+    integration_method::Symbol = :none,
+    rng = nothing,
 )::NamedTuple
     start_time = time_ns()
 
@@ -372,6 +380,7 @@ function solve_egm_stoch(
     verbose::Bool = false,
     c_init = nothing,
     integration_method::Symbol = :gh,
+    rng = nothing,
 )::NamedTuple
     return solve_egm_stoch_impl(
         interp_kind,
@@ -386,6 +395,7 @@ function solve_egm_stoch(
         verbose = verbose,
         c_init = c_init,
         integration_method = integration_method,
+        rng = rng,
     )
 end
 
@@ -405,6 +415,7 @@ function solve_egm_stoch_impl(
     verbose::Bool = false,
     c_init = nothing,
     integration_method::Symbol = :gh,
+    rng = nothing,
 )::NamedTuple
     if hasproperty(model_shocks, :process) &&
        get(model_shocks, :process, nothing) == :gaussian_linear
@@ -421,6 +432,7 @@ function solve_egm_stoch_impl(
             c_init = c_init isa AbstractArray ?
                      (c_init isa AbstractVector ? c_init : nothing) : c_init,
             integration_method = integration_method,
+            rng = rng,
         )
     end
     start_time = time_ns()
@@ -558,6 +570,7 @@ function solve_egm_stoch_impl(
     verbose::Bool = false,
     c_init = nothing,
     integration_method::Symbol = :gh,
+    rng = nothing,
 )::NamedTuple
     start_time = time_ns()
 

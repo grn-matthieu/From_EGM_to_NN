@@ -12,6 +12,7 @@ using ..CommonInterp: InterpKind, LinearInterp
 using ..PolicyUtils: clamp_policy!, compute_binding_tolerance, rmse_nonbinding
 using ..SolverPlaceholders: build_placeholder_solution
 using ..SolverIntegration: integrate_expectation, discrete_expectation
+using Random: default_rng
 using ..CSVarUtils: csvar_income
 using Statistics: mean
 using ForwardDiff
@@ -186,6 +187,7 @@ function solve_perturbation_det(
     h_a = nothing,
     tol_fit = 1e-8,
     maxit_fit = 25,
+    rng = nothing,
 )
     t0 = time_ns()
     a_grid = g[:a].grid
@@ -291,6 +293,7 @@ function solve_perturbation_stoch(
     tol_fit = 1e-8,
     maxit_fit = 25,
     integration_method::Symbol = :gh,
+    rng = nothing,
 )
     if hasproperty(S, :process) && S.process == :gaussian_linear
         return solve_perturbation_csvar(
@@ -305,6 +308,7 @@ function solve_perturbation_stoch(
             tol_fit = tol_fit,
             maxit_fit = maxit_fit,
             integration_method = integration_method,
+            rng = rng,
         )
     end
     t0 = time_ns()
@@ -436,12 +440,14 @@ function solve_perturbation_csvar(
     tol_fit = 1e-8,
     maxit_fit = 25,
     integration_method::Symbol = :gh,
+    rng = nothing,
 )
     order > 1 &&
         @warn "Perturbation (CSVar) currently supports only first-order approximation; downgrading to order=1" order
     integration_method == :mc &&
         @warn "CSVar perturbation uses Gauss-Hermite integration for stability; switching to :gh" integration_method
     integration = integration_method == :mc ? :gh : integration_method
+    local_rng = rng === nothing ? default_rng() : rng
 
     t0 = time_ns()
     a_grid = g[:a].grid
@@ -508,6 +514,7 @@ function solve_perturbation_csvar(
                 S,
                 y_curr;
                 gh_order = max(3, d),
+                rng = local_rng,
             )
             r[idx] = 1 - β * R * EU
         end
@@ -549,6 +556,7 @@ function solve_perturbation_csvar(
             S,
             ȳ_vec;
             gh_order = max(3, d),
+            rng = local_rng,
         )
         resid[i] = abs(1 - β * R * EU)
     end

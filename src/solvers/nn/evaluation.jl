@@ -7,6 +7,7 @@ common diagnostic bundles.
 """
 
 using Random
+using Random: randn!
 using Lux: fmap
 using LinearAlgebra: cholesky, mul!, Symmetric
 using ..CSVarUtils: csvar_income
@@ -125,8 +126,20 @@ function evaluate_deterministic(model, params, states, P_resid, P, G, scaler)
     return EvaluationResult(c_on_grid, a_next, residuals, max_resid)
 end
 
-function evaluate_stochastic(model, params, states, P_resid, P, G, S, scaler, settings, U)
-    X_eval, _ = generate_dataset(G, S, P; mode = :full)
+function evaluate_stochastic(
+    model,
+    params,
+    states,
+    P_resid,
+    P,
+    G,
+    S,
+    scaler,
+    settings,
+    U,
+    rng::AbstractRNG,
+)
+    X_eval, _ = generate_dataset(G, S, P; mode = :full, rng = rng)
     normalize_samples!(scaler, X_eval)
     batch = prepare_training_batch(X_eval, Val(settings.use_cuda))
     prediction = run_model(model, params, states, batch)
@@ -162,7 +175,19 @@ function evaluate_stochastic(model, params, states, P_resid, P, G, S, scaler, se
     return EvaluationResult(c_on_grid, a_next, residuals, max_resid)
 end
 
-function evaluate_csvar(model, params, states, P_resid, P, G, S, scaler, settings, U)
+function evaluate_csvar(
+    model,
+    params,
+    states,
+    P_resid,
+    P,
+    G,
+    S,
+    scaler,
+    settings,
+    U,
+    rng::AbstractRNG,
+)
     y_state =
         hasproperty(P, :y) && P.y isa AbstractVector ? Float32.(collect(P.y)) :
         Float32[Float32(P_resid.y)]
@@ -206,9 +231,10 @@ function evaluate_csvar(model, params, states, P_resid, P, G, S, scaler, setting
     A = Matrix{Float32}(P.A)
     μ_vec = A * y_state
 
-    ε = randn(Float32, y_dim, CSVAR_EVAL_SAMPLES)
-    draws = similar(ε)
-    mul!(draws, L, ε)
+    innovations = Matrix{Float32}(undef, y_dim, CSVAR_EVAL_SAMPLES)
+    randn!(rng, innovations)
+    draws = Matrix{Float32}(undef, y_dim, CSVAR_EVAL_SAMPLES)
+    mul!(draws, L, innovations)
     @. draws += μ_vec
     income_draws = Float32.(csvar_income(draws))
 
@@ -258,6 +284,7 @@ function evaluate_solution(
     scaler;
     settings::Union{NNSolverSettings,Nothing} = nothing,
     U = nothing,
+    rng = nothing,
 )
     local_settings =
         settings === nothing ?
@@ -267,6 +294,7 @@ function evaluate_solution(
             objective_default = is_csvar_problem(P, S) ? :euler_residual :
                                 (scaler.has_shocks ? :euler_fb_aio : :euler_residual),
         ) : settings
+    local_rng = rng === nothing ? Random.default_rng() : rng
     if is_csvar_problem(P, S)
         return evaluate_csvar(
             model,
@@ -279,6 +307,7 @@ function evaluate_solution(
             scaler,
             local_settings,
             U,
+            local_rng,
         )
     elseif scaler.has_shocks
         return evaluate_stochastic(
@@ -292,6 +321,7 @@ function evaluate_solution(
             scaler,
             local_settings,
             U,
+            local_rng,
         )
     else
         return evaluate_deterministic(model, params, states, P_resid, P, G, scaler)

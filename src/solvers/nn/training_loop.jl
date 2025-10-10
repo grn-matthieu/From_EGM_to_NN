@@ -350,7 +350,7 @@ function create_training_batch(
     if mode == :full
         base_P = P === nothing ? P_resid : P
         @assert base_P !== nothing
-        X, _ = generate_dataset(G, S, base_P; mode = :full)
+        X, _ = generate_dataset(G, S, base_P; mode = :full, rng = rng)
         normalize_samples!(scaler, X)
         return prepare_training_batch(X, Val(settings.use_cuda)), size(X, 1)
     end

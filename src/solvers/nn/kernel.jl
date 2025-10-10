@@ -154,6 +154,7 @@ function solve_nn(model; opts = nothing, rng = nothing)
     master = promote_master_rng(rng)
     train_rng = derive_rng(master, :train)
     diag_rng = derive_rng(master, :diagnostics)
+    eval_rng = derive_rng(master, :evaluation)
 
     P = get_params(model)
     G = get_grids(model)
@@ -207,6 +208,7 @@ function solve_nn(model; opts = nothing, rng = nothing)
         scaler;
         settings = settings,
         U = U,
+        rng = eval_rng,
     )
 
     runtime = (time_ns() - start_time) / 1e9

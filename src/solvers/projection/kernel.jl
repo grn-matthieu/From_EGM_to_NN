@@ -17,6 +17,7 @@ using ..CommonValidators: is_nondec
 using ..SolverIntegration: integrate_expectation, discrete_expectation
 using ..CSVarUtils: csvar_income
 using Statistics: mean
+using Random: default_rng
 using LinearAlgebra: dot
 
 export solve_projection_det, solve_projection_stoch
@@ -58,6 +59,7 @@ function solve_projection_det(
     tol_pol::Real = tol,
 )::NamedTuple
     start_time = time_ns()
+    local_rng = rng === nothing ? default_rng() : rng
 
     a_min = model_grids[:a].min
     a_max = model_grids[:a].max
@@ -195,6 +197,7 @@ function solve_projection_stoch(
     λ::Real = 0.0,
     tol_pol::Real = tol,
     integration_method::Symbol = :gh,
+    rng = nothing,
 )::NamedTuple
     if hasproperty(model_shocks, :process) && model_shocks.process == :gaussian_linear
         return solve_projection_csvar(
@@ -209,6 +212,7 @@ function solve_projection_stoch(
             λ = λ,
             tol_pol = tol_pol,
             integration_method = integration_method,
+            rng = rng,
         )
     end
     start_time = time_ns()
@@ -387,6 +391,7 @@ function solve_projection_csvar(
     λ::Real = 0.0,
     tol_pol::Real = tol,
     integration_method::Symbol = :gh,
+    rng = nothing,
 )::NamedTuple
     start_time = time_ns()
 
@@ -450,6 +455,7 @@ function solve_projection_csvar(
                     model_params,
                     model_shocks,
                     y_state,
+                    rng = local_rng,
                 )
                 c_new[idx] = model_utility.u_prime_inv(β * R * EU)
             end
@@ -481,6 +487,7 @@ function solve_projection_csvar(
                 model_params,
                 model_shocks,
                 y_state,
+                rng = local_rng,
             )
             resid_val[i] = abs(1 - β * R * EU)
         end
@@ -520,6 +527,7 @@ function solve_projection_csvar(
             model_params,
             model_shocks,
             y_state,
+            rng = local_rng,
         )
         resid_out[i] = abs(1 - β * R * EU)
     end

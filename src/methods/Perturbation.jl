@@ -79,6 +79,7 @@ function solve(
             tol_fit = method.opts.tol_fit,
             maxit_fit = method.opts.maxit_fit,
             integration_method = integration,
+            rng = rng,
         )
     elseif S === nothing
         solve_perturbation_det(
@@ -90,6 +91,7 @@ function solve(
             h_a = method.opts.h_a,
             tol_fit = method.opts.tol_fit,
             maxit_fit = method.opts.maxit_fit,
+            rng = rng,
         )
     else
         solve_perturbation_stoch(
@@ -104,6 +106,7 @@ function solve(
             tol_fit = method.opts.tol_fit,
             maxit_fit = method.opts.maxit_fit,
             integration_method = integration,
+            rng = rng,
         )
     end
 

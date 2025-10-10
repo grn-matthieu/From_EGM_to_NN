@@ -71,6 +71,7 @@ function solve(
             orders = method.opts.orders,
             Nval = method.opts.Nval,
             integration_method = method.opts.integration,
+            rng = rng,
         )
 
     ee = sol.resid

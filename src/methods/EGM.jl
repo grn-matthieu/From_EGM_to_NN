@@ -108,6 +108,7 @@ function solve(
             verbose = method.opts.verbose,
             c_init = c_init,
             integration_method = method.opts.integration,
+            rng = rng,
         )
     else
         solve_egm_stoch(
@@ -123,6 +124,7 @@ function solve(
             verbose = method.opts.verbose,
             c_init = c_init,
             integration_method = method.opts.integration,
+            rng = rng,
         )
     end
 
