@@ -51,3 +51,33 @@ end
     sols = API.solve(cfg_path; rng = master_rng(9876), opts = override)
     @test sols isa API.Solution || sols isa Vector{API.Solution}
 end
+
+@testset "EGM dim-1 CSVAR matches scalar baseline" begin
+    base_cfg = deterministic_config(method = "EGM", solver_overrides = (; maxit = 200))
+    base_model, base_method = build_model_and_method(base_cfg)
+    base_rng = derive_solver_rng(base_cfg, "EGM")
+    base_sol = API.solve(base_model, base_method, base_cfg; rng = base_rng)
+
+    y_val = base_cfg.params.y
+    cs_params = (
+        β = base_cfg.params.β,
+        γ = base_cfg.params.γ,
+        r = base_cfg.params.r,
+        y = [y_val],
+        A = [[1.0]],
+        Σ = [[0.0]],
+    )
+    csvar_cfg = deep_merge(base_cfg, (model = (name = :cs_vec,), params = cs_params))
+    cs_model, cs_method = build_model_and_method(csvar_cfg)
+    cs_rng = derive_solver_rng(csvar_cfg, "EGM")
+    cs_sol = API.solve(cs_model, cs_method, csvar_cfg; rng = cs_rng)
+
+    c_base = base_sol.policy[:c][:value]
+    c_cs = cs_sol.policy[:c][:value]
+    a_base = base_sol.policy[:a][:value]
+    a_cs = cs_sol.policy[:a][:value]
+    @test c_cs ≈ c_base atol = 1e-8 rtol = 1e-8
+    @test a_cs ≈ a_base atol = 1e-8 rtol = 1e-8
+    @test cs_sol.metadata[:converged] == base_sol.metadata[:converged]
+    @test cs_sol.metadata[:max_resid] ≈ base_sol.metadata[:max_resid] atol = 1e-10
+end
