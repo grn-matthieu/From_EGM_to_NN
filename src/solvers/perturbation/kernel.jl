@@ -449,6 +449,22 @@ function solve_perturbation_csvar(
     integration = integration_method == :mc ? :gh : integration_method
     local_rng = rng === nothing ? default_rng() : rng
 
+    if maximum(abs.(S.Σ)) <= eps(eltype(S.Σ))
+        p_det = merge(p, (y = csvar_income(p.y),))
+        p_det = hasproperty(p_det, :y_dim) ? merge(p_det, (y_dim = 1,)) : p_det
+        return solve_perturbation_det(
+            p_det,
+            g,
+            U;
+            a_bar = a_bar,
+            order = order,
+            h_a = h_a,
+            tol_fit = tol_fit,
+            maxit_fit = maxit_fit,
+            rng = local_rng,
+        )
+    end
+
     t0 = time_ns()
     a_grid = g[:a].grid
     a_min = g[:a].min
