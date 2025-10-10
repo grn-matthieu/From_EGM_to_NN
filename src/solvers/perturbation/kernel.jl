@@ -11,6 +11,9 @@ using ..EulerResiduals:
 using ..CommonInterp: InterpKind, LinearInterp
 using ..PolicyUtils: clamp_policy!, compute_binding_tolerance, rmse_nonbinding
 using ..SolverPlaceholders: build_placeholder_solution
+using ..SolverIntegration: integrate_expectation, discrete_expectation
+using ..CSVarUtils: csvar_income
+using Statistics: mean
 using ForwardDiff
 using LinearAlgebra
 
@@ -191,7 +194,7 @@ function solve_perturbation_det(
     Na = g[:a].N
     bind_tol = compute_binding_tolerance(a_min, a_max, Na; floor = DEFAULT_BINDING_TOL)
     R = 1 + p.r
-    ȳ = p.y
+    ȳ = hasproperty(p, :y_dim) ? csvar_income(p.y) : p.y
 
     ā = a_bar === nothing ? _steady_state_asset(p, g) : a_bar
     c̄ = ȳ + p.r * ā
@@ -287,7 +290,23 @@ function solve_perturbation_stoch(
     h_z = nothing,
     tol_fit = 1e-8,
     maxit_fit = 25,
+    integration_method::Symbol = :gh,
 )
+    if hasproperty(S, :process) && S.process == :gaussian_linear
+        return solve_perturbation_csvar(
+            p,
+            g,
+            S,
+            U;
+            a_bar = a_bar,
+            order = order,
+            h_a = h_a,
+            h_z = h_z,
+            tol_fit = tol_fit,
+            maxit_fit = maxit_fit,
+            integration_method = integration_method,
+        )
+    end
     t0 = time_ns()
     a_grid = g[:a].grid
     a_min = g[:a].min
@@ -400,6 +419,169 @@ function solve_perturbation_stoch(
         converged = converged,
         max_resid = max_resid,
         rmse = max_resid,
+        model_params = p,
+        opts = opts,
+    )
+end
+
+function solve_perturbation_csvar(
+    p,
+    g,
+    S,
+    U;
+    a_bar = nothing,
+    order::Int = 1,
+    h_a = nothing,
+    h_z = nothing,
+    tol_fit = 1e-8,
+    maxit_fit = 25,
+    integration_method::Symbol = :gh,
+)
+    order > 1 &&
+        @warn "Perturbation (CSVar) currently supports only first-order approximation; downgrading to order=1" order
+    integration_method == :mc &&
+        @warn "CSVar perturbation uses Gauss-Hermite integration for stability; switching to :gh" integration_method
+    integration = integration_method == :mc ? :gh : integration_method
+
+    t0 = time_ns()
+    a_grid = g[:a].grid
+    a_min = g[:a].min
+    a_max = g[:a].max
+    Na = g[:a].N
+    bind_tol = compute_binding_tolerance(a_min, a_max, Na; floor = DEFAULT_BINDING_TOL)
+
+    ȳ_vec = Float64.(p.y)
+    d = length(ȳ_vec)
+    ȳ = csvar_income(ȳ_vec)
+
+    R = 1 + p.r
+    β = p.β
+    γ = p.γ
+
+    ā = a_bar === nothing ? _steady_state_asset(p, g) : a_bar
+    c̄ = ȳ + p.r * ā
+
+    θ0 = zeros(Float64, 1 + d)
+    θ0[1] = R - 1 / (β * R)
+
+    ha = h_a === nothing ? 0.01 * max(a_max - a_min, 1.0) : h_a
+    base_y_scale = maximum(abs.(ȳ_vec))
+    hz_val = h_z === nothing ? (base_y_scale == 0 ? 0.01 : 0.01 * base_y_scale) : h_z
+
+    collocation = Vector{Tuple{Float64,Vector{Float64}}}()
+    push!(collocation, (ha, zeros(d)))
+    push!(collocation, (-ha, zeros(d)))
+    for j = 1:d
+        Δ = zeros(d)
+        Δ[j] = hz_val
+        push!(collocation, (0.0, Δ))
+        Δn = zeros(d)
+        Δn[j] = -hz_val
+        push!(collocation, (0.0, Δn))
+    end
+
+    cmin = 1e-12
+
+    function csvar_residual(θ::AbstractVector)
+        Fa = θ[1]
+        Fy = view(θ, 2:length(θ))
+        r = Vector{Float64}(undef, length(collocation))
+        for (idx, (da, Δy)) in enumerate(collocation)
+            y_curr = ȳ_vec .+ Δy
+            income_curr = csvar_income(y_curr)
+            c0 = c̄ + Fa * da + dot(Fy, Δy)
+            c0 = c0 <= cmin ? cmin : c0
+            a0 = ā + da
+            a1 = clamp(R * a0 + income_curr - c0, a_min, a_max)
+
+            integrand = function (y_next)
+                δy_next = y_next .- ȳ_vec
+                c1 = c̄ + Fa * (a1 - ā) + dot(Fy, δy_next)
+                c1 = c1 <= cmin ? cmin : c1
+                (c0 / c1)^γ
+            end
+
+            EU = integrate_expectation(
+                integration,
+                integrand,
+                p,
+                S,
+                y_curr;
+                gh_order = max(3, d),
+            )
+            r[idx] = 1 - β * R * EU
+        end
+        return r
+    end
+
+    θ_init = copy(θ0)
+    θ̂, ok, _ = _gauss_newton!(θ_init, csvar_residual, maxit_fit, tol_fit)
+    Fa = θ̂[1]
+    Fy = θ̂[2:end]
+
+    c = Vector{Float64}(undef, Na)
+    available = similar(a_grid)
+    for (i, a_val) in enumerate(a_grid)
+        da = a_val - ā
+        c_val = c̄ + Fa * da
+        available[i] = ȳ + R * a_val - a_min
+        c[i] = clamp(c_val, cmin, available[i])
+    end
+
+    a_next = clamp.(R .* a_grid .+ ȳ .- c, a_min, a_max)
+
+    resid = Vector{Float64}(undef, Na)
+    for (i, a_val) in enumerate(a_grid)
+        da = a_val - ā
+        c0 = c̄ + Fa * da
+        c0 = c0 <= cmin ? cmin : c0
+        a1 = clamp(R * a_val + ȳ - c0, a_min, a_max)
+        integrand = function (y_next)
+            δy_next = y_next .- ȳ_vec
+            c1 = c̄ + Fa * (a1 - ā) + dot(Fy, δy_next)
+            c1 = c1 <= cmin ? cmin : c1
+            (c0 / c1)^γ
+        end
+        EU = integrate_expectation(
+            integration,
+            integrand,
+            p,
+            S,
+            ȳ_vec;
+            gh_order = max(3, d),
+        )
+        resid[i] = abs(1 - β * R * EU)
+    end
+
+    max_resid = maximum(resid)
+    rmse = sqrt(mean(resid .^ 2))
+
+    runtime = (time_ns() - t0) / 1e9
+    opts = (;
+        maxit = 1,
+        runtime,
+        seed = -1,
+        interp_kind = LinearInterp(),
+        tol = NaN,
+        tol_pol = NaN,
+        relax = NaN,
+        patience = 0,
+        order = 1,
+        fit_ok = ok,
+        theta = θ̂,
+        resid_metric = :max,
+        integration_method = integration,
+    )
+
+    return (
+        a_grid = a_grid,
+        c = c,
+        a_next = a_next,
+        resid = resid,
+        iters = 1,
+        converged = ok,
+        max_resid = max_resid,
+        rmse = rmse,
         model_params = p,
         opts = opts,
     )

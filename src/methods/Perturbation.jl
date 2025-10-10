@@ -33,6 +33,8 @@ Options:
 function build_perturbation_method(cfg::NamedTuple)
     solver_cfg = cfg.solver
     perturbation_cfg = solver_cfg.perturbation
+    integration_raw = maybe(perturbation_cfg, :integration, :gh)
+    integration_sym = Symbol(lowercase(string(integration_raw)))
     return PerturbationMethod((
         name = maybe(cfg, :method, solver_cfg.method),
         a_bar = perturbation_cfg.a_bar,
@@ -42,6 +44,7 @@ function build_perturbation_method(cfg::NamedTuple)
         h_z = perturbation_cfg.h_z,
         tol_fit = perturbation_cfg.tol_fit,
         maxit_fit = perturbation_cfg.maxit_fit,
+        integration = integration_sym,
     ))
 end
 
@@ -57,13 +60,17 @@ function solve(
     U = get_utility(model)
 
     csvar = is_csvar_model(p)
-    shocks_for_solver = csvar ? nothing : S
+    integration = method.opts.integration
+    if csvar && integration == :mc
+        @warn "Perturbation CSVar fallback to Gauss-Hermite integration" integration
+        integration = :gh
+    end
 
     sol = if csvar
-        solve_perturbation_placeholder(
+        solve_perturbation_stoch(
             p,
             g,
-            shocks_for_solver,
+            S,
             U;
             a_bar = method.opts.a_bar,
             order = method.opts.order,
@@ -71,6 +78,7 @@ function solve(
             h_z = method.opts.h_z,
             tol_fit = method.opts.tol_fit,
             maxit_fit = method.opts.maxit_fit,
+            integration_method = integration,
         )
     elseif S === nothing
         solve_perturbation_det(
@@ -95,6 +103,7 @@ function solve(
             h_z = method.opts.h_z,
             tol_fit = method.opts.tol_fit,
             maxit_fit = method.opts.maxit_fit,
+            integration_method = integration,
         )
     end
 
