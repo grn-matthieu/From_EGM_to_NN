@@ -21,7 +21,7 @@ using ..PolicyUtils:
     rmse_nonbinding,
     sort_policy_pairs!
 using ..CSVarUtils: csvar_income
-using ..SolverIntegration: integrate_expectation
+using ..SolverIntegration: integrate_expectation, discrete_expectation
 using ..SolverPlaceholders: build_placeholder_solution
 using Printf
 
@@ -445,6 +445,7 @@ function solve_egm_stoch_impl(
     cnew = similar(c)
     a_next = similar(c)
     resid_mat = similar(c)
+    pow = similar(c)
     EUprime = similar(view(c, :, 1))
     c_endo = similar(EUprime)
     a_endo = similar(EUprime)
@@ -460,14 +461,12 @@ function solve_egm_stoch_impl(
     for it = 1:maxit
         iters = it
         copyto!(cold, c)
+        @. pow = max(cold, cmin)^(-γ)
 
         for (j, z) in enumerate(z_grid)
             y = exp(z)
-            fill!(EUprime, 0.0)
-            for jp = 1:Nz
-                c_future = view(cold, :, jp)
-                @. EUprime += Π[j, jp] * (max(c_future, cmin)^(-γ))
-            end
+            weights = view(Π, j, :)
+            EUprime .= discrete_expectation(weights, pow)
 
             @. c_endo = model_utility.u_prime_inv(β * R * EUprime)
             @. a_endo = (a_grid - y + c_endo) / R
@@ -582,6 +581,7 @@ function solve_egm_stoch_impl(
     cnew = similar(c)
     a_next = similar(c)
     resid_mat = similar(c)
+    pow = similar(c)
     EUprime = similar(view(c, :, 1))
     c_endo = similar(EUprime)
     a_endo = similar(EUprime)
@@ -597,14 +597,12 @@ function solve_egm_stoch_impl(
     for it = 1:maxit
         iters = it
         copyto!(cold, c)
+        @. pow = max(cold, cmin)^(-γ)
 
         for (j, z) in enumerate(z_grid)
             y = exp(z)
-            fill!(EUprime, 0.0)
-            for jp = 1:Nz
-                c_future = view(cold, :, jp)
-                @. EUprime += Π[j, jp] * (max(c_future, cmin)^(-γ))
-            end
+            weights = view(Π, j, :)
+            EUprime .= discrete_expectation(weights, pow)
 
             @. c_endo = model_utility.u_prime_inv(β * R * EUprime)
             @. a_endo = (a_grid - y + c_endo) / R

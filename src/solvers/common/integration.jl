@@ -1,10 +1,10 @@
 module SolverIntegration
 
-using LinearAlgebra: Symmetric, cholesky, eigen
+using LinearAlgebra: Symmetric, cholesky, eigen, mul!
 using Random: default_rng, randn!
 using ..CSVarUtils: csvar_expected_state
 
-export integrate_expectation
+export integrate_expectation, discrete_expectation
 
 const DEFAULT_MC_SAMPLES = 128
 const SQRT_PI = sqrt(pi)
@@ -57,11 +57,12 @@ function _mc_expectation(f, μ::AbstractVector, Σ::AbstractMatrix, nsamples::In
     L = cholesky(Symmetric(Σ), check = false).L
     draws = Matrix{Float64}(undef, d, nsamples)
     randn!(rng, draws)
-    y_next = μ .+ L * view(draws, :, 1)
-    acc = f(y_next)
+    tmp = Vector{Float64}(undef, d)
+    mul!(tmp, L, view(draws, :, 1))
+    acc = f(μ .+ tmp)
     for s = 2:nsamples
-        y_next = μ .+ L * view(draws, :, s)
-        acc += f(y_next)
+        mul!(tmp, L, view(draws, :, s))
+        acc += f(μ .+ tmp)
     end
     return acc / nsamples
 end
@@ -104,6 +105,16 @@ function _gauss_hermite_nodes_weights(order::Int)
     nodes = eig.values
     weights = (eig.vectors[1, :] .^ 2) .* SQRT_PI
     return nodes, weights
+end
+
+discrete_expectation(weights::AbstractVector, values::AbstractVector) =
+    sum(weights .* values)
+
+function discrete_expectation(weights::AbstractVector, values::AbstractMatrix)
+    size(values, 2) == length(weights) || error(
+        "values columns ($(size(values, 2))) must match weights length $(length(weights))",
+    )
+    return values * weights
 end
 
 end # module
