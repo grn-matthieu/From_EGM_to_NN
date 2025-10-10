@@ -160,7 +160,7 @@ function solve_nn(model; opts = nothing, rng = nothing)
     settings = solver_settings(opts; has_shocks = has_shocks)
     scaler = FeatureScaler(P, G, S, settings)
 
-    chain = build_dual_head_network(input_dimension(S), settings.hidden_sizes)
+    chain = build_dual_head_network(nn_input_dimension(P), settings.hidden_sizes)
 
     P_resid = scalar_params(P)
     model_cfg = build_model_config(P, U, scaler, P_resid, settings)
@@ -215,7 +215,7 @@ function solve_nn(model; opts = nothing, rng = nothing)
         rng = diag_rng,
     )
 
-    _, w_grid = det_forward_inputs(G, P_resid)
+    _, w_grid = det_forward_inputs(G, P)
 
     return (;
         w_grid = w_grid,
@@ -248,15 +248,11 @@ function loss_euler_fb_aio!(chain, ps, st, batch, model_cfg, rng)
 
     Rg = one(T) + T(P.r)
     μ = T(P_resid.y)
-    if size(batch, 1) == 2
-        y0 = ((batch[1, :] .+ one(T)) ./ T(2)) .* T(scaler.y_range) .+ T(scaler.y_min)
-        w0 = ((batch[2, :] .+ one(T)) ./ T(2)) .* T(scaler.w_range) .+ T(scaler.w_min)
-    elseif size(batch, 1) == 1
-        w0 = ((batch[1, :] .+ one(T)) ./ T(2)) .* T(scaler.w_range) .+ T(scaler.w_min)
-        y0 = fill_like(exp(μ), w0)
-    else
-        throw(ArgumentError("Expected 1 or 2 feature rows, got $(size(batch, 1))"))
-    end
+    feature_dim = size(batch, 1)
+    mean_norm = batch[1, :]
+    w_norm = batch[end, :]
+    y0 = ((mean_norm .+ one(T)) ./ T(2)) .* T(scaler.mean_range) .+ T(scaler.mean_min)
+    w0 = ((w_norm .+ one(T)) ./ T(2)) .* T(scaler.w_range) .+ T(scaler.w_min)
     z0 = log.(y0) .- μ
     out, st1 = Lux.apply(chain, batch, ps, st)
     c0 = vec(phi_to_consumption(out[:Φ], w0; min_c = C_MIN))
@@ -277,8 +273,22 @@ function loss_euler_fb_aio!(chain, ps, st, batch, model_cfg, rng)
     w1 = @. Rg * a1 + y1
     w2 = @. Rg * a2 + y2
 
-    X1 = vcat(reshape(y1, 1, :), reshape(w1, 1, :))
-    X2 = vcat(reshape(y2, 1, :), reshape(w2, 1, :))
+    component_levels =
+        hasproperty(P, :y) && P.y isa AbstractVector ? Float32.(exp.(collect(P.y))) :
+        Float32[]
+    X1 = Matrix{Float32}(undef, feature_dim, length(y1))
+    X2 = Matrix{Float32}(undef, feature_dim, length(y2))
+    X1[1, :] .= y1
+    X2[1, :] .= y2
+    if feature_dim > 2
+        for j = 1:(feature_dim-2)
+            level = j <= length(component_levels) ? component_levels[j] : Float32(exp(μ))
+            X1[1+j, :] .= level
+            X2[1+j, :] .= level
+        end
+    end
+    X1[end, :] .= w1
+    X2[end, :] .= w2
 
     normalize_feature_batch!(scaler, X1)
     normalize_feature_batch!(scaler, X2)

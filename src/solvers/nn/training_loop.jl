@@ -214,15 +214,10 @@ function build_loss_function(
             Φ = prediction.Φ
             h_raw = prediction.h
 
-            if size(X, 1) == 2
-                y = ((X[1, :] .+ one(T)) ./ T(2)) .* T(scaler.y_range) .+ T(scaler.y_min)
-                w = ((X[2, :] .+ one(T)) ./ T(2)) .* T(scaler.w_range) .+ T(scaler.w_min)
-            elseif size(X, 1) == 1
-                w = ((X[1, :] .+ one(T)) ./ T(2)) .* T(scaler.w_range) .+ T(scaler.w_min)
-                y = fill(exp(μ), size(w))
-            else
-                throw(ArgumentError("Expected 1 or 2 feature rows, got $(size(X, 1))"))
-            end
+            mean_vals =
+                ((X[1, :] .+ one(T)) ./ T(2)) .* T(scaler.mean_range) .+ T(scaler.mean_min)
+            w = ((X[end, :] .+ one(T)) ./ T(2)) .* T(scaler.w_range) .+ T(scaler.w_min)
+            y = mean_vals
 
             # Align shapes: Φ and h may be 1×N (row) or N×1 (column)
             if ndims(Φ) == 2 && size(Φ, 1) == 1
@@ -247,15 +242,10 @@ function build_loss_function(
         elseif prediction isa Tuple
             c_pred, st_out = prediction
             c_pred = clamp.(c_pred, eps(eltype(X)), Inf)
-            if size(X, 1) == 2
-                y = ((X[1, :] .+ one(T)) ./ T(2)) .* T(scaler.y_range) .+ T(scaler.y_min)
-                w = ((X[2, :] .+ one(T)) ./ T(2)) .* T(scaler.w_range) .+ T(scaler.w_min)
-            elseif size(X, 1) == 1
-                w = ((X[1, :] .+ one(T)) ./ T(2)) .* T(scaler.w_range) .+ T(scaler.w_min)
-                y = fill(exp(μ), size(w))
-            else
-                throw(ArgumentError("Expected 1 or 2 feature rows, got $(size(X, 1))"))
-            end
+            mean_vals =
+                ((X[1, :] .+ one(T)) ./ T(2)) .* T(scaler.mean_range) .+ T(scaler.mean_min)
+            w = ((X[end, :] .+ one(T)) ./ T(2)) .* T(scaler.w_range) .+ T(scaler.w_min)
+            y = mean_vals
             c_vec = vec(c_pred)
         else
             c_pred = prediction
@@ -331,13 +321,15 @@ function create_training_batch(
     rng::AbstractRNG,
     P_resid = nothing,
     settings::Union{NNSolverSettings,Nothing} = nothing,
+    P = nothing,
 )
     want =
         nsamples > 0 ? nsamples :
         (isnothing(S) ? length(G[:a].grid) : length(G[:a].grid) * length(S.zgrid))
     if mode == :full
-        @assert P_resid !== nothing
-        X, _ = generate_dataset(G, S, P_resid; mode = :full)
+        base_P = P === nothing ? P_resid : P
+        @assert base_P !== nothing
+        X, _ = generate_dataset(G, S, base_P; mode = :full)
         normalize_samples!(scaler, X)
         return prepare_training_batch(X, Val(settings.use_cuda)), size(X, 1)
     end
@@ -349,7 +341,13 @@ function create_training_batch(
     @assert w_hi > w_lo "Require w_max > w_min for cash-on-hand sampling"
 
     Rg = 1.0f0 + Float32(P_resid.r)
-    μ = Float32(P_resid.y)
+    base_P = P === nothing ? P_resid : P
+    y_levels =
+        hasproperty(base_P, :y) && base_P.y isa AbstractVector ?
+        Float32.(collect(base_P.y)) : Float32[Float32(getfield(base_P, :y))]
+    y_dim = length(y_levels)
+    extra_cols = y_dim > 1 ? y_dim : 0
+    feature_dim = 1 + extra_cols + 1
     a_min = Float32(G[:a].min)
     a_max = Float32(G[:a].max)
     if settings.has_shocks && !isnothing(S)
@@ -360,7 +358,10 @@ function create_training_batch(
         z_max = 0.0f0
     end
 
-    Y = Vector{Float32}(undef, want)
+    mean_vec = Vector{Float32}(undef, want)
+    component_mat =
+        extra_cols > 0 ? Matrix{Float32}(undef, extra_cols, want) :
+        Matrix{Float32}(undef, 1, want)
     W = Vector{Float32}(undef, want)
     filled = 0
     tries = 0
@@ -369,22 +370,54 @@ function create_training_batch(
         m = max(want - filled, 4096)
         a_draw = rand(rng, Float32, m) .* (a_max - a_min) .+ a_min
         z_draw = rand(rng, Float32, m) .* (z_max - z_min) .+ z_min
-        y_draw = @. exp(μ + z_draw)
-        w_draw = @. Rg * a_draw + y_draw
+        if extra_cols > 0 &&
+           hasproperty(base_P, :Σ) &&
+           !isnothing(S) &&
+           hasproperty(S, :process) &&
+           S.process == :gaussian_linear
+            Σ = Matrix{Float64}(base_P.Σ)
+            chol = cholesky(Symmetric(Σ), check = false).L
+            μ_vec = Float64.(y_levels)
+            comps_tmp = Matrix{Float32}(undef, extra_cols, m)
+            @inbounds for i = 1:m
+                ε = randn(rng, Float64, y_dim)
+                y_vec = μ_vec .+ chol * ε
+                comps_tmp[:, i] .= Float32.(y_vec)
+            end
+            mean_draw = vec(mean(comps_tmp; dims = 1))
+        else
+            mean_draw = fill(Float32(mean(y_levels)), m)
+            if extra_cols > 0
+                comps_tmp = repeat(reshape(Float32.(y_levels), extra_cols, 1), 1, m)
+            end
+        end
+        w_draw = @. Rg * a_draw + Float32(mean_draw)
         keep = (w_draw .>= w_lo) .& (w_draw .<= w_hi)
         k = count(keep)
         if k > 0
             idx = findall(keep)
             take = min(k, want - filled)
-            Y[filled+1:filled+take] .= y_draw[idx[1:take]]
+            mean_vec[filled+1:filled+take] .= mean_draw[idx[1:take]]
             W[filled+1:filled+take] .= w_draw[idx[1:take]]
+            if extra_cols > 0
+                component_mat[:, filled+1:filled+take] .= comps_tmp[:, idx[1:take]]
+            else
+                component_mat[1, filled+1:filled+take] .= mean_draw[idx[1:take]]
+            end
             filled += take
         end
         tries += 1
     end
     @assert filled == want "Sampler could not hit the w-window; widen [w_min, w_max] or increase nsamples"
 
-    X = hcat(Y, W)
+    X = Matrix{Float32}(undef, want, feature_dim)
+    X[:, 1] .= mean_vec
+    if extra_cols > 0
+        for j = 1:extra_cols
+            X[:, 1+j] .= component_mat[j, :]
+        end
+    end
+    X[:, end] .= W
     normalize_samples!(scaler, X)
     batch = prepare_training_batch(X, Val(settings.use_cuda))
     return batch, want
@@ -456,6 +489,7 @@ function train_consumption_network!(
         rng = rng,
         P_resid = P_resid,
         settings = settings,
+        P = model_cfg === nothing ? nothing : model_cfg.P,
     )
     # create a fixed validation batch for periodic diagnostics (held out)
     val_nsamples = min(4096, sample_count)
@@ -468,6 +502,7 @@ function train_consumption_network!(
         rng = rng,
         P_resid = P_resid,
         settings = settings,
+        P = model_cfg === nothing ? nothing : model_cfg.P,
     )
     total_samples = size(batch, 2)
     batch_size = compute_batch_size(total_samples, settings.batch_choice)
@@ -495,6 +530,7 @@ function train_consumption_network!(
                 rng = rng,
                 P_resid = P_resid,
                 settings = settings,
+                P = model_cfg === nothing ? nothing : model_cfg.P,
             )
             batch = maybe_to_device(batch, settings)
             total_samples = size(batch, 2)

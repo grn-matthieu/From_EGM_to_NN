@@ -25,17 +25,10 @@ const DEFAULT_EVAL_SAMPLES = 8192
 const EVAL_MIN_CONSUMPTION = 1.0f-3
 
 @inline function denormalize_features(scaler::FeatureScaler, batch)
-    if size(batch, 1) == 2
-        y = ((batch[1, :] .+ 1.0f0) ./ 2.0f0) .* scaler.y_range .+ scaler.y_min
-        w = ((batch[2, :] .+ 1.0f0) ./ 2.0f0) .* scaler.w_range .+ scaler.w_min
-        return Float32.(y), Float32.(w)
-    elseif size(batch, 1) == 1
-        w = ((batch[1, :] .+ 1.0f0) ./ 2.0f0) .* scaler.w_range .+ scaler.w_min
-        y = fill(scaler.y_min, length(w))
-        return Float32.(y), Float32.(w)
-    else
-        throw(ArgumentError("Expected 1 or 2 feature rows, got $(size(batch, 1))"))
-    end
+    feature_dim = size(batch, 1)
+    mean_vals = ((batch[1, :] .+ 1.0f0) ./ 2.0f0) .* scaler.mean_range .+ scaler.mean_min
+    w_vals = ((batch[end, :] .+ 1.0f0) ./ 2.0f0) .* scaler.w_range .+ scaler.w_min
+    return Float32.(mean_vals), Float32.(w_vals)
 end
 
 function extract_consumption(prediction, w)
@@ -101,7 +94,7 @@ function next_assets_from_cash(w, consumption)
 end
 
 function evaluate_deterministic(model, params, states, P_resid, P, G, scaler)
-    X_forward, w_grid = det_forward_inputs(G, P_resid)
+    X_forward, w_grid = det_forward_inputs(G, P)
     normalize_feature_batch!(scaler, X_forward)
     prediction = run_model(model, params, states, X_forward)
 
@@ -122,7 +115,7 @@ function evaluate_deterministic(model, params, states, P_resid, P, G, scaler)
 end
 
 function evaluate_stochastic(model, params, states, P_resid, P, G, S, scaler, settings, U)
-    X_eval, _ = generate_dataset(G, S, P_resid; mode = :full)
+    X_eval, _ = generate_dataset(G, S, P; mode = :full)
     normalize_samples!(scaler, X_eval)
     batch = prepare_training_batch(X_eval, Val(settings.use_cuda))
     prediction = run_model(model, params, states, batch)
@@ -220,10 +213,13 @@ function eval_euler_residuals_mc(
         rng = rng,
         P_resid = P_resid,
         settings = settings,
+        P = P,
     )
 
-    y0 = ((batch[1, :] .+ 1.0f0) ./ 2.0f0) .* scaler.y_range .+ scaler.y_min
-    w0 = ((batch[2, :] .+ 1.0f0) ./ 2.0f0) .* scaler.w_range .+ scaler.w_min
+    mean_norm = batch[1, :]
+    w_norm = batch[end, :]
+    y0 = ((mean_norm .+ 1.0f0) ./ 2.0f0) .* scaler.mean_range .+ scaler.mean_min
+    w0 = ((w_norm .+ 1.0f0) ./ 2.0f0) .* scaler.w_range .+ scaler.w_min
 
     # Ensure y0/w0 live on the same device as model outputs when using CUDA
     if settings.use_cuda
@@ -253,7 +249,19 @@ function eval_euler_residuals_mc(
     a1 = @. w0 - c0
     w1 = @. Rg * a1 + y1
 
-    X1 = vcat(reshape(y1, 1, :), reshape(w1, 1, :))
+    feature_dim = size(batch, 1)
+    component_levels =
+        hasproperty(P, :y) && P.y isa AbstractVector ? Float32.(exp.(collect(P.y))) :
+        Float32[]
+    X1 = Matrix{Float32}(undef, feature_dim, length(y1))
+    X1[1, :] .= y1
+    if feature_dim > 2
+        for j = 1:(feature_dim-2)
+            level = j <= length(component_levels) ? component_levels[j] : Float32(P_resid.y)
+            X1[1+j, :] .= level
+        end
+    end
+    X1[end, :] .= w1
     normalize_feature_batch!(scaler, X1)
     out1, _ = Lux.apply(model, X1, ps, st)
     c1 = vec(phi_to_consumption(out1[:Φ], w1; min_c = 1.0f-3))
@@ -349,9 +357,12 @@ function eval_euler_residuals_gh(
         rng = rng,
         P_resid = P_resid,
         settings = settings,
+        P = P,
     )
-    y0 = ((batch[1, :] .+ 1.0f0) ./ 2.0f0) .* scaler.y_range .+ scaler.y_min
-    w0 = ((batch[2, :] .+ 1.0f0) ./ 2.0f0) .* scaler.w_range .+ scaler.w_min
+    mean_norm = batch[1, :]
+    w_norm = batch[end, :]
+    y0 = ((mean_norm .+ 1.0f0) ./ 2.0f0) .* scaler.mean_range .+ scaler.mean_min
+    w0 = ((w_norm .+ 1.0f0) ./ 2.0f0) .* scaler.w_range .+ scaler.w_min
     if settings.use_cuda
         y0 = cu(y0)
         w0 = cu(w0)
@@ -378,7 +389,20 @@ function eval_euler_residuals_gh(
         y1 = exp.(μ .+ z1)
         a1 = @. w0 - c0
         w1 = @. Rg * a1 + y1
-        X1 = vcat(reshape(y1, 1, :), reshape(w1, 1, :))
+        feature_dim = size(batch, 1)
+        component_levels =
+            hasproperty(P, :y) && P.y isa AbstractVector ? Float32.(collect(P.y)) :
+            Float32[]
+        X1 = Matrix{Float32}(undef, feature_dim, length(y1))
+        X1[1, :] .= y1
+        if feature_dim > 2
+            for j = 1:(feature_dim-2)
+                level =
+                    j <= length(component_levels) ? component_levels[j] : Float32(P_resid.y)
+                X1[1+j, :] .= level
+            end
+        end
+        X1[end, :] .= w1
         normalize_feature_batch!(scaler, X1)
         out1, _ = Lux.apply(model, X1, ps, st)
         c1 = vec(phi_to_consumption(out1[:Φ], w1; min_c = 1.0f-3))
