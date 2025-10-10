@@ -175,15 +175,14 @@ function validate_config(cfg::NamedTuple)
 
     if model_name == :cs_vec
         hasproperty(p, :A) || error("missing params.A")
-        hasproperty(p, :Epsilon) || error("missing params.Epsilon")
+        hasproperty(p, :Σ) || error("missing params.Σ")
         Ay = getproperty(p, :A)
         rows_A, cols_A = _check_numeric_matrix_repr(Ay; name = "params.A")
         rows_A == cols_A || error("params.A must be square")
 
-        Ey = getproperty(p, :Epsilon)
-        rows_E, _ = _check_numeric_matrix_repr(Ey; name = "params.Epsilon")
-        rows_E == rows_A ||
-            error("params.Epsilon must have the same number of rows as params.A")
+        Ey = getproperty(p, :Σ)
+        rows_E, _ = _check_numeric_matrix_repr(Ey; name = "params.Σ")
+        rows_E == rows_A || error("params.Σ must have the same number of rows as params.A")
 
         if hasproperty(p, :y)
             y_val = getproperty(p, :y)
