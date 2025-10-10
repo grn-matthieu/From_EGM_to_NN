@@ -260,8 +260,13 @@ function evaluate_solution(
     U = nothing,
 )
     local_settings =
-        settings === nothing ? solver_settings(nothing; has_shocks = scaler.has_shocks) :
-        settings
+        settings === nothing ?
+        solver_settings(
+            nothing;
+            has_shocks = scaler.has_shocks,
+            objective_default = is_csvar_problem(P, S) ? :euler_residual :
+                                (scaler.has_shocks ? :euler_fb_aio : :euler_residual),
+        ) : settings
     if is_csvar_problem(P, S)
         return evaluate_csvar(
             model,

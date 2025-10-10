@@ -163,7 +163,13 @@ function solve_nn(model; opts = nothing, rng = nothing)
     start_time = time_ns()
     is_csvar = !isnothing(S) && hasproperty(S, :process) && S.process == :gaussian_linear
     has_shocks = !isnothing(S) && !is_csvar
-    settings = solver_settings(opts; has_shocks = has_shocks)
+    objective_default =
+        is_csvar ? :euler_residual : has_shocks ? :euler_fb_aio : :euler_residual
+    settings = solver_settings(
+        opts;
+        has_shocks = has_shocks,
+        objective_default = objective_default,
+    )
     scaler = FeatureScaler(P, G, S, settings)
 
     chain = build_dual_head_network(nn_input_dimension(P), settings.hidden_sizes)

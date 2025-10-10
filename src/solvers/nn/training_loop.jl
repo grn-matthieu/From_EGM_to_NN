@@ -114,7 +114,11 @@ function detect_cuda_preference(objective, opts)
     return use_cuda
 end
 
-function solver_settings(opts; has_shocks::Bool = false)
+function solver_settings(
+    opts;
+    has_shocks::Bool = false,
+    objective_default::Symbol = :euler_fb_aio,
+)
     epochs = max(Int(get_option(opts, :epochs, 1000)), 0)
     batch_choice = get_option(opts, :batch, 64)
     batch_choice = isnothing(batch_choice) ? nothing : max(Int(batch_choice), 1)
@@ -126,7 +130,7 @@ function solver_settings(opts; has_shocks::Bool = false)
     patience = max(Int(get_option(opts, :patience, 200)), 0)
     hid1 = max(Int(get_option(opts, :hid1, 128)), 1)
     hid2 = max(Int(get_option(opts, :hid2, 128)), 1)
-    objective = Symbol(get_option(opts, :objective, :euler_fb_aio))
+    objective = Symbol(get_option(opts, :objective, objective_default))
     # clamp v_h to a broader safe range [0.2, 5.0] to allow more tuning flexibility
     v_h = clamp(Float64(get_option(opts, :v_h, 0.5)), 0.2, 5.0)
     w_min = Float32(get_option(opts, :w_min, 0.1))
@@ -181,6 +185,16 @@ function build_loss_function(
     rng::AbstractRNG,
     model_cfg = nothing,
 )
+    function fb_supported(model_cfg)
+        model_cfg === nothing && return false
+        P_full = model_cfg.P
+        has_ar1 = hasproperty(P_full, :ρ_shock) && hasproperty(P_full, :σ_shock)
+        has_var = hasproperty(P_full, :A) && hasproperty(P_full, :Σ)
+        return has_ar1 || has_var
+    end
+
+    fb_warning_emitted = Ref(false)
+
     return function (model, ps, st, data)
         X = data[1]
         T = eltype(X)
@@ -189,20 +203,27 @@ function build_loss_function(
 
         # If caller selected the FB AiO objective, delegate to the custom loss
         if settings.objective == :euler_fb_aio
-            # loss_euler_fb_aio! returns (loss, (st1, aux_namedtuple))
-            loss_val, st_pack = loss_euler_fb_aio!(model, ps, st, X, model_cfg, rng)
-            st1, aux = st_pack
-            # package diagnostics: include FB aux diagnostics and leave phi/h fields empty
-            diag = (;
-                phi = nothing,
-                h = nothing,
-                a = nothing,
-                z = nothing,
-                w = nothing,
-                c = nothing,
-                fb = aux,
-            )
-            return loss_val, st1, diag
+            if !fb_supported(model_cfg)
+                if !fb_warning_emitted[]
+                    @warn "objective :euler_fb_aio requires active stochastic shocks; falling back to :euler_residual"
+                    fb_warning_emitted[] = true
+                end
+            else
+                # loss_euler_fb_aio! returns (loss, (st1, aux_namedtuple))
+                loss_val, st_pack = loss_euler_fb_aio!(model, ps, st, X, model_cfg, rng)
+                st1, aux = st_pack
+                # package diagnostics: include FB aux diagnostics and leave phi/h fields empty
+                diag = (;
+                    phi = nothing,
+                    h = nothing,
+                    a = nothing,
+                    z = nothing,
+                    w = nothing,
+                    c = nothing,
+                    fb = aux,
+                )
+                return loss_val, st1, diag
+            end
         end
 
         # Default Euler residual loss path (existing behaviour)
