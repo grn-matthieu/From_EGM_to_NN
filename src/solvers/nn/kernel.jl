@@ -71,7 +71,10 @@ function maybe_dense_diagnostics(
     P = nothing,
     rng = nothing,
 )
-    if !settings.has_shocks
+    has_stochastic =
+        settings.has_shocks ||
+        (S !== nothing && hasproperty(S, :process) && S.process == :gaussian_linear)
+    if !has_stochastic
         return nothing, nothing
     end
     # forward explicit grids/shocks/params when available to avoid relying on Main

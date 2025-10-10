@@ -8,6 +8,8 @@ common diagnostic bundles.
 
 using Random
 using Lux: fmap
+using LinearAlgebra: cholesky, mul!, Symmetric
+using ..CSVarUtils: csvar_income
 
 # Local sigmoid function to avoid NNlib dependency
 @inline sigmoid(x) = 1 / (1 + exp(-x))
@@ -23,6 +25,13 @@ const CONSUMPTION_FLOOR = 1.0f-8
 
 const DEFAULT_EVAL_SAMPLES = 8192
 const EVAL_MIN_CONSUMPTION = 1.0f-3
+@inline is_csvar_problem(P, S) =
+    S !== nothing &&
+    hasproperty(S, :process) &&
+    S.process == :gaussian_linear &&
+    hasproperty(P, :A) &&
+    hasproperty(P, :Σ)
+const CSVAR_EVAL_SAMPLES = 512
 
 @inline function denormalize_features(scaler::FeatureScaler, batch)
     feature_dim = size(batch, 1)
@@ -93,6 +102,8 @@ function next_assets_from_cash(w, consumption)
     return convert.(T, w) .- consumption
 end
 
+@inline maybe_to_cpu(x, settings) = settings.use_cuda ? Array(x) : x
+
 function evaluate_deterministic(model, params, states, P_resid, P, G, scaler)
     X_forward, w_grid = det_forward_inputs(G, P)
     normalize_feature_batch!(scaler, X_forward)
@@ -151,6 +162,91 @@ function evaluate_stochastic(model, params, states, P_resid, P, G, S, scaler, se
     return EvaluationResult(c_on_grid, a_next, residuals, max_resid)
 end
 
+function evaluate_csvar(model, params, states, P_resid, P, G, S, scaler, settings, U)
+    y_state =
+        hasproperty(P, :y) && P.y isa AbstractVector ? Float32.(collect(P.y)) :
+        Float32[Float32(P_resid.y)]
+    y_dim = length(y_state)
+    y_dim > 0 || error("CSVAR evaluation requires a positive state dimension")
+
+    a_grid_f32 = float32_vector(G[:a].grid)
+    Na = length(a_grid_f32)
+    Rg = 1.0f0 + Float32(P_resid.r)
+    income_curr = Float32(csvar_income(y_state))
+
+    feature_dim = y_dim + 2
+    X = Matrix{Float32}(undef, feature_dim, Na)
+    X[1, :] .= income_curr
+    for j = 1:y_dim
+        X[1+j, :] .= y_state[j]
+    end
+    w_grid = @. Rg * a_grid_f32 + income_curr
+    X[end, :] .= w_grid
+    normalize_feature_batch!(scaler, X)
+    X_dev = maybe_to_device(X, settings)
+
+    prediction = run_model(model, params, states, X_dev)
+    if prediction isa NamedTuple
+        w_dev = maybe_to_device(w_grid, settings)
+        c_pred = phi_to_consumption(prediction[:Φ], w_dev; min_c = EVAL_MIN_CONSUMPTION)
+    else
+        c_pred = prediction
+    end
+    _, c_vec, _ = det_residual_inputs(c_pred, G)
+    c_on_grid = convert_to_grid_eltype(G[:a].grid, c_vec)
+    a_next = next_assets_from_cash(w_grid, Float32.(c_on_grid))
+    a_next = clamp_to_asset_bounds(a_next, G[:a])
+
+    uprime = get_uprime(U, P_resid)
+    β = Float32(P_resid.β)
+
+    Σ = Matrix{Float64}(P.Σ)
+    chol = cholesky(Symmetric(Σ), check = false)
+    L = Matrix{Float32}(chol.L)
+    A = Matrix{Float32}(P.A)
+    μ_vec = A * y_state
+
+    ε = randn(Float32, y_dim, CSVAR_EVAL_SAMPLES)
+    draws = similar(ε)
+    mul!(draws, L, ε)
+    @. draws += μ_vec
+    income_draws = Float32.(csvar_income(draws))
+
+    resid = Vector{Float32}(undef, Na)
+    uprime_c0 = uprime(Float32.(c_on_grid))
+    Rg64 = Float32(Rg)
+    for i = 1:Na
+        a_next_i = Float32(a_next[i])
+        w_future = @. Rg64 * a_next_i + income_draws
+        X_future = build_feature_batch_from_states(scaler, draws, w_future)
+        X_future_dev = maybe_to_device(X_future, settings)
+        pred_next = run_model(model, params, states, X_future_dev)
+        if pred_next isa NamedTuple
+            w_future_dev = maybe_to_device(w_future, settings)
+            c1_raw = phi_to_consumption(
+                pred_next[:Φ],
+                w_future_dev;
+                min_c = EVAL_MIN_CONSUMPTION,
+            )
+        else
+            c1_raw = pred_next
+        end
+        c1_vec = vec(permutedims(ensure_row(c1_raw)))
+        c1_cpu = maybe_to_cpu(c1_vec, settings)
+        mean_uprime = mean(uprime(c1_cpu))
+        denom =
+            uprime_c0[i] <= 0 ? uprime(Float32(max(c_on_grid[i], EVAL_MIN_CONSUMPTION))) :
+            uprime_c0[i]
+        val = abs(1 - β * Rg64 * mean_uprime / denom)
+        resid[i] = Float32(val)
+    end
+
+    max_resid = sqrt(mean(Float64.(resid) .^ 2))
+    a_next_out = convert.(eltype(G[:a].grid), a_next)
+
+    return EvaluationResult(c_on_grid, a_next_out, resid, max_resid)
+end
+
 function evaluate_solution(
     model,
     params,
@@ -166,7 +262,20 @@ function evaluate_solution(
     local_settings =
         settings === nothing ? solver_settings(nothing; has_shocks = scaler.has_shocks) :
         settings
-    if scaler.has_shocks
+    if is_csvar_problem(P, S)
+        return evaluate_csvar(
+            model,
+            params,
+            states,
+            P_resid,
+            P,
+            G,
+            S,
+            scaler,
+            local_settings,
+            U,
+        )
+    elseif scaler.has_shocks
         return evaluate_stochastic(
             model,
             params,
@@ -199,6 +308,22 @@ function eval_euler_residuals_mc(
     S = nothing,
     P = nothing,
 )
+    if P !== nothing && is_csvar_problem(P, S)
+        return eval_euler_residuals_mc_csvar(
+            model,
+            ps,
+            st,
+            P_resid,
+            U,
+            scaler,
+            settings;
+            N = N,
+            rng = rng,
+            G = G,
+            S = S,
+            P = P,
+        )
+    end
     @assert settings.has_shocks "MC eval is for stochastic spec"
     @assert !(G === nothing) "eval_euler_residuals_mc requires G to be provided"
     @assert !(S === nothing) "eval_euler_residuals_mc requires S to be provided"
@@ -301,6 +426,95 @@ function eval_euler_residuals_mc(
     )
 end
 
+function eval_euler_residuals_mc_csvar(
+    model,
+    ps,
+    st,
+    P_resid,
+    U,
+    scaler,
+    settings;
+    N = 8192,
+    rng::AbstractRNG,
+    G = nothing,
+    S = nothing,
+    P = nothing,
+)
+    @assert !(G === nothing) "eval_euler_residuals_mc_csvar requires G to be provided"
+    @assert !(P === nothing) "eval_euler_residuals_mc_csvar requires P to be provided"
+    @assert !(S === nothing) "eval_euler_residuals_mc_csvar requires S to be provided"
+
+    batch, _ = create_training_batch(
+        G,
+        S,
+        scaler;
+        mode = :rand,
+        nsamples = N,
+        rng = rng,
+        P_resid = P_resid,
+        settings = settings,
+        P = P,
+    )
+
+    batch_cpu = maybe_to_cpu(batch, settings)
+    mean_vals, comps, w0_cpu = denormalize_feature_batch(scaler, batch_cpu)
+    y_dim = size(comps, 1)
+    y_dim > 0 || error("CSVAR diagnostics require vector-valued income state")
+
+    w0_dev = maybe_to_device(w0_cpu, settings)
+    out, _ = Lux.apply(model, batch, ps, st)
+    c0 = vec(phi_to_consumption(out[:Φ], w0_dev; min_c = 1.0f-3))
+    h = vec(ensure_row(out[:h]))
+
+    c0_cpu = maybe_to_cpu(c0, settings)
+    h_cpu = maybe_to_cpu(h, settings)
+
+    β = Float32(P.β)
+    Rg = 1.0f0 + Float32(P.r)
+    uprime = U.u_prime
+    a0 = w0_cpu .- c0_cpu
+
+    Σ = Matrix{Float64}(P.Σ)
+    chol = cholesky(Symmetric(Σ), check = false)
+    L = Matrix{Float32}(chol.L)
+    A = Matrix{Float32}(P.A)
+
+    ε = randn(rng, Float32, y_dim, N)
+    y_next = A * comps .+ L * ε
+    income_next = csvar_income(y_next)
+    w1_cpu = @. Rg * a0 + income_next
+    X1 = build_feature_batch_from_states(scaler, y_next, Float32.(w1_cpu))
+    X1_dev = maybe_to_device(X1, settings)
+    out1, _ = Lux.apply(model, X1_dev, ps, st)
+    w1_dev = maybe_to_device(Float32.(w1_cpu), settings)
+    c1 = vec(phi_to_consumption(out1[:Φ], w1_dev; min_c = 1.0f-3))
+    c1_cpu = maybe_to_cpu(c1, settings)
+
+    ratio = @. β * Rg * uprime(c1_cpu) / uprime(c0_cpu)
+    resid = abs.(1.0f0 .- ratio)
+
+    resid_cpu = Float32.(maybe_to_cpu(resid, settings))
+    w_cpu = Float32.(w0_cpu)
+    y_cpu = Float32.(mean_vals)
+    c_cpu = Float32.(c0_cpu)
+    h_cpu_f32 = Float32.(h_cpu)
+
+    sr = sort(vec(resid_cpu))
+    n = length(sr)
+    p50 = sr[clamp(Int(round(0.5 * n)), 1, n)]
+    p95 = sr[clamp(Int(ceil(0.95 * n)), 1, n)]
+
+    stats = (mean = mean(resid_cpu), p50 = p50, p95 = p95, max = maximum(resid_cpu))
+    return (
+        abs_resid = resid_cpu,
+        w = w_cpu,
+        y = y_cpu,
+        c = c_cpu,
+        stats = stats,
+        h = h_cpu_f32,
+    )
+end
+
 const GH10_X =
     Float32.([
         -3.436159,
@@ -343,6 +557,29 @@ function eval_euler_residuals_gh(
     S = nothing,
     P = nothing,
 )
+    if P !== nothing && is_csvar_problem(P, S)
+        mc_res = eval_euler_residuals_mc_csvar(
+            model,
+            ps,
+            st,
+            P_resid,
+            U,
+            scaler,
+            settings;
+            N = N,
+            rng = rng,
+            G = G,
+            S = S,
+            P = P,
+        )
+        return (;
+            abs_resid = mc_res.abs_resid,
+            w = mc_res.w,
+            y = mc_res.y,
+            c = mc_res.c,
+            stats = mc_res.stats,
+        )
+    end
     @assert settings.has_shocks
     @assert !(G === nothing) "eval_euler_residuals_gh requires G to be provided"
     @assert !(S === nothing) "eval_euler_residuals_gh requires S to be provided"
