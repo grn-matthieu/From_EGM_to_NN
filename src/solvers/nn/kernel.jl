@@ -12,11 +12,13 @@ using ..CommonInterp: InterpKind, LinearInterp
 using ..DataNN: generate_dataset
 using ..EulerResiduals: euler_resid_det_grid, euler_resid_stoch_grid
 using ..Determinism: derive_rng, promote_master_rng
+using ..CSVarUtils: csvar_income
 using Lux
 using Optimisers
 using Random
 using Printf
 using Statistics: mean, quantile
+using LinearAlgebra: cholesky, mul!, Symmetric
 
 include("mixed_precision.jl")
 include("preprocessing.jl")
@@ -156,7 +158,8 @@ function solve_nn(model; opts = nothing, rng = nothing)
     U = get_utility(model)
 
     start_time = time_ns()
-    has_shocks = !isnothing(S)
+    is_csvar = !isnothing(S) && hasproperty(S, :process) && S.process == :gaussian_linear
+    has_shocks = !isnothing(S) && !is_csvar
     settings = solver_settings(opts; has_shocks = has_shocks)
     scaler = FeatureScaler(P, G, S, settings)
 
@@ -237,6 +240,15 @@ end
 
 function loss_euler_fb_aio!(chain, ps, st, batch, model_cfg, rng)
     P = model_cfg.P
+    if hasproperty(P, :A) && hasproperty(P, :Σ)
+        return loss_euler_fb_aio_csvar!(chain, ps, st, batch, model_cfg, rng)
+    else
+        return loss_euler_fb_aio_ar1!(chain, ps, st, batch, model_cfg, rng)
+    end
+end
+
+function loss_euler_fb_aio_ar1!(chain, ps, st, batch, model_cfg, rng)
+    P = model_cfg.P
     U = model_cfg.U
     scaler = model_cfg.scaler
     P_resid = model_cfg.P_resid
@@ -269,9 +281,8 @@ function loss_euler_fb_aio!(chain, ps, st, batch, model_cfg, rng)
     y1 = exp.(μ .+ z1)
     y2 = exp.(μ .+ z2)
     a1 = @. w0 - c0
-    a2 = a1
     w1 = @. Rg * a1 + y1
-    w2 = @. Rg * a2 + y2
+    w2 = @. Rg * a1 + y2
 
     component_levels =
         hasproperty(P, :y) && P.y isa AbstractVector ? Float32.(exp.(collect(P.y))) :
@@ -311,6 +322,92 @@ function loss_euler_fb_aio!(chain, ps, st, batch, model_cfg, rng)
     v_h = hasproperty(model_cfg, :v_h) ? T(getfield(model_cfg, :v_h)) : one(T)
     loss_vec = kt .+ v_h .* aio_pen
 
+    max_abs_q = maximum(abs.(vcat(q1, q2)))
+
+    return mean(loss_vec),
+    (st1, (; kt_mean = mean(kt), aio_mean = mean(aio_pen), max_abs_q = max_abs_q))
+end
+
+function loss_euler_fb_aio_csvar!(chain, ps, st, batch, model_cfg, rng)
+    P = model_cfg.P
+    U = model_cfg.U
+    scaler = model_cfg.scaler
+    P_resid = model_cfg.P_resid
+    settings = model_cfg.settings
+    uprime = U.u_prime
+
+    T = eltype(batch)
+    C_MIN = T(1e-3)
+    feature_dim = size(batch, 1)
+    n = size(batch, 2)
+
+    mean_vals, comps, w0 = denormalize_feature_batch(scaler, batch)
+    y_dim = size(comps, 1) > 0 ? size(comps, 1) : 1
+    y_matrix = size(comps, 1) == 0 ? reshape(mean_vals, 1, :) : comps
+
+    out, st1 = Lux.apply(chain, batch, ps, st)
+    c0 = vec(phi_to_consumption(out[:Φ], w0; min_c = C_MIN))
+    h = T.(vec(ensure_row(out[:h])))
+    a_term = @. one(T) - c0 / w0
+    a_curr = @. w0 - c0
+
+    Rg = one(T) + T(P.r)
+    β = T(P.β)
+    v_h = hasproperty(model_cfg, :v_h) ? T(getfield(model_cfg, :v_h)) : one(T)
+
+    A = Matrix{T}(P.A)
+    Σ = Matrix{Float64}(P.Σ)
+    chol = cholesky(Symmetric(Σ), check = false)
+    L = Matrix{T}(chol.L)
+
+    ε1 = randn(rng, T, y_dim, n)
+    ε2 = randn(rng, T, y_dim, n)
+
+    y1 = similar(y_matrix)
+    y2 = similar(y_matrix)
+    noise_vec = Vector{T}(undef, y_dim)
+    @inbounds for i = 1:n
+        @views begin
+            curr = y_matrix[:, i]
+            dest1 = y1[:, i]
+            dest2 = y2[:, i]
+            mul!(dest1, A, curr)
+            mul!(dest2, A, curr)
+            mul!(noise_vec, L, view(ε1, :, i))
+            dest1 .+= noise_vec
+            mul!(noise_vec, L, view(ε2, :, i))
+            dest2 .+= noise_vec
+        end
+    end
+
+    income1 = Vector{T}(undef, n)
+    income2 = Vector{T}(undef, n)
+    @inbounds for i = 1:n
+        income1[i] = T(csvar_income(y1[:, i]))
+        income2[i] = T(csvar_income(y2[:, i]))
+    end
+
+    w1 = @. Rg * a_curr + income1
+    w2 = @. Rg * a_curr + income2
+
+    X1 = build_feature_batch_from_states(scaler, y1, w1)
+    X2 = build_feature_batch_from_states(scaler, y2, w2)
+    out1, st1 = Lux.apply(chain, X1, ps, st1)
+    out2, st2 = Lux.apply(chain, X2, ps, st1)
+
+    c1 = vec(phi_to_consumption(out1[:Φ], w1; min_c = C_MIN))
+    c2 = vec(phi_to_consumption(out2[:Φ], w2; min_c = C_MIN))
+
+    q1 = @. β * Rg * uprime(c1) / uprime(c0)
+    q2 = @. β * Rg * uprime(c2) / uprime(c0)
+
+    fb_term = fb(a_term, @. one(T) - h)
+    kt = @. fb_term^2
+    gh1 = clamp.(q1 .- h, -T(1e3), T(1e3))
+    gh2 = clamp.(q2 .- h, -T(1e3), T(1e3))
+    aio_pen = (gh1 .* gh2) .^ 2
+
+    loss_vec = kt .+ v_h .* aio_pen
     max_abs_q = maximum(abs.(vcat(q1, q2)))
 
     return mean(loss_vec),

@@ -83,7 +83,7 @@ function FeatureScaler(P, G, S, settings)
         y_range_vec,
         w_min,
         w_range,
-        !isnothing(S),
+        settings.has_shocks,
     )
 end
 
@@ -131,6 +131,44 @@ function normalize_feature_batch!(sc::FeatureScaler, X::AbstractMatrix{<:Abstrac
         )
     end
     return X
+end
+
+function build_feature_batch_from_states(
+    scaler::FeatureScaler,
+    y_components::AbstractMatrix,
+    w::AbstractVector,
+)
+    y_dim = size(y_components, 1)
+    n = length(w)
+    y_dim > 0 || error("build_feature_batch_from_states requires positive state dimension")
+    feature_dim = y_dim + 2
+    X = Matrix{Float32}(undef, feature_dim, n)
+    mean_vals = vec(sum(y_components; dims = 1)) ./ y_dim
+    X[1, :] .= Float32.(mean_vals)
+    for j = 1:y_dim
+        X[1+j, :] .= Float32.(y_components[j, :])
+    end
+    X[end, :] .= Float32.(w)
+    normalize_feature_batch!(scaler, X)
+    return X
+end
+
+function denormalize_feature_batch(scaler::FeatureScaler, batch::AbstractMatrix)
+    T = eltype(batch)
+    ncols = size(batch, 2)
+    mean_vals =
+        ((batch[1, :] .+ one(T)) ./ T(2)) .* T(scaler.mean_range) .+ T(scaler.mean_min)
+    y_dim = length(scaler.y_min)
+    comps = y_dim == 0 ? Matrix{T}(undef, 0, ncols) : Matrix{T}(undef, y_dim, ncols)
+    if y_dim > 0
+        for j = 1:y_dim
+            comps[j, :] .=
+                ((batch[1+j, :] .+ one(T)) ./ T(2)) .* T(scaler.y_range[j]) .+
+                T(scaler.y_min[j])
+        end
+    end
+    w_vals = ((batch[end, :] .+ one(T)) ./ T(2)) .* T(scaler.w_range) .+ T(scaler.w_min)
+    return mean_vals, comps, w_vals
 end
 
 # GPU in-place version without views nor scalar indexing
