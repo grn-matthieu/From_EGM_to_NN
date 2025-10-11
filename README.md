@@ -1,30 +1,28 @@
 
+
 # From_EGM_to_NN
 
-A Julia package and set of experiments comparing EGM, projection, perturbation, and neural-network solvers for a consumption-saving model.
+A small Julia project that compares methods for solving a consumption–saving model: endogenous grid method (EGM), projection, perturbation, and a neural-network solver. The repository includes the package code, experiments, and example configs so you can reproduce the main results or run quick checks.
 
-Core points
-- Package: `ThesisProject` (entry point for model building and solvers).
-- Minimal Julia version: 1.11
-- Configs: YAML files in `config/` drive experiments and solver options.
+What's here
 
-Quick install
+- `src/` — package source and solver implementations (entry point: `ThesisProject.jl`).
+- `config/` — YAML files used to run experiments and control solver options.
+- `scripts/` — experiment runners and CI scripts.
+- `docs/`, `results/`, `outputs/` — figures, logs, and outputs from experiments.
+- `test/` — unit and integration tests.
 
-1. Clone the repository and instantiate the environment:
+Quick start
+
+1. Clone and instantiate the Julia environment:
 
 ```bash
-git clone https://github.com/matthieugrenier/From_EGM_to_NN.git
+git clone https://github.com/grn-matthieu/From_EGM_to_NN.git
 cd From_EGM_to_NN
 julia --project -e 'using Pkg; Pkg.instantiate()'
 ```
 
-2. (Optional) Add plotting packages if needed:
-
-```bash
-julia --project -e 'using Pkg; Pkg.add(["Plots"])'
-```
-
-Basic usage
+2. Run a small example (uses the bundled config files):
 
 ```julia
 using ThesisProject
@@ -34,33 +32,27 @@ model = build_model(cfg)
 method = build_method(cfg)
 sol = solve(model, method, cfg)
 
-# inspect results
-sol.resid
-plot_policy(sol)    # requires Plots
+println("Residuals: ", sol.resid)
 ```
 
 Running tests
 
-Run the full test suite:
+Execute the test suite from the project environment:
 
 ```bash
 julia --project -e 'using Pkg; Pkg.test()'
 ```
 
-Repository layout (high level)
+Configuration and experiments
 
-- `src/` : package source (core API, models, solvers, methods, utils)
-- `config/` : YAML configs used by scripts and experiments
-- `scripts/` : experiment and CI scripts
-- `docs/`, `results/`, `outputs/` : figures and outputs
-- `test/` : unit and integration tests
+Configs live in `config/`. There are smoke tests and deterministic/stochastic variants to try quick runs. The `scripts/experiments` folder contains example experiment drivers used to produce figures in `docs/` and `results/`.
 
-Notes
+License and contact
 
-- Neural-network solver lives under `src/solvers/nn` and uses dual-head networks for policy outputs. Tunable options are exposed in the `solver` block of YAML configs.
-- Reproducibility: RNGs are derived from a master RNG via utilities in `src/utils/Determinism.jl` to avoid mutating the global RNG.
+This project is released under the MIT license (see `LICENSE`). If you want to reach out, please open an issue on GitHub with details and a minimal reproduction.
 
-License
+Simple notes for contributors
 
-This project is licensed under the MIT License (see `LICENSE`).
+- Use `julia --project` to run code or tests so dependencies are picked up from `Project.toml`.
+- Tests live in `test/`; smaller quick checks are under `test/unit` and `test/integration`.
 
