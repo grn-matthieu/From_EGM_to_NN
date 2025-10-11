@@ -63,7 +63,6 @@ shocks:
   method: "rouwenhorst"
   ρ_shock: 0.95
   σ_shock: 0.10
-  Nz: 7
   m: 3.0
 
 random:

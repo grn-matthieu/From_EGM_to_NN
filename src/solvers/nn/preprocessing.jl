@@ -1,6 +1,8 @@
 import ChainRulesCore: @non_differentiable
 using CUDA: cu, CuArray, CUDA
 using Statistics: mean
+using LinearAlgebra: diag
+
 struct ScalarParams
     γ::Float64
     β::Float64
@@ -156,19 +158,21 @@ end
 function denormalize_feature_batch(scaler::FeatureScaler, batch::AbstractMatrix)
     T = eltype(batch)
     ncols = size(batch, 2)
+
     mean_vals =
         ((batch[1, :] .+ one(T)) ./ T(2)) .* T(scaler.mean_range) .+ T(scaler.mean_min)
+
     y_dim = length(scaler.y_min)
-    comps = y_dim == 0 ? Matrix{T}(undef, 0, ncols) : Matrix{T}(undef, y_dim, ncols)
-    if y_dim > 0
-        for j = 1:y_dim
-            comps[j, :] .=
-                ((batch[1+j, :] .+ one(T)) ./ T(2)) .* T(scaler.y_range[j]) .+
-                T(scaler.y_min[j])
-        end
+    comps = if y_dim == 0
+        Matrix{T}(undef, 0, ncols)
+    else
+        B = @view batch[2:1+y_dim, :]                # source seulement, pas de mutation
+        r = reshape(T.(scaler.y_range[1:y_dim]), y_dim, 1)
+        m = reshape(T.(scaler.y_min[1:y_dim]), y_dim, 1)
+        ((B .+ one(T)) ./ T(2)) .* r .+ m        # retourne une nouvelle matrice
     end
-    w_vals = ((batch[end, :] .+ one(T)) ./ T(2)) .* T(scaler.w_range) .+ T(scaler.w_min)
-    return mean_vals, comps, w_vals
+
+    return mean_vals, comps, T.(batch[end, :])
 end
 
 # GPU in-place version without views nor scalar indexing

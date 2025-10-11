@@ -22,7 +22,6 @@ using Statistics: mean, quantile
 using LinearAlgebra: cholesky, mul!, Symmetric
 
 include("mixed_precision.jl")
-include("preprocessing.jl")
 include("training_loop.jl")
 include("evaluation.jl")
 
@@ -377,28 +376,15 @@ function loss_euler_fb_aio_csvar!(chain, ps, st, batch, model_cfg, rng)
     ε1 = randn(rng, T, y_dim, n)
     ε2 = randn(rng, T, y_dim, n)
 
-    y1 = similar(y_matrix)
-    y2 = similar(y_matrix)
-    noise_vec = Vector{T}(undef, y_dim)
-    @inbounds for i = 1:n
-        @views begin
-            curr = y_matrix[:, i]
-            dest1 = y1[:, i]
-            dest2 = y2[:, i]
-            mul!(dest1, A, curr)
-            mul!(dest2, A, curr)
-            mul!(noise_vec, L, view(ε1, :, i))
-            dest1 .+= noise_vec
-            mul!(noise_vec, L, view(ε2, :, i))
-            dest2 .+= noise_vec
-        end
-    end
+    y1, y2, income1, income2 = ignore_derivatives() do
+        # Non-mutating linear transitions
+        y1_ = A * y_matrix .+ L * ε1  # size: y_dim × n
+        y2_ = A * y_matrix .+ L * ε2
 
-    income1 = Vector{T}(undef, n)
-    income2 = Vector{T}(undef, n)
-    @inbounds for i = 1:n
-        income1[i] = T(csvar_income(y1[:, i]))
-        income2[i] = T(csvar_income(y2[:, i]))
+        # Build incomes without mutation
+        inc1 = collect(map(i -> T(csvar_income(view(y1_, :, i))), 1:n))
+        inc2 = collect(map(i -> T(csvar_income(view(y2_, :, i))), 1:n))
+        (y1_, y2_, inc1, inc2)
     end
 
     w1 = @. Rg * a_curr + income1

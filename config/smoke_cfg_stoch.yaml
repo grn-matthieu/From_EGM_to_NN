@@ -23,7 +23,7 @@ solver:
   tol: 1.0e-4
   tol_pol: 1.0e-3
   maxit: 1000
-  verbose: false
+  verbose: true
   relax: 0.5
   warm_start: default
   egm:
@@ -42,7 +42,7 @@ solver:
     tol_fit: 1e-8
     maxit_fit: 25
   nn:
-    epochs: 10000
+    epochs: 1000
     batch: 2048
     lr: 1e-3
     hid1: 64
@@ -54,14 +54,14 @@ solver:
     w_max: 4.0
     sigma_shocks: 0.1
     target_loss: 1e-10
-    use_cuda: true
+    use_cuda: false
+    n_mc: 32
 
 shocks:
   active: true
   method: "tauchen"
   ρ_shock: 0
   σ_shock: 0.10
-  Nz: 7
   m: 3.0
 
 random:

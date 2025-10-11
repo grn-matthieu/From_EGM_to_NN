@@ -12,10 +12,6 @@ params:
   Σ:
     - [0.02, 0.00]
     - [0.00, 0.02]
-  Σ:
-    - [1.0, 0.0]
-    - [0.0, 1.0]
-
 grids:
   Na: 40
   a_min: 0.0
@@ -25,11 +21,11 @@ utility:
   u_type: CRRA
 
 solver:
-  method: EGM
+  method: NN
   tol: 1.0e-3
   tol_pol: 1.0e-6
   maxit: 5000
-  verbose: false
+  verbose: true
   relax: 0.5
   warm_start: default
   egm:
@@ -47,11 +43,13 @@ solver:
     tol_fit: 1.0e-8
     maxit_fit: 20
   nn:
-    epochs: 5
+    epochs: 1000
     batch: 16
     lr: 1.0e-3
     hid1: 16
     hid2: 16
+    n_mc: 16
+    resample_every: 1
     samples_per_epoch: 64
     objective: euler_fb_aio
     v_h: 0.5

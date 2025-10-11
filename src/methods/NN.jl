@@ -51,6 +51,7 @@ function build_nn_method(cfg::NamedTuple)
         # device selection: allow config to explicitly request CUDA
         # pass-through so NNKernel.solver_settings can honor it
         use_cuda = nn_cfg.use_cuda,
+        n_mc = nn_cfg.n_mc,
     ))
 end
 
@@ -97,15 +98,6 @@ function solve(
             (sol.a_next isa AbstractVector) &&
             (length(sol.c) == Na) &&
             (length(sol.a_next) == Na)
-    else
-        Nz = size(S.Π, 1)
-        shapes_ok =
-            (sol.c isa AbstractMatrix) &&
-            (sol.a_next isa AbstractMatrix) &&
-            (size(sol.c, 1) == Na) &&
-            (size(sol.c, 2) == Nz) &&
-            (size(sol.a_next, 1) == Na) &&
-            (size(sol.a_next, 2) == Nz)
     end
 
     value = shapes_ok ? compute_value_policy(p, g, S, U, policy) : nothing

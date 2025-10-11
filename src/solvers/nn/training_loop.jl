@@ -4,6 +4,9 @@ import Zygote
 import Adapt
 using Lux: fmap
 
+include("preprocessing.jl")
+
+
 struct NNSolverSettings
     epochs::Int
     batch_choice::Union{Nothing,Int}
@@ -21,6 +24,7 @@ struct NNSolverSettings
     samples_per_epoch::Int
     sigma_shocks::Union{Nothing,Float64}
     use_cuda::Bool
+    n_mc::Int
 end
 
 struct TrainingResult
@@ -138,6 +142,7 @@ function solver_settings(
     samples_per_epoch = max(Int(get_option(opts, :samples_per_epoch, 64)), 1)
     sigma_shocks = get_option(opts, :sigma_shocks, nothing)
     use_cuda = detect_cuda_preference(objective, opts)
+    n_mc = max(Int(get_option(opts, :n_mc, 16)), 1)
 
     return NNSolverSettings(
         epochs,
@@ -156,6 +161,7 @@ function solver_settings(
         samples_per_epoch,
         sigma_shocks,
         use_cuda,
+        n_mc,
     )
 end
 
@@ -286,13 +292,81 @@ function build_loss_function(
         if isnothing(S)
             a_grid_f32, _, c_pred_vec_f32 = det_residual_inputs(c_pred, G)
             resid = euler_resid_det_grid(P_resid, a_grid_f32, c_pred_vec_f32)
+            loss = mean(huber_loss.(resid, 1.0f0))
         else
-            a_grid_f32, z_grid_f32, Pz_f32, _, c_pred_f32 =
-                stoch_residual_inputs(c_pred, G, S)
-            resid =
-                euler_resid_stoch_grid(P_resid, a_grid_f32, z_grid_f32, Pz_f32, c_pred_f32)
+            if is_csvar_problem(model_cfg === nothing ? P_resid : model_cfg.P, S)
+                # --- CSVAR Monte Carlo expectation on the minibatch ---
+                # Denormalize features
+                mean_vals, comps, w_vals = denormalize_feature_batch(scaler, X)
+                T = eltype(X)
+                β = T(P_resid.β)
+                Rg = one(T) + T(P_resid.r)
+                # current consumption from prediction
+                c0 =
+                    prediction isa NamedTuple ?
+                    vec(phi_to_consumption(prediction[:Φ], w_vals; min_c = 1.0f-8)) :
+                    vec(clamp.(prediction, eps(T), Inf))
+                a_next = @. Rg * (w_vals - c0)
+
+                # Draw innovations: ε ~ N(0, Σ)
+                base_P = model_cfg === nothing ? P_resid : model_cfg.P
+                Σ = Matrix{Float32}(base_P.Σ)
+                L = cholesky(Symmetric(Σ), check = false).L
+                y_dim = size(Σ, 1)
+                K = settings.n_mc
+
+                # Preallocate
+                resid_vec = Vector{Float32}(undef, length(a_next))
+                uprime = uprime_from(U, P_resid)
+                uprime_c0 = Float32.(uprime(Float32.(c0)))
+
+                # MC loop: build K future feature batches and average u′(c1)
+                innovations = Matrix{Float32}(undef, y_dim, K)
+                randn!(rng, innovations)
+                draws = Matrix{Float32}(undef, y_dim, K)
+                mul!(draws, L, innovations)                # y components
+                μ_vec =
+                    hasproperty(base_P, :y) && base_P.y isa AbstractVector ?
+                    Float32.(collect(base_P.y)) : Float32[Float32(getfield(base_P, :y))]
+                @. draws += μ_vec
+                income_draws = Float32.(csvar_income(draws))   # scalar income from components
+
+                # For each sample in the minibatch, evaluate c1 under K draws
+                for i = 1:length(a_next)
+                    w_future = @. Rg * Float32(a_next[i]) + income_draws
+                    X_future = build_feature_batch_from_states(scaler, draws, w_future)
+                    X_future_dev = maybe_to_device(X_future, settings)
+                    pred_next = run_model(model, ps, st_out, X_future_dev)
+                    c1_raw =
+                        pred_next isa NamedTuple ?
+                        phi_to_consumption(
+                            pred_next[:Φ],
+                            maybe_to_device(w_future, settings);
+                            min_c = 1.0f-6,
+                        ) : pred_next
+                    c1_vec = vec(permutedims(ensure_row(c1_raw)))
+                    c1_cpu = maybe_to_cpu(c1_vec, settings)
+                    mean_u′ = mean(uprime(Float32.(c1_cpu)))
+                    denom =
+                        uprime_c0[i] <= 0 ? uprime(Float32(max(c0[i], 1.0f-6))) :
+                        uprime_c0[i]
+                    resid_vec[i] = Float32(abs(1 - β * Rg * mean_u′ / denom))
+                end
+                loss = mean(huber_loss.(resid_vec, 1.0f0))
+            else
+                # Discrete scalar z with grid
+                a_grid_f32, z_grid_f32, Pz_f32, _, c_pred_f32 =
+                    stoch_residual_inputs(c_pred, G, S)
+                resid = euler_resid_stoch_grid(
+                    P_resid,
+                    a_grid_f32,
+                    z_grid_f32,
+                    Pz_f32,
+                    c_pred_f32,
+                )
+                loss = mean(huber_loss.(resid, 1.0f0))
+            end
         end
-        loss = mean(huber_loss.(resid, 1.0f0))
 
         # Build diagnostics NamedTuple for minibatch (phi, h, a, z, w, c)
         if prediction isa NamedTuple
@@ -371,7 +445,8 @@ function create_training_batch(
     feature_dim = 1 + extra_cols + 1
     a_min = Float32(G[:a].min)
     a_max = Float32(G[:a].max)
-    if settings.has_shocks && !isnothing(S)
+
+    if settings.has_shocks && !isnothing(S) && hasproperty(S, :zgrid)
         z_min = Float32(minimum(S.zgrid))
         z_max = Float32(maximum(S.zgrid))
     else

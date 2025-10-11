@@ -413,18 +413,30 @@ function eval_euler_residuals_mc(
     component_levels =
         hasproperty(P, :y) && P.y isa AbstractVector ? Float32.(exp.(collect(P.y))) :
         Float32[]
-    X1 = Matrix{Float32}(undef, feature_dim, length(y1))
-    X1[1, :] .= y1
+
+    # Build feature matrix on CPU (so assignment works regardless of whether
+    # y1/w1 are on the GPU). After normalization, move the batch to device if
+    # settings.use_cuda is set.
+    y1_cpu = maybe_to_cpu(y1, settings)
+    w1_cpu = maybe_to_cpu(w1, settings)
+    X1 = Matrix{Float32}(undef, feature_dim, length(y1_cpu))
+    X1[1, :] .= y1_cpu
     if feature_dim > 2
         for j = 1:(feature_dim-2)
             level = j <= length(component_levels) ? component_levels[j] : Float32(P_resid.y)
             X1[1+j, :] .= level
         end
     end
-    X1[end, :] .= w1
+    X1[end, :] .= w1_cpu
     normalize_feature_batch!(scaler, X1)
-    out1, _ = Lux.apply(model, X1, ps, st)
-    c1 = vec(phi_to_consumption(out1[:Φ], w1; min_c = 1.0f-3))
+
+    X1_dev = maybe_to_device(X1, settings)
+    out1, _ = Lux.apply(model, X1_dev, ps, st)
+
+    # Ensure the cash-on-hand passed to phi_to_consumption lives on the same
+    # device as the model output.
+    w1_dev = maybe_to_device(w1_cpu, settings)
+    c1 = vec(phi_to_consumption(out1[:Φ], w1_dev; min_c = 1.0f-3))
 
     uprime = U.u_prime
     ratio = @. β * Rg * uprime(c1) / uprime(c0)
@@ -665,8 +677,13 @@ function eval_euler_residuals_gh(
         component_levels =
             hasproperty(P, :y) && P.y isa AbstractVector ? Float32.(collect(P.y)) :
             Float32[]
-        X1 = Matrix{Float32}(undef, feature_dim, length(y1))
-        X1[1, :] .= y1
+        # Build feature matrix on CPU (so assignment works regardless of whether
+        # y1/w1 are on the GPU). After normalization, move the batch to device if
+        # settings.use_cuda is set.
+        y1_cpu = maybe_to_cpu(y1, settings)
+        w1_cpu = maybe_to_cpu(w1, settings)
+        X1 = Matrix{Float32}(undef, feature_dim, length(y1_cpu))
+        X1[1, :] .= y1_cpu
         if feature_dim > 2
             for j = 1:(feature_dim-2)
                 level =
@@ -674,7 +691,16 @@ function eval_euler_residuals_gh(
                 X1[1+j, :] .= level
             end
         end
-        X1[end, :] .= w1
+        X1[end, :] .= w1_cpu
+        normalize_feature_batch!(scaler, X1)
+
+        X1_dev = maybe_to_device(X1, settings)
+        out1, _ = Lux.apply(model, X1_dev, ps, st)
+
+        # Ensure the cash-on-hand passed to phi_to_consumption lives on the same
+        # device as the model output.
+        w1_dev = maybe_to_device(w1_cpu, settings)
+        c1 = vec(phi_to_consumption(out1[:Φ], w1_dev; min_c = 1.0f-3))
         normalize_feature_batch!(scaler, X1)
         out1, _ = Lux.apply(model, X1, ps, st)
         c1 = vec(phi_to_consumption(out1[:Φ], w1; min_c = 1.0f-3))
