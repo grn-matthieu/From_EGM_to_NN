@@ -77,7 +77,114 @@ end
 # Supported method names (keeps the order deterministic when using :all)
 const SUPPORTED_METHODS = (:TimeIteration, :EGM, :Projection, :Perturbation, :NN)
 
-using ..Determinism: derive_rng, promote_master_rng, MasterRNG, make_master_rng
+using ..Determinism: derive_rng, promote_master_rng, MasterRNG
+
+# --- Internal helpers for solver orchestration ---
+function _solver_settings(cfg::NamedTuple)
+    if !haskey(cfg, :solver)
+        error("Configuration must contain a `solver` section with a `method` field.")
+    end
+    solver = cfg.solver
+    if !hasproperty(solver, :method)
+        error("Configuration must contain a `solver.method` entry.")
+    end
+    return solver
+end
+
+function _normalize_method_names(requested)
+    if requested === :all || requested == "all"
+        return collect(SUPPORTED_METHODS)
+    elseif requested isa AbstractVector
+        return [m isa Symbol ? m : Symbol(m) for m in requested]
+    else
+        return [requested isa Symbol ? requested : Symbol(requested)]
+    end
+end
+
+function _normalize_methods(cfg::NamedTuple)
+    solver = _solver_settings(cfg)
+    return _normalize_method_names(solver.method)
+end
+
+function _method_specific_cfg(cfg::NamedTuple, method_name::Symbol)
+    solver = _solver_settings(cfg)
+    solver_nt = merge(solver, (method = method_name,))
+    return merge(cfg, (solver = solver_nt,))
+end
+
+function _resolve_master_rng(cfg::NamedTuple, rng)
+    if haskey(cfg, :random) && hasproperty(cfg.random, :master_rng)
+        master_candidate = cfg.random.master_rng
+        if master_candidate !== nothing
+            return promote_master_rng(master_candidate)
+        end
+    end
+    rng === nothing && error(
+        "master RNG not available; ensure the configuration defines random.seed or pass `rng`.",
+    )
+    return promote_master_rng(rng)
+end
+
+function _execute_solver(
+    model::AbstractModel,
+    method_obj::AbstractMethod,
+    cfg::NamedTuple,
+    master::MasterRNG,
+    method_name::Symbol,
+)
+    local_rng = derive_rng(master, string(method_name))
+    return solve(model, method_obj, cfg; rng = local_rng)
+end
+
+function _log_solver_success(method_name::Symbol, sol::Solution)
+    converged = haskey(sol.metadata, :converged) ? sol.metadata[:converged] : nothing
+    max_resid = haskey(sol.metadata, :max_resid) ? sol.metadata[:max_resid] : nothing
+    runtime = haskey(sol.diagnostics, :runtime) ? sol.diagnostics.runtime : nothing
+    runtime === nothing &&
+        (runtime = haskey(sol.metadata, :runtime) ? sol.metadata[:runtime] : nothing)
+    @info "Finished solver $(method_name). converged=$(converged) max_resid=$(max_resid) runtime=$(runtime)"
+end
+
+function _solver_failure_placeholder(
+    err,
+    model::AbstractModel,
+    method_obj::AbstractMethod,
+    method_name::Symbol,
+)
+    @warn "Solver $(method_name) failed; storing error in metadata." err
+    @info "Solver $(method_name) failed with error: $(err)"
+    return Solution(
+        policy = Dict{Symbol,Any}(),
+        value = nothing,
+        diagnostics = (method = string(method_name), runtime = 0.0),
+        metadata = Dict(:error => any(err)),
+        model = model,
+        method = method_obj,
+    )
+end
+
+function _dispatch_solvers(
+    model::AbstractModel,
+    cfg::NamedTuple,
+    methods::Vector{Symbol},
+    master::MasterRNG,
+)
+    solutions = Vector{Solution}(undef, length(methods))
+    for (i, method_name) in enumerate(methods)
+        cfg_m = _method_specific_cfg(cfg, method_name)
+        method_obj = build_method(cfg_m)
+        @info "Starting solver $(method_name)..."
+        try
+            sol = _execute_solver(model, method_obj, cfg_m, master, method_name)
+            solutions[i] = sol
+            _log_solver_success(method_name, sol)
+        catch err
+            solutions[i] = _solver_failure_placeholder(err, model, method_obj, method_name)
+        end
+    end
+    return solutions
+end
+
 
 # Recursively merge two NamedTuples: keys in `b` override or are merged
 # into `a` without erasing nested fields not mentioned in `b`.
@@ -109,67 +216,9 @@ entry is interpreted as a method name (String or Symbol). Returns a
 Vector{Solution} with one Solution per requested solver, in the same order.
 """
 function solve(model::AbstractModel, cfg::NamedTuple; rng = nothing)
-    # extract requested method(s)
-    if !haskey(cfg, :solver)
-        error("Configuration must contain a `solver` section with a `method` field.")
-    end
-    requested = cfg.solver.method
-
-    # normalize to vector of Symbols
-    methods::Vector{Symbol} = Vector{Symbol}()
-    if requested === :all || requested == "all"
-        methods = collect(SUPPORTED_METHODS)
-    elseif requested isa AbstractVector
-        for m in requested
-            push!(methods, m isa Symbol ? m : Symbol(m))
-        end
-    else
-        push!(methods, requested isa Symbol ? requested : Symbol(requested))
-    end
-
-    solutions = Vector{Solution}(undef, length(methods))
-
-    master = cfg.random.master_rng
-
-    for (i, mname) in enumerate(methods)
-        # create a cfg copy with solver.method set to the single method name
-        solver_nt = merge(cfg.solver, (method = mname,))
-        cfg_m = merge(cfg, (solver = solver_nt,))
-
-        # build method object and dispatch to the per-method solve
-        method_m = build_method(cfg_m)
-        @info "Starting solver $(mname)..."
-        try
-            local_rng = derive_rng(master, string(mname))
-            sol = solve(model, method_m, cfg_m; rng = local_rng)
-            solutions[i] = sol
-            # try to extract some diagnostics for the finish message
-            converged =
-                haskey(sol.metadata, :converged) ? sol.metadata[:converged] : nothing
-            max_resid =
-                haskey(sol.metadata, :max_resid) ? sol.metadata[:max_resid] : nothing
-            runtime =
-                haskey(sol.diagnostics, :runtime) ? sol.diagnostics.runtime :
-                (haskey(sol.metadata, :runtime) ? sol.metadata[:runtime] : nothing)
-            @info "Finished solver $(mname). converged=$(converged) max_resid=$(max_resid) runtime=$(runtime)"
-        catch err
-            @warn "Solver $(mname) failed; storing error in metadata." err
-            @info "Solver $(mname) failed with error: $(err)"
-            # create a minimal Solution-like placeholder capturing the error
-            # Use the local API.Solution constructor signature
-            dummy = Solution(
-                policy = Dict{Symbol,Any}(),
-                value = nothing,
-                diagnostics = (method = string(mname), runtime = 0.0),
-                metadata = Dict(:error => any(err)),
-                model = model,
-                method = method_m,
-            )
-            solutions[i] = dummy
-        end
-    end
-
-    return solutions
+    methods = _normalize_methods(cfg)
+    master = _resolve_master_rng(cfg, rng)
+    return _dispatch_solvers(model, cfg, methods, master)
 end
 
 """
@@ -186,28 +235,12 @@ function solve(cfg::NamedTuple; rng = nothing)
     # will honor `rng` when passed, or enrich from cfg.random.seed when present
     cfg = validate_config(cfg)
 
-    # Enrich cfg with a MasterRNG if a seed is available and a master isn't
-    master =
-        cfg.random.master_rng !== nothing ? cfg.random.master_rng : make_master_rng(rng)
-
-    # Decide if a single method is requested to return a single Solution
-    requested = cfg.solver.method
-    single = false
-    if requested == "all"
-        single = false
-    elseif requested isa AbstractVector
-        single = length(requested) == 1
-    else
-        single = true
-    end
+    methods = _normalize_methods(cfg)
+    master = _resolve_master_rng(cfg, rng)
 
     model = build_model(cfg)
-    if single
-        method = build_method(cfg)
-        return solve(model, method, cfg; rng = master)
-    else
-        return solve(model, cfg; rng = master)
-    end
+    solutions = _dispatch_solvers(model, cfg, methods, master)
+    return length(methods) == 1 ? solutions[1] : solutions
 end
 
 """
