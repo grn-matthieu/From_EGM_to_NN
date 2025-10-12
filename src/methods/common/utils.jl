@@ -2,8 +2,6 @@ module MethodUtils
 
 using Base: @views
 using ..CommonValidators: is_nondec, is_positive, respects_amin
-using ..CSVarUtils: csvar_income
-
 export build_consumption_initializer,
     validate_policy!, DEFAULT_VALIDATION_CHECKS, is_csvar_model
 
@@ -38,25 +36,43 @@ function _build_c_init_det(p, g, warm::Symbol, custom_c)
     a_grid = g[:a].grid
     a_min = g[:a].min
     R = 1 + p.r
-    income = is_csvar_model(p) ? csvar_income(p.y) : p.y
+    csvar = is_csvar_model(p)
 
     if warm == :steady_state
-        c = similar(a_grid, Float64)
-        @inbounds for (i, a) in enumerate(a_grid)
-            cval = income + R * a - a
-            cmax = income + R * a - a_min
-            c[i] = clamp(cval, 1e-12, cmax)
+        if csvar
+            y_state = Float64.(p.y)
+            Ny = length(y_state)
+            Na = length(a_grid)
+            c = Array{Float64}(undef, Na, Ny)
+            tmp = similar(a_grid, Float64)
+            @inbounds for (j, y_val) in enumerate(y_state)
+                @inbounds for (i, a) in enumerate(a_grid)
+                    cval = y_val + R * a - a
+                    cmax = y_val + R * a - a_min
+                    tmp[i] = clamp(cval, 1e-12, cmax)
+                end
+                @views c[:, j] .= tmp
+            end
+            return c
+        else
+            income = p.y
+            c = similar(a_grid, Float64)
+            @inbounds for (i, a) in enumerate(a_grid)
+                cval = income + R * a - a
+                cmax = income + R * a - a_min
+                c[i] = clamp(cval, 1e-12, cmax)
+            end
+            return c
         end
-        return c
     elseif warm in BASIC_WARM_STARTS
         return nothing
     else
         if custom_c === nothing
             return nothing
-        elseif custom_c isa AbstractVector
+        elseif custom_c isa AbstractArray
             return copy(custom_c)
         else
-            error("custom deterministic warm-start must be a vector")
+            error("custom deterministic warm-start must be an array")
         end
     end
 end
@@ -91,13 +107,7 @@ function _build_c_init_stoch(p, g, shocks, warm::Symbol, custom_c)
     elseif warm in BASIC_WARM_STARTS
         return nothing
     else
-        if custom_c === nothing
-            return nothing
-        elseif custom_c isa AbstractMatrix
-            return copy(custom_c)
-        else
-            error("custom stochastic warm-start must be a matrix")
-        end
+        return custom_c === nothing ? nothing : copy(custom_c)
     end
 end
 

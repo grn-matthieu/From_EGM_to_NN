@@ -73,15 +73,15 @@ function solve(
     init_cfg = maybe(cfg, :init)
     custom_c_data = maybe(init_cfg, :c)
     custom_c_vec = custom_c_data isa AbstractVector ? custom_c_data : nothing
-    custom_c_mat = custom_c_data isa AbstractMatrix ? custom_c_data : nothing
+    custom_c_array = custom_c_data isa AbstractArray ? custom_c_data : nothing
 
     csvar = is_csvar_model(p)
     custom_c = if S === nothing
         custom_c_vec
     elseif csvar
-        custom_c_vec
+        custom_c_array
     else
-        custom_c_mat
+        custom_c_data isa AbstractMatrix ? custom_c_data : nothing
     end
 
     c_init = build_consumption_initializer(

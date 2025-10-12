@@ -8,6 +8,8 @@ const ValueFunction = ThesisProject.ValueFunction
 const Validators = ThesisProject.CommonValidators
 const Chebyshev = ThesisProject.Chebyshev
 const CSVarUtils = ThesisProject.CSVarUtils
+const MethodUtils = ThesisProject.MethodUtils
+const ConsumerSavingVAR = ThesisProject.ConsumerSavingVAR
 
 @testset "Common interpolation" begin
     x = collect(0.0:1.0:4.0)
@@ -68,6 +70,53 @@ end
     a_next = [0.0, 0.3, 0.5]
     metric = PolicyUtils.rmse_nonbinding(resid, a_next, 0.0, 0.1)
     @test metric > 0
+end
+
+@testset "Consumption warm starts" begin
+    cfg = deterministic_config()
+    model = ThesisProject.build_model(cfg)
+    p = ThesisProject.get_params(model)
+    g = ThesisProject.get_grids(model)
+
+    c_det = MethodUtils.build_consumption_initializer(p, g; warm_start = :steady_state)
+    @test c_det isa Vector{Float64}
+    @test length(c_det) == g[:a].N
+
+    vec_params = (
+        model = (name = :cs_vec,),
+        params = (
+            y = [0.8, 1.2],
+            A = [[0.9, 0.1], [0.05, 0.95]],
+            Σ = [[0.1, 0.0], [0.0, 0.1]],
+        ),
+    )
+    cfg_vec = deep_merge(cfg, vec_params)
+    model_vec = ConsumerSavingVAR.build_cs_var_model(cfg_vec)
+    p_vec = ConsumerSavingVAR.get_params(model_vec)
+    g_vec = ConsumerSavingVAR.get_grids(model_vec)
+
+    c_vec =
+        MethodUtils.build_consumption_initializer(p_vec, g_vec; warm_start = :steady_state)
+
+    @test size(c_vec) == (g_vec[:a].N, p_vec.y_dim)
+
+    a_grid_vec = g_vec[:a].grid
+    a_min_vec = g_vec[:a].min
+    R_vec = 1 + p_vec.r
+    y_vals = Float64.(p_vec.y)
+
+    expected = Array{Float64}(undef, length(a_grid_vec), length(y_vals))
+    tmp = similar(a_grid_vec, Float64)
+    for (j, y_val) in enumerate(y_vals)
+        @inbounds for (i, a) in enumerate(a_grid_vec)
+            cval = y_val + R_vec * a - a
+            cmax = y_val + R_vec * a - a_min_vec
+            tmp[i] = clamp(cval, 1e-12, cmax)
+        end
+        @views expected[:, j] .= tmp
+    end
+
+    @test c_vec ≈ expected
 end
 
 @testset "CSVar utilities" begin
