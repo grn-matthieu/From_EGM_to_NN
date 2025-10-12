@@ -7,6 +7,11 @@ export csvar_income,
     csvar_state_matrix,
     csvar_state_income,
     csvar_state_incomes,
+    csvar_joint_state_grid,
+    csvar_joint_state_tensor,
+    csvar_joint_state_matrix,
+    csvar_tensorise,
+    csvar_vectorise,
     csvar_cash_on_hand,
     csvar_assets_from_cash,
     csvar_next_cash_on_hand,
@@ -19,6 +24,38 @@ export csvar_income,
     csvar_next_state,
     csvar_next_state!,
     csvar_step
+
+@inline function _asset_tensor_shape(entry)
+    if hasproperty(entry, :tensor_shape)
+        ts = getproperty(entry, :tensor_shape)
+        if ts === nothing
+            return (getproperty(entry, :N),)
+        elseif ts isa Tuple
+            return ts
+        else
+            error("asset grid tensor_shape must be a tuple or nothing")
+        end
+    elseif hasproperty(entry, :N)
+        return (getproperty(entry, :N),)
+    else
+        grid = getproperty(entry, :grid)
+        return (length(grid),)
+    end
+end
+
+@inline function _asset_grid_length(entry)
+    hasproperty(entry, :N) && return getproperty(entry, :N)
+    grid = getproperty(entry, :grid)
+    return length(grid)
+end
+
+@inline function _prod_tuple(t::Tuple)
+    result = one(Int)
+    for v in t
+        result *= v
+    end
+    return result
+end
 
 """
     csvar_income(y)
@@ -106,6 +143,100 @@ function csvar_state_incomes(Y::AbstractMatrix)
         incomes[j] = csvar_state_income(view(Y, :, j))
     end
     return incomes
+end
+
+"""
+    csvar_joint_state_grid(Y, a_entry)
+
+Construct the joint state grid combining VAR states `Y` and the asset grid
+`a_entry`. Returns an array of size `(y_dim + 1, Na, Ny)` where `Na` is the
+length of the asset grid and `Ny` the number of VAR states.
+"""
+function csvar_joint_state_grid(Y::AbstractMatrix, a_entry)
+    y_dim, Ny = size(Y)
+    Na = _asset_grid_length(a_entry)
+    a_grid = getproperty(a_entry, :grid)
+    T = promote_type(eltype(Y), eltype(a_grid))
+    joint = Array{T}(undef, y_dim + 1, Na, Ny)
+    a_vec = T.(a_grid)
+    @inbounds for j = 1:Ny
+        y_col = view(Y, :, j)
+        for d = 1:y_dim
+            slice = view(joint, d, :, j)
+            fill!(slice, T(y_col[d]))
+        end
+        view(joint, y_dim + 1, :, j) .= a_vec
+    end
+    return joint
+end
+
+"""
+    csvar_joint_state_tensor(Y, a_entry)
+
+Return the joint state grid reshaped according to the tensorised asset grid.
+The output has size `(y_dim + 1, tensor_shape..., Ny)` where `tensor_shape`
+matches the dense asset grid layout.
+"""
+function csvar_joint_state_tensor(Y::AbstractMatrix, a_entry)
+    joint = csvar_joint_state_grid(Y, a_entry)
+    tensor_shape = _asset_tensor_shape(a_entry)
+    prod(tensor_shape) == size(joint, 2) || error(
+        "asset tensor shape $(tensor_shape) incompatible with grid length $(size(joint, 2))",
+    )
+    dims = (size(Y, 1) + 1, tensor_shape..., size(Y, 2))
+    return reshape(joint, dims)
+end
+
+"""
+    csvar_joint_state_matrix(Y, a_entry)
+
+Flatten the joint state tensor into a `(y_dim + 1) × (Na * Ny)` matrix for
+vectorised solver interfaces.
+"""
+function csvar_joint_state_matrix(Y::AbstractMatrix, a_entry)
+    joint = csvar_joint_state_grid(Y, a_entry)
+    return reshape(joint, size(joint, 1), :)
+end
+
+"""
+    csvar_tensorise(values, a_entry)
+
+Reshape `values` defined on the flattened asset grid into its tensorised
+representation following the metadata stored in `a_entry`.
+"""
+function csvar_tensorise(values::AbstractArray, a_entry)
+    tensor_shape = _asset_tensor_shape(a_entry)
+    trailing = ndims(values) <= 1 ? () : Base.tail(size(values))
+    total = length(values)
+    base = _prod_tuple(tensor_shape)
+    remaining = isempty(trailing) ? 1 : _prod_tuple(trailing)
+    base * remaining == total || error(
+        "cannot tensorise array of size $(size(values)) with asset shape $(tensor_shape)",
+    )
+    return reshape(values, (tensor_shape..., trailing...))
+end
+
+"""
+    csvar_vectorise(tensor, a_entry)
+
+Inverse operation of [`csvar_tensorise`](@ref). Flattens a tensorised policy
+back to the vector-or-matrix representation used by solver kernels.
+"""
+function csvar_vectorise(tensor::AbstractArray, a_entry)
+    tensor_shape = _asset_tensor_shape(a_entry)
+    nd = length(tensor_shape)
+    dims = size(tensor)
+    length(dims) >= nd ||
+        error("tensor has insufficient dimensions for asset shape $(tensor_shape)")
+    front = dims[1:nd]
+    for (expected, actual) in zip(tensor_shape, front)
+        expected == actual ||
+            error("tensor dimension $actual does not match expected asset shape $expected")
+    end
+    trailing = length(dims) == nd ? () : dims[(nd+1):end]
+    total = _prod_tuple(tensor_shape)
+    new_shape = isempty(trailing) ? (total,) : (total, trailing...)
+    return reshape(tensor, new_shape)
 end
 
 """
