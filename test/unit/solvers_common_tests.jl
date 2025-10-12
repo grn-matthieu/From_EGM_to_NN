@@ -201,6 +201,31 @@ end
     manual_buf = CSVarUtils.csvar_next_state(A, y, Matrix(chol.L), ε_manual)
     @test step_buf ≈ manual_buf
     @test ε_buffer ≈ ε_manual
+
+    Y_states = [1.0 2.0; 0.5 0.75]
+    a_entry = (grid = [0.0, 0.5, 1.0, 1.5], tensor_shape = (2, 2), N = 4)
+
+    joint_grid = CSVarUtils.csvar_joint_state_grid(Y_states, a_entry)
+    @test size(joint_grid) == (3, length(a_entry.grid), size(Y_states, 2))
+    @test joint_grid[1, :, 1] ≈ fill(1.0, length(a_entry.grid))
+    @test joint_grid[2, :, 2] ≈ fill(0.75, length(a_entry.grid))
+    @test joint_grid[3, :, 1] ≈ a_entry.grid
+
+    joint_tensor = CSVarUtils.csvar_joint_state_tensor(Y_states, a_entry)
+    @test size(joint_tensor) == (3, 2, 2, 2)
+    joint_matrix = CSVarUtils.csvar_joint_state_matrix(Y_states, a_entry)
+    @test size(joint_matrix) == (3, length(a_entry.grid) * size(Y_states, 2))
+    @test joint_matrix ≈ reshape(joint_tensor, 3, :)
+
+    flat_policy = collect(1.0:4.0)
+    tensor_policy = CSVarUtils.csvar_tensorise(flat_policy, a_entry)
+    @test size(tensor_policy) == a_entry.tensor_shape
+    @test vec(CSVarUtils.csvar_vectorise(tensor_policy, a_entry)) ≈ flat_policy
+
+    matrix_policy = reshape(collect(1.0:8.0), 4, 2)
+    tensorised = CSVarUtils.csvar_tensorise(matrix_policy, a_entry)
+    @test size(tensorised) == (a_entry.tensor_shape..., 2)
+    @test CSVarUtils.csvar_vectorise(tensorised, a_entry) ≈ matrix_policy
 end
 
 @testset "Euler residuals" begin
