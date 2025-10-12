@@ -251,7 +251,10 @@ end
 
 function loss_euler_fb_aio!(chain, ps, st, batch, model_cfg, rng)
     P = model_cfg.P
-    if hasproperty(P, :A) && hasproperty(P, :Σ)
+    if hasproperty(P, :A) &&
+       hasproperty(P, :Σ) &&
+       hasproperty(P, :y_dim) &&
+       getproperty(P, :y_dim) > 1
         return loss_euler_fb_aio_csvar!(chain, ps, st, batch, model_cfg, rng)
     else
         return loss_euler_fb_aio_ar1!(chain, ps, st, batch, model_cfg, rng)

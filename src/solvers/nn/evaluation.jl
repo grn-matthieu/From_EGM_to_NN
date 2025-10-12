@@ -31,7 +31,9 @@ const EVAL_MIN_CONSUMPTION = 1.0f-3
     hasproperty(S, :process) &&
     S.process == :gaussian_linear &&
     hasproperty(P, :A) &&
-    hasproperty(P, :Σ)
+    hasproperty(P, :Σ) &&
+    hasproperty(P, :y_dim) &&
+    getproperty(P, :y_dim) > 1
 const CSVAR_EVAL_SAMPLES = 512
 
 @inline function denormalize_features(scaler::FeatureScaler, batch)
