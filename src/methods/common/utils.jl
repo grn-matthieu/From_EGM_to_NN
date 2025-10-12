@@ -1,10 +1,10 @@
 module MethodUtils
 
 using Base: @views
-using ..CommonValidators: is_nondec, is_positive, respects_amin
+using ..CommonValidators: is_nondec, is_nondec_tensor, is_positive, respects_amin
 using ..CSVarUtils: csvar_state_incomes, csvar_state_matrix
 export build_consumption_initializer,
-    validate_policy!, DEFAULT_VALIDATION_CHECKS, is_csvar_model
+    validate_policy!, DEFAULT_VALIDATION_CHECKS, is_csvar_model, summarise_euler_errors
 
 const BASIC_WARM_STARTS = (:default, :half_resources, :none)
 const DEFAULT_VALIDATION_CHECKS =
@@ -83,6 +83,43 @@ end
     hasproperty(params, :y_dim) && getproperty(params, :y_dim) > 1
 end
 
+@inline function _extract_tensor_shape(entry)
+    if entry === nothing
+        return nothing
+    elseif hasproperty(entry, :tensor_shape)
+        ts = getproperty(entry, :tensor_shape)
+        return ts === nothing ? nothing : (ts isa Tuple ? ts : nothing)
+    else
+        return nothing
+    end
+end
+
+function summarise_euler_errors(resid; mask_first_row::Bool = false)
+    if !(resid isa AbstractArray)
+        return resid, nothing
+    end
+
+    if ndims(resid) <= 1
+        if mask_first_row && length(resid) >= 1
+            v = float.(resid)               # allow NaN
+            v[begin] = NaN
+            return v, nothing
+        else
+            return resid, nothing
+        end
+    end
+
+    rows = size(resid, 1)
+    mat = reshape(resid, rows, :)
+    work = mask_first_row ? float.(mat) : mat
+    if mask_first_row && rows >= 1
+        work[1, :] .= NaN
+    end
+
+    vals = vec(maximum(work; dims = 2))     # avoid name clash with `vec` variable
+    return vals, work
+end
+
 function _build_c_init_stoch(p, g, shocks, warm::Symbol, custom_c)
     a_grid = g[:a].grid
     a_min = g[:a].min
@@ -131,6 +168,24 @@ function validate_policy!(
     c_val = policy[:c].value
     a_val = policy[:a].value
 
+    tensor_shape = _extract_tensor_shape(policy[:c])
+    tensor_shape === nothing && (tensor_shape = _extract_tensor_shape(policy[:a]))
+    dims_to_check = nothing
+    c_tensor = c_val
+    a_tensor = a_val
+    if tensor_shape !== nothing
+        total = prod(tensor_shape)
+        first_dim_c = size(c_val, 1)
+        first_dim_a = size(a_val, 1)
+        if first_dim_c == total && first_dim_a == total
+            extra_c = ndims(c_val) <= 1 ? () : Base.tail(size(c_val))
+            extra_a = ndims(a_val) <= 1 ? () : Base.tail(size(a_val))
+            c_tensor = reshape(c_val, (tensor_shape..., extra_c...))
+            a_tensor = reshape(a_val, (tensor_shape..., extra_a...))
+            dims_to_check = collect(1:length(tensor_shape))
+        end
+    end
+
     violations = Dict{Symbol,Any}()
     valid = true
 
@@ -138,9 +193,16 @@ function validate_policy!(
         result =
             check === :c_positive ? is_positive(c_val) :
             check === :a_above_min ? respects_amin(a_val, amin) :
-            check === :c_monotone_nondec ? is_nondec(c_val) :
-            check === :a_monotone_nondec ? is_nondec(a_val) :
-            error("Unknown validation check: $(check)")
+            check === :c_monotone_nondec ?
+            (
+                dims_to_check === nothing ? is_nondec(c_val) :
+                is_nondec_tensor(c_tensor, dims_to_check)
+            ) :
+            check === :a_monotone_nondec ?
+            (
+                dims_to_check === nothing ? is_nondec(a_val) :
+                is_nondec_tensor(a_tensor, dims_to_check)
+            ) : error("Unknown validation check: $(check)")
         violations[check] = result
         valid &= result
     end
