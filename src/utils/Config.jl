@@ -48,151 +48,154 @@ function load_config(path::AbstractString)
 end
 _lower(x) = lowercase(string(x))
 
-# internal helpers (local to validate_config)
-# _getprop: safe property lookup with default; _getnum: fetch numeric with name
-# terse error strings by design
+# --- validation helpers ---
 
-function validate_config(cfg::AbstractDict)
-    # Normalize Dict-like configs to NamedTuple and delegate to the
-    # NamedTuple-specific validator. This keeps `load_config` as the
-    # canonical loader while allowing tests/helpers to call validate_config
-    # with plain Dict objects.
-    return validate_config(yaml_to_namedtuple(Dict(cfg)))
+_getprop(::Any, ::Symbol, default) = default
+_getprop(d::NamedTuple, k::Symbol, default) =
+    hasproperty(d, k) ? getproperty(d, k) : default
+_getprop(d::AbstractDict, k::Symbol, default) = haskey(d, k) ? d[k] : default
+
+function _ensure_numeric_vector(vec; name::AbstractString)
+    vec isa AbstractVector || error("$(name) must be a vector")
+    length(vec) > 0 || error("$(name) must not be empty")
+    for (i, val) in enumerate(vec)
+        val isa Real || error("$(name)[$i] not numeric")
+    end
+    return length(vec)
 end
 
-function validate_config(cfg::NamedTuple)
-    _getprop(::Any, ::Symbol, default) = default
-    _getprop(d::NamedTuple, k::Symbol, default) =
-        hasproperty(d, k) ? getproperty(d, k) : default
-    function _getnum(d::NamedTuple, k::Symbol; name = nothing)
-        hasproperty(d, k) || error("missing $(name === nothing ? k : name)")
-        v = getproperty(d, k)
-        v isa Real || error("$(name === nothing ? k : name) not numeric")
-        return v
-    end
-
-    function _check_numeric_vector(vec; name::AbstractString)
-        vec isa AbstractVector || error("$(name) must be a vector")
-        length(vec) > 0 || error("$(name) must not be empty")
-        for (i, val) in enumerate(vec)
-            val isa Real || error("$(name)[$i] not numeric")
+function _ensure_numeric_matrix_repr(mat; name::AbstractString)
+    if mat isa AbstractMatrix
+        size(mat, 1) > 0 || error("$(name) must have at least one row")
+        size(mat, 2) > 0 || error("$(name) must have at least one column")
+        for (idx, val) in enumerate(mat)
+            val isa Real || error("$(name) entry $idx not numeric")
         end
-        return length(vec)
-    end
-
-    function _check_numeric_matrix_repr(mat; name::AbstractString)
-        if mat isa AbstractMatrix
-            size(mat, 1) > 0 || error("$(name) must have at least one row")
-            size(mat, 2) > 0 || error("$(name) must have at least one column")
-            for (idx, val) in enumerate(mat)
-                val isa Real || error("$(name) entry $idx not numeric")
-            end
-            return size(mat, 1), size(mat, 2)
-        elseif mat isa AbstractVector
-            rows = length(mat)
-            rows > 0 || error("$(name) must have at least one row")
-            first_row = mat[1]
-            first_row isa AbstractVector || error("$(name) rows must be vectors")
-            cols = length(first_row)
-            cols > 0 || error("$(name) must have at least one column")
-            for (i, row) in enumerate(mat)
-                row isa AbstractVector || error("$(name) rows must be vectors")
-                length(row) == cols || error("$(name) rows must have equal length")
-                for (j, val) in enumerate(row)
-                    val isa Real || error("$(name)[$i,$j] not numeric")
-                end
-            end
-            return rows, cols
-        else
-            error("$(name) must be a matrix or a vector of vectors")
-        end
-    end
-
-    function _without_keys(nt::NamedTuple, drop::Set{Symbol})
-        if isempty(drop)
-            return nt
-        end
-        return (; (k => getproperty(nt, k) for k in keys(nt) if !(k in drop))...)
-    end
-
-    function _normalize_alias(
-        params::NamedTuple,
-        canonical::Symbol,
-        aliases::Tuple{Vararg{Symbol}},
-    )
-        result = params
-        for alias in aliases
-            alias == canonical && continue
-            if hasproperty(result, alias)
-                alias_val = getproperty(result, alias)
-                if hasproperty(result, canonical)
-                    getproperty(result, canonical) == alias_val ||
-                        error("params.$alias inconsistent with params.$canonical")
-                else
-                    result = merge(result, (canonical => alias_val,))
-                end
+        return size(mat, 1), size(mat, 2)
+    elseif mat isa AbstractVector
+        rows = length(mat)
+        rows > 0 || error("$(name) must have at least one row")
+        first_row = mat[1]
+        first_row isa AbstractVector || error("$(name) rows must be vectors")
+        cols = length(first_row)
+        cols > 0 || error("$(name) must have at least one column")
+        for (i, row) in enumerate(mat)
+            row isa AbstractVector || error("$(name) rows must be vectors")
+            length(row) == cols || error("$(name) rows must have equal length")
+            for (j, val) in enumerate(row)
+                val isa Real || error("$(name)[$i,$j] not numeric")
             end
         end
-        return result
+        return rows, cols
+    else
+        error("$(name) must be a matrix or a vector of vectors")
     end
-    _normalize_alias(params::NamedTuple, canonical::Symbol, alias::Symbol) =
-        _normalize_alias(params, canonical, (alias,))
+end
 
-    function _drop_aliases(
-        params::NamedTuple,
-        canonical::Symbol,
-        aliases::Tuple{Vararg{Symbol}},
-    )
-        drop = Set{Symbol}()
-        for alias in aliases
-            alias != canonical && push!(drop, alias)
-        end
-        return _without_keys(params, drop)
+function _without_keys(nt::NamedTuple, drop::Set{Symbol})
+    if isempty(drop)
+        return nt
     end
-    _drop_aliases(params::NamedTuple, canonical::Symbol, alias::Symbol) =
-        _drop_aliases(params, canonical, (alias,))
+    return (; (k => getproperty(nt, k) for k in keys(nt) if !(k in drop))...)
+end
 
-    function _canonicalize_csvec_params(params::NamedTuple)
-        Σ_sym = Symbol("Σ")
-        params = _normalize_alias(params, :A, (:A, :transition, :state_transition))
-        params = _drop_aliases(params, :A, (:A, :transition, :state_transition))
-        params = _normalize_alias(params, Σ_sym, (Σ_sym, :Sigma, :covariance))
-        params = _drop_aliases(params, Σ_sym, (Σ_sym, :Sigma, :covariance))
-        params = _normalize_alias(params, :y, (:y, :income))
-        params = _drop_aliases(params, :y, (:y, :income))
-
-        if hasproperty(params, :A)
-            Aval = getproperty(params, :A)
-            if Aval isa Real
-                params = merge(params, (A = [[Aval]],))
+function _normalize_alias(
+    params::NamedTuple,
+    canonical::Symbol,
+    aliases::Tuple{Vararg{Symbol}},
+)
+    result = params
+    for alias in aliases
+        alias == canonical && continue
+        if hasproperty(result, alias)
+            alias_val = getproperty(result, alias)
+            if hasproperty(result, canonical)
+                getproperty(result, canonical) == alias_val ||
+                    error("params.$alias inconsistent with params.$canonical")
+            else
+                result = merge(result, (canonical => alias_val,))
             end
         end
-        if hasproperty(params, Σ_sym)
-            Σval = getproperty(params, Σ_sym)
-            if Σval isa Real
-                params = merge(params, (Σ_sym => [[Σval]],))
-            end
-        end
-        if hasproperty(params, :y)
-            yval = getproperty(params, :y)
-            if yval isa Real
-                params = merge(params, (y = [yval],))
-            end
-        end
-        return params
     end
+    return result
+end
+_normalize_alias(params::NamedTuple, canonical::Symbol, alias::Symbol) =
+    _normalize_alias(params, canonical, (alias,))
 
-    # top-level
-    for sect in (:model, :params, :grids, :solver)
+function _drop_aliases(
+    params::NamedTuple,
+    canonical::Symbol,
+    aliases::Tuple{Vararg{Symbol}},
+)
+    drop = Set{Symbol}()
+    for alias in aliases
+        alias != canonical && push!(drop, alias)
+    end
+    return _without_keys(params, drop)
+end
+_drop_aliases(params::NamedTuple, canonical::Symbol, alias::Symbol) =
+    _drop_aliases(params, canonical, (alias,))
+
+function _canonicalize_csvec_params(params::NamedTuple)
+    Σ_sym = Symbol("Σ")
+    params = _normalize_alias(params, :A, (:A, :transition, :state_transition))
+    params = _drop_aliases(params, :A, (:A, :transition, :state_transition))
+    params = _normalize_alias(params, Σ_sym, (Σ_sym, :Sigma, :covariance))
+    params = _drop_aliases(params, Σ_sym, (Σ_sym, :Sigma, :covariance))
+    params = _normalize_alias(params, :y, (:y, :income))
+    params = _drop_aliases(params, :y, (:y, :income))
+
+    if hasproperty(params, :A)
+        Aval = getproperty(params, :A)
+        if Aval isa Real
+            params = merge(params, (A = [[Aval]],))
+        end
+    end
+    if hasproperty(params, Σ_sym)
+        Σval = getproperty(params, Σ_sym)
+        if Σval isa Real
+            params = merge(params, (Σ_sym => [[Σval]],))
+        end
+    end
+    if hasproperty(params, :y)
+        yval = getproperty(params, :y)
+        if yval isa Real
+            params = merge(params, (y = [yval],))
+        end
+    end
+    return params
+end
+
+to_namedtuple_if_dict(x) = x
+to_namedtuple_if_dict(x::AbstractDict) = yaml_to_namedtuple(Dict(x))
+
+function require_namedtuple_sections(cfg::NamedTuple, sections::Tuple{Vararg{Symbol}})
+    for sect in sections
         hasproperty(cfg, sect) || error("missing $sect")
         getproperty(cfg, sect) isa NamedTuple || error("$sect wrong type")
     end
+    return cfg
+end
 
-    # model
-    hasproperty(cfg.model, :name) || error("missing model.name")
-    model_name = Symbol(cfg.model.name)
+struct SolverValidationInputs
+    params::NamedTuple
+    grids::NamedTuple
+    shocks_active::Bool
+end
 
-    # params
+struct ShocksValidationState
+    active::Bool
+    Nz::Int
+end
+ShocksValidationState(; active::Bool = false, Nz::Int = 1) =
+    ShocksValidationState(active, Nz)
+
+function validate_model_section(model_cfg::NamedTuple)
+    hasproperty(model_cfg, :name) || error("missing model.name")
+    return Symbol(model_cfg.name)
+end
+
+function validate_params_section(cfg::NamedTuple, model_name::Symbol)
     params_raw = cfg.params
     params_raw = _normalize_alias(params_raw, :r, (:r, :interest_rate))
     params_raw = _drop_aliases(params_raw, :r, (:r, :interest_rate))
@@ -230,10 +233,10 @@ function validate_config(cfg::NamedTuple)
     if model_name == :cs_vec
         params_norm = _canonicalize_csvec_params(params_norm)
     end
+
     cfg = merge(cfg, (params = params_norm,))
     p = cfg.params
 
-    # Validate r and y only when provided
     if hasproperty(p, :r)
         getproperty(p, :r) isa Real || error("params.r not numeric")
         getproperty(p, :r) > -1 || error("r ≤ -1")
@@ -242,7 +245,8 @@ function validate_config(cfg::NamedTuple)
         y_val = getproperty(p, :y)
         if model_name == :cs_vec
             len =
-                y_val isa AbstractVector ? _check_numeric_vector(y_val; name = "params.y") :
+                y_val isa AbstractVector ?
+                _ensure_numeric_vector(y_val; name = "params.y") :
                 begin
                     y_val isa Real || error("params.y not numeric")
                     y_val > 0 || error("y ≤ 0")
@@ -259,11 +263,11 @@ function validate_config(cfg::NamedTuple)
         hasproperty(p, :A) || error("missing params.A")
         hasproperty(p, :Σ) || error("missing params.Σ")
         Ay = getproperty(p, :A)
-        rows_A, cols_A = _check_numeric_matrix_repr(Ay; name = "params.A")
+        rows_A, cols_A = _ensure_numeric_matrix_repr(Ay; name = "params.A")
         rows_A == cols_A || error("params.A must be square")
 
         Ey = getproperty(p, :Σ)
-        rows_E, _ = _check_numeric_matrix_repr(Ey; name = "params.Σ")
+        rows_E, _ = _ensure_numeric_matrix_repr(Ey; name = "params.Σ")
         rows_E == rows_A || error("params.Σ must have the same number of rows as params.A")
 
         if hasproperty(p, :y)
@@ -274,83 +278,86 @@ function validate_config(cfg::NamedTuple)
         end
     end
 
-    # grids
-    g = cfg.grids
-    for k in (:Na, :a_min, :a_max)
-        hasproperty(g, k) || error("missing grids.$k")
-    end
-    g.Na isa Integer || error("grids.Na not Int")
-    g.Na > 1 || error("grids.Na out of range")
-    g.a_min isa Real || error("a_min not Real")
-    g.a_max isa Real || error("a_max not Real")
-    g.a_max > g.a_min || error("a_max ≤ a_min")
+    return cfg
+end
 
-    # utility (optional)
+function validate_grids_section(grids::NamedTuple)
+    for k in (:Na, :a_min, :a_max)
+        hasproperty(grids, k) || error("missing grids.$k")
+    end
+    grids.Na isa Integer || error("grids.Na not Int")
+    grids.Na > 1 || error("grids.Na out of range")
+    grids.a_min isa Real || error("a_min not Real")
+    grids.a_max isa Real || error("a_max not Real")
+    grids.a_max > grids.a_min || error("a_max ≤ a_min")
+    return grids
+end
+
+function validate_utility_section(cfg::NamedTuple)
     if hasproperty(cfg, :utility)
-        util = cfg.utility
+        util = getproperty(cfg, :utility)
         if util isa NamedTuple && hasproperty(util, :u_type)
             _lower(getproperty(util, :u_type)) in ("crra",) ||
                 error("utility.u_type unsupported")
         end
     end
+end
 
-    # solver
-    s = cfg.solver
-    # required_common should be Symbols because we validate NamedTuples
+const SUPPORTED_METHODS = (:EGM, :Projection, :Perturbation, :NN, :TimeIteration)
+const METHOD_BLOCKS = Dict(
+    :EGM => :egm,
+    :Projection => :projection,
+    :Perturbation => :perturbation,
+    :NN => :nn,
+    :TimeIteration => :time_iteration,
+)
+
+function _canonical_method(m)
+    str = _lower(m)
+    if str == "egm"
+        return :EGM
+    elseif str == "projection"
+        return :Projection
+    elseif str == "perturbation"
+        return :Perturbation
+    elseif str == "nn"
+        return :NN
+    elseif str == "timeiteration" || str == "ti"
+        return :TimeIteration
+    elseif str == "all"
+        return :ALL
+    else
+        error("solver.method invalid")
+    end
+end
+
+function validate_solver_section(solver::NamedTuple, inputs::SolverValidationInputs)
     required_common = (:method, :tol, :tol_pol, :maxit, :verbose, :relax, :warm_start)
     for key in required_common
-        hasproperty(s, key) || error("missing solver.$key")
+        hasproperty(solver, key) || error("missing solver.$key")
     end
-    s.tol isa Real && s.tol > 0 || error("tol > 0 required")
-    s.tol_pol isa Real && s.tol_pol > 0 || error("tol_pol > 0 required")
-    s.maxit isa Integer && s.maxit ≥ 1 || error("maxit ≥ 1 required")
-    s.verbose isa Bool || error("verbose not Bool")
-    s.relax isa Real && s.relax > 0 || error("relax > 0 required")
+    solver.tol isa Real && solver.tol > 0 || error("tol > 0 required")
+    solver.tol_pol isa Real && solver.tol_pol > 0 || error("tol_pol > 0 required")
+    solver.maxit isa Integer && solver.maxit ≥ 1 || error("maxit ≥ 1 required")
+    solver.verbose isa Bool || error("verbose not Bool")
+    solver.relax isa Real && solver.relax > 0 || error("relax > 0 required")
 
-    warm_start_lower = _lower(s.warm_start)
+    warm_start_lower = _lower(solver.warm_start)
     warm_start_lower in ("default", "half_resources", "none", "steady_state") ||
         error("warm_start invalid")
     if warm_start_lower == "steady_state"
-        hasproperty(p, :y) || error("need params.y for steady_state")
-        hasproperty(p, :r) || error("need params.r for steady_state")
-        hasproperty(g, :a_min) || error("need grids.a_min for steady_state")
+        hasproperty(inputs.params, :y) || error("need params.y for steady_state")
+        hasproperty(inputs.params, :r) || error("need params.r for steady_state")
+        hasproperty(inputs.grids, :a_min) || error("need grids.a_min for steady_state")
     end
 
-    supported_methods = (:EGM, :Projection, :Perturbation, :NN, :TimeIteration)
-    method_blocks = Dict(
-        :EGM => :egm,
-        :Projection => :projection,
-        :Perturbation => :perturbation,
-        :NN => :nn,
-        :TimeIteration => :time_iteration,
-    )
-
-    function _canonical_method(m)
-        str = _lower(m)
-        if str == "egm"
-            return :EGM
-        elseif str == "projection"
-            return :Projection
-        elseif str == "perturbation"
-            return :Perturbation
-        elseif str == "nn"
-            return :NN
-        elseif str == "timeiteration" || str == "ti"
-            return :TimeIteration
-        elseif str == "all"
-            return :ALL
-        else
-            error("solver.method invalid")
-        end
-    end
-
-    requested_raw = getproperty(s, :method)
+    requested_raw = getproperty(solver, :method)
     requested_methods = Symbol[]
     if requested_raw isa AbstractVector
         for entry in requested_raw
             canon = _canonical_method(entry)
             if canon == :ALL
-                requested_methods = collect(supported_methods)
+                requested_methods = collect(SUPPORTED_METHODS)
                 break
             else
                 push!(requested_methods, canon)
@@ -358,14 +365,14 @@ function validate_config(cfg::NamedTuple)
         end
     else
         canon = _canonical_method(requested_raw)
-        requested_methods = canon == :ALL ? collect(supported_methods) : [canon]
+        requested_methods = canon == :ALL ? collect(SUPPORTED_METHODS) : [canon]
     end
 
     unique_methods = Set(requested_methods)
     for canon in unique_methods
-        block = method_blocks[canon]
-        hasproperty(s, block) || error("missing solver.$block")
-        block_cfg = getproperty(s, block)
+        block = METHOD_BLOCKS[canon]
+        hasproperty(solver, block) || error("missing solver.$block")
+        block_cfg = getproperty(solver, block)
         block_cfg isa NamedTuple || error("solver.$block wrong type")
         if canon == :EGM
             hasproperty(block_cfg, :interp_kind) || error("missing solver.egm.interp_kind")
@@ -380,7 +387,7 @@ function validate_config(cfg::NamedTuple)
             hasproperty(block_cfg, :orders) || error("missing solver.projection.orders")
             ords = block_cfg.orders
             ords isa AbstractVector{<:Integer} && !isempty(ords) || error("orders invalid")
-            maxord = g.Na - 1
+            maxord = inputs.grids.Na - 1
             all(o -> 0 ≤ o ≤ maxord, ords) || error("orders out of range")
             hasproperty(block_cfg, :Nval) || error("missing solver.projection.Nval")
             block_cfg.Nval isa Integer && block_cfg.Nval ≥ 2 || error("Nval ≥ 2 required")
@@ -390,15 +397,17 @@ function validate_config(cfg::NamedTuple)
                 error("order ≥ 1 required")
             hasproperty(block_cfg, :a_bar) || error("missing solver.perturbation.a_bar")
             abar = block_cfg.a_bar
-            (abar === nothing || (abar isa Real && g.a_min ≤ abar ≤ g.a_max)) ||
-                error("a_bar out of range")
+            (
+                abar === nothing ||
+                (abar isa Real && inputs.grids.a_min ≤ abar ≤ inputs.grids.a_max)
+            ) || error("a_bar out of range")
             if block_cfg.order ≥ 2
                 if hasproperty(block_cfg, :h_a) && block_cfg.h_a !== nothing
                     block_cfg.h_a isa Real && block_cfg.h_a > 0 || error("h_a > 0 required")
                 else
                     error("missing solver.perturbation.h_a")
                 end
-                if hasproperty(cfg, :shocks) && _getprop(cfg.shocks, :active, false)
+                if inputs.shocks_active
                     if hasproperty(block_cfg, :h_z) && block_cfg.h_z !== nothing
                         block_cfg.h_z isa Real && block_cfg.h_z > 0 ||
                             error("h_z > 0 required")
@@ -452,45 +461,72 @@ function validate_config(cfg::NamedTuple)
             (uc === nothing || uc isa Bool) || error("use_cuda invalid")
         end
     end
+end
 
-    # Shocks (optional)
-    if hasproperty(cfg, :shocks)
-        sh_raw = cfg.shocks
-        sh = sh_raw isa AbstractDict ? yaml_to_namedtuple(Dict(sh_raw)) : sh_raw
-        if sh isa NamedTuple && _getprop(sh, :active, false)
-            method_lower = _lower(_getprop(sh, :method, "tauchen"))
-            method_lower in ("tauchen", "rouwenhorst") || error("shocks.method invalid")
-            ρsym = Symbol("ρ_shock")
-            ρkey = hasproperty(sh, ρsym) ? ρsym : nothing
-            ρkey === nothing && error("missing shocks.ρ_shock")
-            ρ = getproperty(sh, ρkey)
-            ρ isa Real && -1 < ρ < 1 || error("shocks.rho out of range")
-            σsym = Symbol("σ_shock")
-            σkey =
-                hasproperty(sh, σsym) ? σsym :
-                (hasproperty(sh, :s_shock) ? :s_shock : nothing)
-            σkey === nothing && error("missing shocks.σ_shock")
-            s_e = getproperty(sh, σkey)
-            s_e isa Real || error("σ_shock not numeric")
-            s_e ≥ 0 || error("σ_shock < 0")
-            if method_lower == "tauchen" && hasproperty(sh, :m)
-                sh.m isa Real && sh.m > 0 || error("m > 0 required")
-            end
-            if hasproperty(sh, :validate)
-                sh.validate isa Bool || error("validate not Bool")
-            end
-        end
+function preview_shocks_active(cfg::NamedTuple)
+    if !hasproperty(cfg, :shocks)
+        return false
+    end
+    sh_raw = getproperty(cfg, :shocks)
+    sh = to_namedtuple_if_dict(sh_raw)
+    return sh isa NamedTuple && _getprop(sh, :active, false)
+end
+
+function validate_shocks_section(cfg::NamedTuple)
+    has_shocks = hasproperty(cfg, :shocks)
+    if !has_shocks
+        return cfg, ShocksValidationState()
     end
 
-    # Warm start overrides
+    sh_raw = getproperty(cfg, :shocks)
+    sh = to_namedtuple_if_dict(sh_raw)
+    shocks_state = ShocksValidationState()
+    if sh isa NamedTuple && _getprop(sh, :active, false)
+        method_lower = _lower(_getprop(sh, :method, "tauchen"))
+        method_lower in ("tauchen", "rouwenhorst") || error("shocks.method invalid")
+        ρsym = Symbol("ρ_shock")
+        ρkey = hasproperty(sh, ρsym) ? ρsym : nothing
+        ρkey === nothing && error("missing shocks.ρ_shock")
+        ρ = getproperty(sh, ρkey)
+        ρ isa Real && -1 < ρ < 1 || error("shocks.rho out of range")
+        σsym = Symbol("σ_shock")
+        σkey =
+            hasproperty(sh, σsym) ? σsym : (hasproperty(sh, :s_shock) ? :s_shock : nothing)
+        σkey === nothing && error("missing shocks.σ_shock")
+        s_e = getproperty(sh, σkey)
+        s_e isa Real || error("σ_shock not numeric")
+        s_e ≥ 0 || error("σ_shock < 0")
+        if method_lower == "tauchen" && hasproperty(sh, :m)
+            sh.m isa Real && sh.m > 0 || error("m > 0 required")
+        end
+        if hasproperty(sh, :validate)
+            sh.validate isa Bool || error("validate not Bool")
+        end
+        Nz = Int(_getprop(sh, :Nz, 1))
+        shocks_state = ShocksValidationState(active = true, Nz = Nz)
+    else
+        Nz = Int(_getprop(sh, :Nz, 1))
+        shocks_state = ShocksValidationState(active = false, Nz = Nz)
+    end
+
+    sh_cfg = sh isa NamedTuple ? sh : sh_raw
+    cfg = merge(cfg, (shocks = sh_cfg,))
+    return cfg, shocks_state
+end
+
+function validate_init_section(
+    cfg::NamedTuple,
+    grids::NamedTuple,
+    shocks_state::ShocksValidationState,
+)
     if hasproperty(cfg, :init)
-        init_raw = cfg.init
-        initcfg = init_raw isa AbstractDict ? yaml_to_namedtuple(Dict(init_raw)) : init_raw
+        init_raw = getproperty(cfg, :init)
+        initcfg = to_namedtuple_if_dict(init_raw)
         if initcfg isa NamedTuple && hasproperty(initcfg, :c)
             c0 = initcfg.c
-            Na = g.Na
-            if hasproperty(cfg, :shocks) && _getprop(cfg.shocks, :active, false)
-                Nz = Int(_getprop(cfg.shocks, :Nz, 1))
+            Na = grids.Na
+            if shocks_state.active
+                Nz = shocks_state.Nz
                 (
                     c0 isa AbstractArray &&
                     ndims(c0) == 2 &&
@@ -504,17 +540,45 @@ function validate_config(cfg::NamedTuple)
             all(x -> x > 0, c0) || error("init.c must be > 0")
         end
     end
+end
 
-    # Random seed (required)
+function validate_random_section(cfg::NamedTuple)
     hasproperty(cfg, :random) || error("missing random section")
-    r_raw = cfg.random
-    rcfg = r_raw isa AbstractDict ? yaml_to_namedtuple(Dict(r_raw)) : r_raw
+    r_raw = getproperty(cfg, :random)
+    rcfg = to_namedtuple_if_dict(r_raw)
     hasproperty(rcfg, :seed) || error("missing random.seed")
     try
         _ = UInt64(rcfg.seed)
     catch
         error("random.seed not integer")
     end
+end
+
+
+function validate_config(cfg::AbstractDict)
+    # Normalize Dict-like configs to NamedTuple and delegate to the
+    # NamedTuple-specific validator. This keeps `load_config` as the
+    # canonical loader while allowing tests/helpers to call validate_config
+    # with plain Dict objects.
+    return validate_config(yaml_to_namedtuple(Dict(cfg)))
+end
+
+function validate_config(cfg::NamedTuple)
+    cfg = require_namedtuple_sections(cfg, (:model, :params, :grids, :solver))
+
+    model_name = validate_model_section(cfg.model)
+    cfg = validate_params_section(cfg, model_name)
+
+    grids = validate_grids_section(cfg.grids)
+    validate_utility_section(cfg)
+
+    shocks_active_preview = preview_shocks_active(cfg)
+    solver_inputs = SolverValidationInputs(cfg.params, grids, shocks_active_preview)
+    validate_solver_section(cfg.solver, solver_inputs)
+
+    cfg, shocks_state = validate_shocks_section(cfg)
+    validate_init_section(cfg, grids, shocks_state)
+    validate_random_section(cfg)
 
     return cfg
 end
