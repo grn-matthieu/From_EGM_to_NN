@@ -108,6 +108,80 @@ function validate_config(cfg::NamedTuple)
         end
     end
 
+    function _without_keys(nt::NamedTuple, drop::Set{Symbol})
+        if isempty(drop)
+            return nt
+        end
+        return (; (k => getproperty(nt, k) for k in keys(nt) if !(k in drop))...)
+    end
+
+    function _normalize_alias(
+        params::NamedTuple,
+        canonical::Symbol,
+        aliases::Tuple{Vararg{Symbol}},
+    )
+        result = params
+        for alias in aliases
+            alias == canonical && continue
+            if hasproperty(result, alias)
+                alias_val = getproperty(result, alias)
+                if hasproperty(result, canonical)
+                    getproperty(result, canonical) == alias_val ||
+                        error("params.$alias inconsistent with params.$canonical")
+                else
+                    result = merge(result, (canonical => alias_val,))
+                end
+            end
+        end
+        return result
+    end
+    _normalize_alias(params::NamedTuple, canonical::Symbol, alias::Symbol) =
+        _normalize_alias(params, canonical, (alias,))
+
+    function _drop_aliases(
+        params::NamedTuple,
+        canonical::Symbol,
+        aliases::Tuple{Vararg{Symbol}},
+    )
+        drop = Set{Symbol}()
+        for alias in aliases
+            alias != canonical && push!(drop, alias)
+        end
+        return _without_keys(params, drop)
+    end
+    _drop_aliases(params::NamedTuple, canonical::Symbol, alias::Symbol) =
+        _drop_aliases(params, canonical, (alias,))
+
+    function _canonicalize_csvec_params(params::NamedTuple)
+        Σ_sym = Symbol("Σ")
+        params = _normalize_alias(params, :A, (:A, :transition, :state_transition))
+        params = _drop_aliases(params, :A, (:A, :transition, :state_transition))
+        params = _normalize_alias(params, Σ_sym, (Σ_sym, :Sigma, :covariance))
+        params = _drop_aliases(params, Σ_sym, (Σ_sym, :Sigma, :covariance))
+        params = _normalize_alias(params, :y, (:y, :income))
+        params = _drop_aliases(params, :y, (:y, :income))
+
+        if hasproperty(params, :A)
+            Aval = getproperty(params, :A)
+            if Aval isa Real
+                params = merge(params, (A = [[Aval]],))
+            end
+        end
+        if hasproperty(params, Σ_sym)
+            Σval = getproperty(params, Σ_sym)
+            if Σval isa Real
+                params = merge(params, (Σ_sym => [[Σval]],))
+            end
+        end
+        if hasproperty(params, :y)
+            yval = getproperty(params, :y)
+            if yval isa Real
+                params = merge(params, (y = [yval],))
+            end
+        end
+        return params
+    end
+
     # top-level
     for sect in (:model, :params, :grids, :solver)
         hasproperty(cfg, sect) || error("missing $sect")
@@ -120,7 +194,11 @@ function validate_config(cfg::NamedTuple)
 
     # params
     params_raw = cfg.params
+    params_raw = _normalize_alias(params_raw, :r, (:r, :interest_rate))
+    params_raw = _drop_aliases(params_raw, :r, (:r, :interest_rate))
     β_sym = Symbol("β")
+    params_raw = _normalize_alias(params_raw, β_sym, (β_sym, :beta))
+    params_raw = _drop_aliases(params_raw, β_sym, (β_sym, :beta))
     γ_candidates = (:γ, :gamma, :σ, :sigma)
     hasproperty(params_raw, β_sym) || error("missing params.β")
     getproperty(params_raw, β_sym) isa Real || error("params.β not numeric")
@@ -147,7 +225,11 @@ function validate_config(cfg::NamedTuple)
         end
     end
 
-    params_norm = merge(params_raw, (γ = γ_val,))
+    params_norm = merge(params_raw, (; γ = γ_val, β_sym => β_val))
+    params_norm = _drop_aliases(params_norm, :γ, γ_candidates)
+    if model_name == :cs_vec
+        params_norm = _canonicalize_csvec_params(params_norm)
+    end
     cfg = merge(cfg, (params = params_norm,))
     p = cfg.params
 

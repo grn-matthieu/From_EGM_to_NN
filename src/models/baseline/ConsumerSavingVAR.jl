@@ -34,11 +34,11 @@ function _to_float_matrix(x; name = "matrix")
         first_row isa AbstractVector || error("$(name) rows must themselves be vectors")
         cols = length(first_row)
         cols > 0 || error("$(name) must have at least one column")
-        mat = Array{Float64}(undef, rows, cols)
+        mat = Array{Float32}(undef, rows, cols)
         for (i, row) in enumerate(x)
             row isa AbstractVector || error("$(name) rows must be vectors")
             length(row) == cols || error("$(name) rows must have equal length")
-            mat[i, :] .= Float64.(row)
+            mat[i, :] .= Float32.(row)
         end
         return mat
     else
