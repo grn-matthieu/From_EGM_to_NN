@@ -98,16 +98,18 @@ end
     c_vec =
         MethodUtils.build_consumption_initializer(p_vec, g_vec; warm_start = :steady_state)
 
-    @test size(c_vec) == (g_vec[:a].N, p_vec.y_dim)
+    y_states = CSVarUtils.csvar_state_matrix(p_vec.y, p_vec.y_dim)
+    incomes = CSVarUtils.csvar_state_incomes(y_states)
+
+    @test size(c_vec) == (g_vec[:a].N, length(incomes))
 
     a_grid_vec = g_vec[:a].grid
     a_min_vec = g_vec[:a].min
     R_vec = 1 + p_vec.r
-    y_vals = Float64.(p_vec.y)
 
-    expected = Array{Float64}(undef, length(a_grid_vec), length(y_vals))
+    expected = Array{Float64}(undef, length(a_grid_vec), length(incomes))
     tmp = similar(a_grid_vec, Float64)
-    for (j, y_val) in enumerate(y_vals)
+    for (j, y_val) in enumerate(incomes)
         @inbounds for (i, a) in enumerate(a_grid_vec)
             cval = y_val + R_vec * a - a
             cmax = y_val + R_vec * a - a_min_vec
