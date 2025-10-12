@@ -3,6 +3,7 @@ import Adapt
 import Zygote
 import Adapt
 using Lux: fmap
+using ChainRulesCore: ignore_derivatives
 
 include("preprocessing.jl")
 
@@ -54,14 +55,20 @@ function maybe_to_host(state::Lux.Training.TrainState, settings::NNSolverSetting
 end
 
 function randn_like(rng, ref::CUDA.AbstractGPUArray)
-    return CUDA.randn(eltype(ref), size(ref)...)
+    # Generate GPU Gaussian noise similar to `ref`. Prevent AD from tracing sampling.
+    return ignore_derivatives() do
+        CUDA.randn(eltype(ref), size(ref)...)
+    end
 end
+
 function randn_like(rng, ref)
-    out = similar(ref)
-    randn!(rng, out)
-    return out
+    # Generate CPU Gaussian noise similar to `ref`. Prevent AD from tracing sampling.
+    return ignore_derivatives() do
+        out = similar(ref)
+        randn!(rng, out)
+        out
+    end
 end
-Zygote.@nograd randn_like
 
 function fill_like(value, ref)
     if ref isa CUDA.AbstractGPUArray
