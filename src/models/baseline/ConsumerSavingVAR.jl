@@ -1,7 +1,10 @@
 module ConsumerSavingVAR
 
 using LinearAlgebra: Diagonal
-using ..ConsumerSaving: AbstractModel, _build_asset_grid, _build_crra_utility
+using ..ConsumerSaving:
+    AbstractModel, _build_asset_grid, _build_crra_utility, _maybe_discretize_shocks
+using ..Shocks: ShockOutput
+using ..UtilsConfig: maybe
 
 import ..API: get_params, get_grids, get_shocks, get_utility
 
@@ -10,7 +13,7 @@ export ConsumerSavingVARModel, build_cs_var_model
 struct ConsumerSavingVARModel <: AbstractModel
     params::NamedTuple
     grids::NamedTuple
-    shocks::NamedTuple
+    shocks::Union{Nothing,NamedTuple,ShockOutput}
     utility::NamedTuple
 end
 
@@ -59,7 +62,23 @@ function build_cs_var_model(cfg::NamedTuple)
 
     grids = _build_asset_grid(cfg.grids)
 
-    params = merge(params_cfg, (A = A, Σ = Σ, y = y_vec, y_dim = size(A, 1)))
+    y_dim = size(A, 1)
+    params = merge(params_cfg, (A = A, Σ = Σ, y_dim = y_dim))
+
+    if y_dim == 1
+        y_scalar = Float64(y_vec[1])
+        params = merge(params, (y = y_scalar,))
+        shocks, shocks_cfg = _maybe_discretize_shocks(cfg)
+        if shocks !== nothing
+            ρ_shock = maybe(shocks_cfg, :ρ_shock, 0.0)
+            σ_shock = maybe(shocks_cfg, :σ_shock, 0.0)
+            params = merge(params, (ρ_shock = ρ_shock, σ_shock = σ_shock))
+        end
+        utility = _build_crra_utility(params)
+        return ConsumerSavingVARModel(params, grids, shocks, utility)
+    end
+
+    params = merge(params, (y = y_vec,))
 
     shocks = (
         process = :gaussian_linear,
