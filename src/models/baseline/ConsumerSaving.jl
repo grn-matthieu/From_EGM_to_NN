@@ -20,12 +20,27 @@ struct ConsumerSavingModel <: AbstractModel
     utility::NamedTuple
 end
 
-@inline function _build_asset_grid(grids_cfg::NamedTuple)
+@inline function _build_asset_grid(grids_cfg::NamedTuple; y_dim::Integer = 1)
+    y_dim ≥ 1 || error("y_dim must be ≥ 1")
+
     a_min = grids_cfg.a_min
     a_max = grids_cfg.a_max
-    Na = grids_cfg.Na
-    agrid = collect(range(a_min, a_max; length = Na))
-    return (a = (; grid = agrid, min = a_min, max = a_max, N = Na),)
+    Na_base = grids_cfg.Na
+
+    Na_total = Na_base^y_dim
+    agrid = collect(range(a_min, a_max; length = Na_total))
+    tensor_shape = ntuple(_ -> Na_base, y_dim)
+
+    return (
+        a = (
+            grid = agrid,
+            min = a_min,
+            max = a_max,
+            N = Na_total,
+            N_base = Na_base,
+            tensor_shape = tensor_shape,
+        ),
+    )
 end
 
 function _build_crra_utility(params::NamedTuple)
