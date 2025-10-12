@@ -3,7 +3,6 @@ import Adapt
 import Zygote
 import Adapt
 using Lux: fmap
-using ChainRulesCore: @non_differentiable
 
 include("preprocessing.jl")
 
@@ -62,7 +61,7 @@ function randn_like(rng, ref)
     randn!(rng, out)
     return out
 end
-@non_differentiable randn_like
+Zygote.@nograd randn_like
 
 function fill_like(value, ref)
     if ref isa CUDA.AbstractGPUArray
