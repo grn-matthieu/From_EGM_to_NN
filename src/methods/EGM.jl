@@ -18,7 +18,8 @@ using ..MethodUtils:
     build_consumption_initializer,
     validate_policy!,
     DEFAULT_VALIDATION_CHECKS,
-    is_csvar_model
+    is_csvar_model,
+    summarise_euler_errors
 
 export EGMMethod
 
@@ -129,19 +130,21 @@ function solve(
     end
 
     # --- Processing ---
-    ee = sol.resid
-    ee_vec = ee isa AbstractMatrix ? vec(maximum(ee, dims = 2)) : ee # vector of max errors per asset grid point
-    ee_mat = ee isa AbstractMatrix ? ee : nothing
+    ee_vec, ee_mat = summarise_euler_errors(sol.resid)
     ee_mean = ee_mat === nothing ? mean_abs_error(ee_vec) : mean_abs_error(ee_mat)
     delta_pol = hasproperty(sol, :delta_pol) ? sol.delta_pol : missing
+    grid_info = g[:a]
+    tensor_shape = hasproperty(grid_info, :tensor_shape) ? grid_info.tensor_shape : nothing
     policy = Dict{Symbol,Any}(
         :c => (;
             value = sol.c,
-            grid = g[:a].grid,
+            grid = grid_info.grid,
+            tensor_shape = tensor_shape,
             euler_errors = ee_vec,
             euler_errors_mat = ee_mat,
         ),
-        :a => (; value = sol.a_next, grid = g[:a].grid),
+        :a =>
+            (; value = sol.a_next, grid = grid_info.grid, tensor_shape = tensor_shape),
     )
     shocks_for_value = csvar ? nothing : S
     value = compute_value_policy(p, g, shocks_for_value, U, policy)

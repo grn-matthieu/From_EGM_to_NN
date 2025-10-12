@@ -15,7 +15,7 @@ using ..ValueFunction: compute_value_policy
 using ..Determinism: canonicalize_cfg, hash_hex
 using ..UtilsConfig: maybe
 using ..UtilsDiagnostics: mean_abs_error
-using ..MethodUtils: validate_policy!, is_csvar_model
+using ..MethodUtils: validate_policy!, is_csvar_model, summarise_euler_errors
 
 export PerturbationMethod, build_perturbation_method
 
@@ -110,20 +110,22 @@ function solve(
         )
     end
 
-    ee = sol.resid
-    ee_vec = ee isa AbstractMatrix ? vec(maximum(ee, dims = 2)) : ee
-    ee_mat = ee isa AbstractMatrix ? ee : nothing
+    ee_vec, ee_mat = summarise_euler_errors(sol.resid)
     ee_mean = ee_mat === nothing ? mean_abs_error(ee_vec) : mean_abs_error(ee_mat)
     delta_pol = 0.0
 
+    grid_info = g[:a]
+    tensor_shape = hasproperty(grid_info, :tensor_shape) ? grid_info.tensor_shape : nothing
     policy = Dict{Symbol,Any}(
         :c => (;
             value = sol.c,
-            grid = sol.a_grid,
+            grid = grid_info.grid,
+            tensor_shape = tensor_shape,
             euler_errors = ee_vec,
             euler_errors_mat = ee_mat,
         ),
-        :a => (; value = sol.a_next, grid = sol.a_grid),
+        :a =>
+            (; value = sol.a_next, grid = grid_info.grid, tensor_shape = tensor_shape),
     )
 
     shocks_for_value = csvar ? nothing : S

@@ -9,7 +9,7 @@ module TimeIteration
 using ..API
 import ..API: solve
 
-using ..TimeIterationKernel: solve_ti_det, solve_ti_stoch, solve_ti_placeholder
+using ..TimeIterationKernel: solve_ti_det, solve_ti_stoch
 using ..ValueFunction: compute_value_policy
 using ..Determinism: canonicalize_cfg, hash_hex
 using ..CommonInterp: LinearInterp, MonotoneCubicInterp
@@ -19,7 +19,8 @@ using ..MethodUtils:
     build_consumption_initializer,
     validate_policy!,
     DEFAULT_VALIDATION_CHECKS,
-    is_csvar_model
+    is_csvar_model,
+    summarise_euler_errors
 
 export TimeIterationMethod, build_timeiteration_method
 
@@ -64,37 +65,26 @@ function solve(
     csvar = is_csvar_model(p)
     shocks_for_solver = csvar ? nothing : S
 
-    c_init = nothing
-    if !csvar
-        custom_c = shocks_for_solver === nothing ? custom_c_vec : custom_c_mat
-        c_init = build_consumption_initializer(
-            p,
-            g;
-            shocks = shocks_for_solver,
-            warm_start = method.opts.warm_start,
-            custom_c = custom_c,
-        )
+    custom_c = if csvar
+        custom_c_data isa AbstractArray ? custom_c_data : nothing
+    elseif shocks_for_solver === nothing
+        custom_c_vec
+    else
+        custom_c_mat
     end
+
+    c_init = build_consumption_initializer(
+        p,
+        g;
+        shocks = shocks_for_solver,
+        warm_start = method.opts.warm_start,
+        custom_c = custom_c,
+    )
 
     ik = method.opts.interp_kind
     interp = ik == :linear ? LinearInterp() : MonotoneCubicInterp()
 
-    sol = if csvar
-        @warn "TimeIteration solver is not implemented for CSVar models; returning placeholder solution."
-        solve_ti_placeholder(
-            p,
-            g,
-            shocks_for_solver,
-            U;
-            tol = method.opts.tol,
-            tol_pol = method.opts.tol_pol,
-            maxit = method.opts.maxit,
-            interp_kind = interp,
-            relax = method.opts.relax,
-            verbose = method.opts.verbose,
-            c_init = c_init,
-        )
-    elseif S === nothing
+    sol = if shocks_for_solver === nothing
         solve_ti_det(
             p,
             g,
@@ -123,34 +113,22 @@ function solve(
         )
     end
 
-    ee = sol.resid
-    # For stochastic solutions `ee` is a Na x Nz matrix (Euler residuals per a,z).
-    # Errors at the borrowing-constraint (first asset grid point) are allowed to be
-    # large; mask them out by setting to NaN so downstream diagnostics/plots ignore
-    # the constraint point. This mirrors solver behaviour which already ignores
-    # the first row when computing `max_resid`.
-    if ee isa AbstractMatrix
-        ee_mat = copy(ee)
-        # mask first asset row
-        if size(ee_mat, 1) >= 1
-            ee_mat[1, :] .= NaN
-        end
-        # per-asset max across shocks, preserve shape (Na,)
-        ee_vec = vec(maximum(ee_mat, dims = 2))
-    else
-        ee_mat = nothing
-        ee_vec = ee
-    end
+    mask_first = sol.resid isa AbstractArray && ndims(sol.resid) >= 2
+    ee_vec, ee_mat = summarise_euler_errors(sol.resid; mask_first_row = mask_first)
     ee_mean = ee_mat === nothing ? mean_abs_error(ee_vec) : mean_abs_error(ee_mat)
     delta_pol = hasproperty(sol, :delta_pol) ? sol.delta_pol : missing
+    grid_info = g[:a]
+    tensor_shape = hasproperty(grid_info, :tensor_shape) ? grid_info.tensor_shape : nothing
     policy = Dict{Symbol,Any}(
         :c => (;
             value = sol.c,
-            grid = g[:a].grid,
+            grid = grid_info.grid,
+            tensor_shape = tensor_shape,
             euler_errors = ee_vec,
             euler_errors_mat = ee_mat,
         ),
-        :a => (; value = sol.a_next, grid = g[:a].grid),
+        :a =>
+            (; value = sol.a_next, grid = grid_info.grid, tensor_shape = tensor_shape),
     )
 
     shocks_for_value = csvar ? nothing : S
