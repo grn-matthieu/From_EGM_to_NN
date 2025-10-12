@@ -20,7 +20,7 @@ using ..PolicyUtils:
     relaxation_step!,
     rmse_nonbinding,
     sort_policy_pairs!
-using ..CSVarUtils: csvar_income
+using ..CSVarUtils: csvar_state_incomes, csvar_state_matrix
 using ..SolverIntegration: integrate_expectation, discrete_expectation
 using Random: default_rng
 using ..SolverPlaceholders: build_placeholder_solution
@@ -29,6 +29,36 @@ using Printf
 export solve_egm_det, solve_egm_stoch, solve_egm_placeholder
 
 const DEFAULT_BINDING_TOL = 1e-12
+
+@inline function _is_csvar_model(params)
+    hasproperty(params, :y_dim) && getproperty(params, :y_dim) > 1
+end
+
+function _csvar_state_data(params)
+    _is_csvar_model(params) ||
+        error("CSVAR state data requested for model without vector income")
+    y_dim = params.y_dim
+    Y = csvar_state_matrix(params.y, y_dim)
+    incomes = csvar_state_incomes(Y)
+    return Y, incomes
+end
+
+function _prepare_csvar_initial_consumption(a_grid, a_min, R, incomes; c_init, cmin)
+    Na = length(a_grid)
+    Ny = length(incomes)
+    if c_init === nothing
+        c = Array{Float64}(undef, Na, Ny)
+        for (j, income) in enumerate(incomes)
+            column = init_consumption_det(a_grid, a_min, R, income; cmin = cmin)
+            @views c[:, j] .= column
+        end
+        return c
+    elseif c_init isa AbstractArray
+        return copy(c_init)
+    else
+        error("CSVAR warm start must be an array when provided")
+    end
+end
 
 """
     solve_egm_det(model_params, model_grids, model_utility; ...)
@@ -98,8 +128,161 @@ function solve_egm_det_impl(
     R = 1 + model_params.r
     γ = model_params.γ
     cmin = 1e-12
-    income =
-        hasproperty(model_params, :y_dim) ? csvar_income(model_params.y) : model_params.y
+    if _is_csvar_model(model_params)
+        y_states, incomes = _csvar_state_data(model_params)
+        c = _prepare_csvar_initial_consumption(
+            a_grid,
+            a_min,
+            R,
+            incomes;
+            c_init = c_init,
+            cmin = cmin,
+        )
+
+        cnew = similar(c)
+        cnext = similar(c)
+        resid = similar(c)
+        a_next = similar(c)
+        cold = similar(c)
+        c_prime = similar(c)
+
+        c_endo_vec = similar(a_grid)
+        a_endo_vec = similar(a_grid)
+        a_sorted = similar(a_grid)
+        c_sorted = similar(a_grid)
+        cmax_vec = similar(a_grid)
+
+        converged = false
+        iters = 0
+        max_resid = Inf
+        Δpol = Inf
+        integ_kind = integration_method === :none ? :gh : integration_method
+
+        for it = 1:maxit
+            iters = it
+
+            copyto!(cold, c)
+            copyto!(c_prime, cold)
+            ensure_minimum!(c_prime, cmin)
+
+            for (j, income) in enumerate(incomes)
+                cprime_col = view(c_prime, :, j)
+                y_state = view(y_states, :, j)
+                for idx in eachindex(cprime_col)
+                    cval = cprime_col[idx] <= cmin ? cmin : cprime_col[idx]
+                    integrand = _ -> model_utility.u_prime(cval)
+                    EU = integrate_expectation(
+                        integ_kind,
+                        integrand,
+                        model_params,
+                        nothing,
+                        y_state,
+                        rng = local_rng,
+                    )
+                    c_endo_vec[idx] = model_utility.u_prime_inv(β * R * EU)
+                end
+                @. a_endo_vec = (a_grid - income + c_endo_vec) / R
+                enforce_borrowing_constraint!(
+                    a_endo_vec,
+                    c_endo_vec,
+                    a_min,
+                    income,
+                    R,
+                    a_grid;
+                    cmin = cmin,
+                )
+                sort_policy_pairs!(a_sorted, c_sorted, a_endo_vec, c_endo_vec)
+
+                column_new = view(cnew, :, j)
+                interp_linear!(column_new, a_sorted, c_sorted, a_grid)
+                @. cmax_vec = income + R * a_grid - a_min
+                clamp_policy!(column_new, cmin, cmax_vec)
+            end
+
+            Δpol = relaxation_step!(c, cold, cnew, relax)
+
+            for (j, income) in enumerate(incomes)
+                col_next = view(a_next, :, j)
+                col_c = view(c, :, j)
+                @. col_next = clamp(income + R * a_grid - col_c, a_min, a_max)
+                interp_linear!(view(cnext, :, j), a_grid, col_c, col_next)
+            end
+            ensure_minimum!(cnext, cmin)
+
+            for j = 1:length(incomes)
+                euler_resid_det!(
+                    view(resid, :, j),
+                    model_params,
+                    view(c, :, j),
+                    view(cnext, :, j),
+                )
+            end
+
+            max_resid = rmse_nonbinding(resid, a_next, a_min, bind_tol)
+
+            if verbose && it % 10 == 0
+                @printf(
+                    "[EGM det linear] it=%d rmse=%.6e Δpol=%.6e\n",
+                    it,
+                    max_resid,
+                    Δpol,
+                )
+                flush(stdout)
+            end
+
+            if max_resid < tol && Δpol < tol_pol
+                converged = true
+                break
+            end
+        end
+
+        for (j, income) in enumerate(incomes)
+            col_next = view(a_next, :, j)
+            col_c = view(c, :, j)
+            @. col_next = clamp(R * a_grid + income - col_c, a_min, a_max)
+            interp_linear!(view(cnext, :, j), a_grid, col_c, col_next)
+        end
+        ensure_minimum!(cnext, cmin)
+        for j = 1:length(incomes)
+            euler_resid_det!(
+                view(resid, :, j),
+                model_params,
+                view(c, :, j),
+                view(cnext, :, j),
+            )
+        end
+        max_resid = rmse_nonbinding(resid, a_next, a_min, bind_tol)
+
+        runtime = (time_ns() - start_time) / 1e9
+        opts = (;
+            tol,
+            tol_pol,
+            maxit,
+            interp_kind = LinearInterp(),
+            relax,
+            verbose,
+            resid_metric = :rmse,
+            seed = nothing,
+            runtime,
+            integration_method = integration_method,
+        )
+
+        return (;
+            a_grid,
+            c,
+            a_next,
+            resid,
+            iters,
+            converged,
+            max_resid,
+            rmse = max_resid,
+            model_params,
+            opts,
+            delta_pol = Δpol,
+        )
+    end
+
+    income = model_params.y
 
     c = init_consumption_det(a_grid, a_min, R, income; c_init = c_init, cmin = cmin)
 
@@ -126,23 +309,7 @@ function solve_egm_det_impl(
         copyto!(c_prime, cold)
         ensure_minimum!(c_prime, cmin)
 
-        if hasproperty(model_params, :y_dim) && model_params.y_dim > 1
-            @inbounds for idx in eachindex(c_prime)
-                cval = c_prime[idx] <= cmin ? cmin : c_prime[idx]
-                integrand = _ -> model_utility.u_prime(cval)
-                EU = integrate_expectation(
-                    integration_method === :none ? :gh : integration_method,
-                    integrand,
-                    model_params,
-                    nothing,
-                    model_params.y,
-                    rng = local_rng,
-                )
-                c_endo[idx] = model_utility.u_prime_inv(β * R * EU)
-            end
-        else
-            @. c_endo = model_utility.u_prime_inv(β * R * c_prime^(-γ))
-        end
+        @. c_endo = model_utility.u_prime_inv(β * R * c_prime^(-γ))
         @. a_endo = (a_grid - income + c_endo) / R
 
         enforce_borrowing_constraint!(a_endo, c_endo, a_min, income, R, a_grid; cmin = cmin)
@@ -255,6 +422,7 @@ function solve_egm_det_impl(
     rng = nothing,
 )::NamedTuple
     start_time = time_ns()
+    local_rng = rng === nothing ? default_rng() : rng
 
     a_grid = model_grids[:a].grid
     a_min = model_grids[:a].min
@@ -266,8 +434,160 @@ function solve_egm_det_impl(
     R = 1 + model_params.r
     γ = model_params.γ
     cmin = 1e-12
-    income =
-        hasproperty(model_params, :y_dim) ? csvar_income(model_params.y) : model_params.y
+    if _is_csvar_model(model_params)
+        y_states, incomes = _csvar_state_data(model_params)
+        c = _prepare_csvar_initial_consumption(
+            a_grid,
+            a_min,
+            R,
+            incomes;
+            c_init = c_init,
+            cmin = cmin,
+        )
+
+        cnew = similar(c)
+        cnext = similar(c)
+        resid = similar(c)
+        a_next = similar(c)
+        cold = similar(c)
+        c_prime = similar(c)
+
+        c_endo_vec = similar(a_grid)
+        a_endo_vec = similar(a_grid)
+        a_sorted = similar(a_grid)
+        c_sorted = similar(a_grid)
+        cmax_vec = similar(a_grid)
+
+        converged = false
+        iters = 0
+        max_resid = Inf
+        Δpol = Inf
+        integ_kind = integration_method === :none ? :gh : integration_method
+
+        for it = 1:maxit
+            iters = it
+
+            copyto!(cold, c)
+            copyto!(c_prime, cold)
+            ensure_minimum!(c_prime, cmin)
+
+            for (j, income) in enumerate(incomes)
+                cprime_col = view(c_prime, :, j)
+                y_state = view(y_states, :, j)
+                for idx in eachindex(cprime_col)
+                    cval = cprime_col[idx] <= cmin ? cmin : cprime_col[idx]
+                    integrand = _ -> model_utility.u_prime(cval)
+                    EU = integrate_expectation(
+                        integ_kind,
+                        integrand,
+                        model_params,
+                        nothing,
+                        y_state,
+                        rng = local_rng,
+                    )
+                    c_endo_vec[idx] = model_utility.u_prime_inv(β * R * EU)
+                end
+                @. a_endo_vec = (a_grid - income + c_endo_vec) / R
+                enforce_borrowing_constraint!(
+                    a_endo_vec,
+                    c_endo_vec,
+                    a_min,
+                    income,
+                    R,
+                    a_grid;
+                    cmin = cmin,
+                )
+                sort_policy_pairs!(a_sorted, c_sorted, a_endo_vec, c_endo_vec)
+                enforce_strict_increase!(a_sorted)
+                enforce_monotone!(c_sorted)
+
+                column_new = view(cnew, :, j)
+                interp_pchip!(column_new, a_sorted, c_sorted, a_grid)
+
+                @. cmax_vec = income + R * a_grid - a_min
+                clamp_policy!(column_new, cmin, cmax_vec)
+                enforce_monotone!(column_new)
+            end
+
+            Δpol = relaxation_step!(c, cold, cnew, relax)
+
+            for (j, income) in enumerate(incomes)
+                col_next = view(a_next, :, j)
+                col_c = view(c, :, j)
+                @. col_next = clamp(income + R * a_grid - col_c, a_min, a_max)
+                interp_pchip!(view(cnext, :, j), a_grid, col_c, col_next)
+            end
+            ensure_minimum!(cnext, cmin)
+
+            for j = 1:length(incomes)
+                euler_resid_det!(
+                    view(resid, :, j),
+                    model_params,
+                    view(c, :, j),
+                    view(cnext, :, j),
+                )
+            end
+
+            max_resid = rmse_nonbinding(resid, a_next, a_min, bind_tol)
+
+            if verbose && it % 10 == 0
+                @printf("[EGM det pchip] it=%d rmse=%.6e Δpol=%.6e\n", it, max_resid, Δpol,)
+                flush(stdout)
+            end
+
+            if max_resid < tol && Δpol < tol_pol
+                converged = true
+                break
+            end
+        end
+
+        for (j, income) in enumerate(incomes)
+            col_next = view(a_next, :, j)
+            col_c = view(c, :, j)
+            @. col_next = clamp(R * a_grid + income - col_c, a_min, a_max)
+            interp_pchip!(view(cnext, :, j), a_grid, col_c, col_next)
+        end
+        ensure_minimum!(cnext, cmin)
+        for j = 1:length(incomes)
+            euler_resid_det!(
+                view(resid, :, j),
+                model_params,
+                view(c, :, j),
+                view(cnext, :, j),
+            )
+        end
+        max_resid = rmse_nonbinding(resid, a_next, a_min, bind_tol)
+
+        runtime = (time_ns() - start_time) / 1e9
+        opts = (;
+            tol,
+            tol_pol,
+            maxit,
+            interp_kind = MonotoneCubicInterp(),
+            relax,
+            verbose,
+            resid_metric = :rmse,
+            seed = nothing,
+            runtime,
+            integration_method = integration_method,
+        )
+
+        return (;
+            a_grid,
+            c,
+            a_next,
+            resid,
+            iters,
+            converged,
+            max_resid,
+            rmse = max_resid,
+            model_params,
+            opts,
+            delta_pol = Δpol,
+        )
+    end
+
+    income = model_params.y
 
     c = init_consumption_det(a_grid, a_min, R, income; c_init = c_init, cmin = cmin)
 
