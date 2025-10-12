@@ -4,6 +4,9 @@ using LinearAlgebra: Cholesky, Symmetric, cholesky, mul!
 using Random: AbstractRNG, default_rng, randn, randn!
 
 export csvar_income,
+    csvar_state_matrix,
+    csvar_state_income,
+    csvar_state_incomes,
     csvar_cash_on_hand,
     csvar_assets_from_cash,
     csvar_next_cash_on_hand,
@@ -42,6 +45,68 @@ function csvar_income(y::AbstractMatrix)
 end
 
 csvar_income(states::AbstractVector{<:AbstractVector}) = map(csvar_income, states)
+
+"""
+    csvar_state_matrix(y, y_dim)
+
+Return a matrix whose columns enumerate the VAR state vectors. Accepts vectors,
+matrices, or vectors of vectors and reshapes them into a `y_dim × Ny` matrix.
+"""
+function csvar_state_matrix(y, y_dim::Integer)
+    y_dim > 0 || error("y_dim must be positive, got $y_dim")
+    if y isa Number
+        y_dim == 1 || error("scalar income only valid when y_dim = 1 (got $y_dim)")
+        return reshape(float(y), 1, 1)
+    elseif y isa AbstractVector{<:Number}
+        len = length(y)
+        len % y_dim == 0 ||
+            error("state vector length $len must be a multiple of y_dim = $y_dim")
+        cols = max(1, div(len, y_dim))
+        return reshape(float.(y), y_dim, cols)
+    elseif y isa AbstractMatrix
+        size(y, 1) == y_dim ||
+            error("state matrix must have y_dim = $y_dim rows (got $(size(y, 1)))")
+        return float.(y)
+    elseif y isa AbstractVector
+        cols = length(y)
+        cols > 0 || error("state vector collection must be non-empty")
+        first_vec = y[1]
+        first_vec isa AbstractVector ||
+            error("state collection elements must themselves be vectors")
+        length(first_vec) == y_dim || error("state vectors must have length y_dim = $y_dim")
+        mat = Array{Float64}(undef, y_dim, cols)
+        for (j, vec) in enumerate(y)
+            vec isa AbstractVector || error("state collection elements must be vectors")
+            length(vec) == y_dim ||
+                error("state vector $j has length $(length(vec)); expected $y_dim")
+            @views mat[:, j] .= Float64.(vec)
+        end
+        return mat
+    else
+        error("Unsupported state representation of type $(typeof(y))")
+    end
+end
+
+"""
+    csvar_state_income(y_state)
+
+Compute the scalar income associated with the state vector `y_state`.
+"""
+csvar_state_income(y_state::AbstractVector) = sum(y_state)
+
+"""
+    csvar_state_incomes(Y)
+
+Return the vector of incomes for each column in the state matrix `Y`.
+"""
+function csvar_state_incomes(Y::AbstractMatrix)
+    Ny = size(Y, 2)
+    incomes = Vector{Float64}(undef, Ny)
+    @inbounds for j = 1:Ny
+        incomes[j] = csvar_state_income(view(Y, :, j))
+    end
+    return incomes
+end
 
 """
     csvar_cash_on_hand(a_prev, y, r)

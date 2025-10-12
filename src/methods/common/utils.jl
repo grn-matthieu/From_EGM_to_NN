@@ -2,6 +2,7 @@ module MethodUtils
 
 using Base: @views
 using ..CommonValidators: is_nondec, is_positive, respects_amin
+using ..CSVarUtils: csvar_state_incomes, csvar_state_matrix
 export build_consumption_initializer,
     validate_policy!, DEFAULT_VALIDATION_CHECKS, is_csvar_model
 
@@ -40,12 +41,13 @@ function _build_c_init_det(p, g, warm::Symbol, custom_c)
 
     if warm == :steady_state
         if csvar
-            y_state = Float64.(p.y)
-            Ny = length(y_state)
+            y_state = csvar_state_matrix(p.y, p.y_dim)
+            incomes = csvar_state_incomes(y_state)
+            Ny = length(incomes)
             Na = length(a_grid)
             c = Array{Float64}(undef, Na, Ny)
             tmp = similar(a_grid, Float64)
-            @inbounds for (j, y_val) in enumerate(y_state)
+            @inbounds for (j, y_val) in enumerate(incomes)
                 @inbounds for (i, a) in enumerate(a_grid)
                     cval = y_val + R * a - a
                     cmax = y_val + R * a - a_min
