@@ -4,7 +4,7 @@ import ..API: load_config, validate_config
 using YAML
 using ..Determinism: MasterRNG, make_master_rng, master_seed
 
-export maybe, ensure_master_rng
+export maybe, maybe_nested, ensure_master_rng
 
 # --- helpers ---
 yaml_to_namedtuple(x) = x
@@ -591,65 +591,33 @@ maybe(cfg, ::Symbol; default = nothing) = default
 # Support calling with a positional default argument (common call pattern
 # throughout the repo). These overloads avoid MethodError when the third
 # argument is a concrete default value (e.g. a number) instead of a Symbol.
-maybe(::Nothing, ::Vararg{Symbol}; default = nothing) = default
+maybe(cfg, key::Symbol, default) = maybe(cfg, key; default = default)
 
-# Unified variadic `maybe` which supports two common call patterns used
-# throughout the repo:
-# 1) maybe(cfg, :a, :b)          -> nested lookup: cfg.a.b if present
-# 2) maybe(cfg, :a, default_val) -> positional default when the third arg is a value
-#
-# The function heuristically distinguishes these at runtime: if a single
-# trailing Symbol is provided and the value obtained at the first key is *not*
-# a NamedTuple with that symbol as a property, then we treat the trailing
-# Symbol as a positional default. Otherwise we perform nested traversal.
-function maybe(cfg, key::Symbol, rest::Any...; default = nothing)
-    # Single-key access: delegate to keyword-default form
-    if isempty(rest)
-        return maybe(cfg, key; default = default)
-    end
+"""
+    maybe_nested(cfg, keys...; default = nothing)
 
-    # If cfg is nothing, positional-default calls like `maybe(nothing, :k, false)`
-    # should simply return the provided default positional value.
-    if cfg === nothing
-        first_rest = rest[1]
-        return first_rest === nothing ? default : first_rest
-    end
+Traverse a nested configuration `cfg` following the provided `keys` and return
+the resulting value. If any intermediate key is missing (or resolves to
+`nothing`), return `default` instead. The final value also falls back to the
+`default` when it is `nothing`.
+"""
+maybe_nested(cfg, keys::Symbol...; default = nothing) =
+    maybe_nested(cfg, Tuple(keys); default = default)
 
-    # Fetch the first-level value at `key` (using keyword default)
-    val = maybe(cfg, key; default = default)
+maybe_nested(::Nothing, ::Symbol...; default = nothing) = default
 
-    # If there's exactly one trailing arg, prefer treating it as a positional
-    # default value (e.g. `maybe(s, :k, 3.0)` or `maybe(s, :k, false)`), even
-    # when it's a Symbol. Only perform nested lookup when the fetched value at
-    # `key` is a NamedTuple that actually contains that Symbol property.
-    if length(rest) == 1
-        if !(rest[1] isa Symbol)
-            return maybe(cfg, key; default = rest[1])
-        else
-            # trailing Symbol: use as positional default unless val is a NamedTuple
-            # exposing that property (nested lookup requested)
-            if !(val isa NamedTuple && hasproperty(val, rest[1]))
-                return maybe(cfg, key; default = rest[1])
-            end
+function maybe_nested(cfg, keys::Tuple{Vararg{Symbol}}; default = nothing)
+    isempty(keys) && return maybe(cfg; default = default)
+
+    current = cfg
+    for key in keys
+        if current === nothing
+            return default
         end
+        current = maybe(current, key; default = nothing)
     end
 
-    # If all trailing args are Symbols, treat as nested lookup: maybe(cfg, :a, :b, :c)
-    if all(x -> x isa Symbol, rest)
-        return maybe(val, Tuple(rest)...; default = default)
-    end
-
-    # Mixed case: last element may be a positional default, preceding ones are keys
-    if rest[end] !== nothing && !(rest[end] isa Symbol)
-        # split keys vs default
-        keys = rest[1:end-1]
-        if all(x -> x isa Symbol, keys)
-            return maybe(val, Tuple(keys)...; default = rest[end])
-        end
-    end
-
-    # Fallback: attempt nested lookup where possible, otherwise return keyword default
-    return maybe(val, (x for x in rest if x isa Symbol)...; default = default)
+    return maybe(current; default = default)
 end
 
 end # module

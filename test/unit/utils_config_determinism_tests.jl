@@ -46,8 +46,8 @@ end
 
     enriched = UtilsConfig.ensure_master_rng((random = (seed = 99,),))
     @test hasproperty(enriched.random, :master_rng)
-    @test UtilsConfig.maybe(cfg, :solver, :egm, :interp_kind) == :linear
-    @test UtilsConfig.maybe(cfg, :solver, :missing_field, false) == false
+    @test UtilsConfig.maybe_nested(cfg, :solver, :egm, :interp_kind) == :linear
+    @test UtilsConfig.maybe_nested(cfg, :solver, :missing_field; default = false) == false
     @test UtilsConfig.maybe(nothing, :anything, 42) == 42
 
     bad_cfg = deterministic_config(solver_overrides = (; tol = -1.0))
