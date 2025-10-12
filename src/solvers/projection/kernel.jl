@@ -102,6 +102,7 @@ function solve_projection_det(
         coeffs = solve_coefficients(B, c; λ = λ)
         a_next = similar(c)
         c_new = similar(c)
+        c_next = similar(c)
         converged = false
         iters = 0
 

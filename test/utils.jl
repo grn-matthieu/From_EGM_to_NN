@@ -70,6 +70,7 @@ function _base_solver_block(; method::String = "EGM")
             sigma_shocks = nothing,
             target_loss = 1.0e-2,
             use_cuda = false,
+            n_mc = 16,
         ),
     )
 end

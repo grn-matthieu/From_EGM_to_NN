@@ -29,7 +29,7 @@ Base.@kwdef struct Solution{M<:AbstractModel,K<:AbstractMethod}
     policy::Dict{Symbol,Any}
     value::Union{Nothing,AbstractArray{Float64}} # Value function
     diagnostics::NamedTuple  # EE stats, iterations, runtime
-    metadata::Dict{Symbol,Any} # Model id, method, seed, timestamps
+    metadata::Dict # Model id, method, seed, timestamps
     model::M
     method::K
 end
@@ -161,7 +161,7 @@ function solve(model::AbstractModel, cfg::NamedTuple; rng = nothing)
                 policy = Dict{Symbol,Any}(),
                 value = nothing,
                 diagnostics = (method = string(mname), runtime = 0.0),
-                metadata = Dict(:error => string(err)),
+                metadata = Dict(:error => any(err)),
                 model = model,
                 method = method_m,
             )

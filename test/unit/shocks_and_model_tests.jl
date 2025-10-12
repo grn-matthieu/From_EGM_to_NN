@@ -62,6 +62,13 @@ end
     @test model_vec.shocks.ε_dim == 2
     @test hasproperty(model_vec.params, :γ)
 
+    a_grid_vec = model_vec.grids[:a]
+    expected_total_nodes = cfg_vec.grids.Na^model_vec.params.y_dim
+    @test length(a_grid_vec.grid) == expected_total_nodes
+    @test a_grid_vec.N == expected_total_nodes
+    @test a_grid_vec.N_base == cfg_vec.grids.Na
+    @test a_grid_vec.tensor_shape == ntuple(_ -> cfg_vec.grids.Na, model_vec.params.y_dim)
+
     model_factory_vec = ModelFactory.build_model(cfg_vec)
     @test model_factory_vec isa ConsumerSavingVAR.ConsumerSavingVARModel
 
@@ -138,9 +145,14 @@ end
     model_scalar = ConsumerSavingVAR.build_cs_var_model(cfg_scalar_validated)
     params_scalar = ConsumerSavingVAR.get_params(model_scalar)
     @test params_scalar.y_dim == 1
-    @test params_scalar.y ≈ Float32[1.1]
+    @test params_scalar.y ≈ 1.1f0
     @test params_scalar.A[1, 1] ≈ 0.9f0
     @test params_scalar.Σ[1, 1] ≈ 0.2f0
+
+    a_grid_scalar = model_scalar.grids[:a]
+    @test a_grid_scalar.N == cfg_scalar_validated.grids.Na
+    @test a_grid_scalar.N_base == cfg_scalar_validated.grids.Na
+    @test a_grid_scalar.tensor_shape == (cfg_scalar_validated.grids.Na,)
 end
 
 @testset "Model factory" begin
