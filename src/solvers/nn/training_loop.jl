@@ -26,6 +26,9 @@ struct NNSolverSettings
     sigma_shocks::Union{Nothing,Float64}
     use_cuda::Bool
     n_mc::Int
+    bcmc_budget_T::Union{Nothing,Int}
+    bcmc_auto_N::Bool
+    bcmc_update_every::Int
 end
 
 struct TrainingResult
@@ -150,6 +153,19 @@ function solver_settings(
     sigma_shocks = get_option(opts, :sigma_shocks, nothing)
     use_cuda = detect_cuda_preference(objective, opts)
     n_mc = max(Int(get_option(opts, :n_mc, 16)), 1)
+    bcmc_budget_T = let v = get_option(opts, :bcmc_budget_T, nothing)
+        v === nothing ? nothing : Int(v)
+    end
+    bcmc_auto_N = Bool(get_option(opts, :bcmc_auto_N, false))
+    bcmc_update_every = max(Int(get_option(opts, :bcmc_update_every, 10)), 1)
+
+    if objective === :euler_fb_bcmc
+        if n_mc < 2
+            throw(ArgumentError("objective :euler_fb_bcmc requires n_mc ≥ 2 (got $(n_mc))"))
+        elseif n_mc == 2
+            @info "bc-MC with n_mc=2 is equivalent to AiO"
+        end
+    end
 
     return NNSolverSettings(
         epochs,
@@ -169,6 +185,9 @@ function solver_settings(
         sigma_shocks,
         use_cuda,
         n_mc,
+        bcmc_budget_T,
+        bcmc_auto_N,
+        bcmc_update_every,
     )
 end
 
