@@ -321,8 +321,8 @@ Field notes:
 - `epochs`, `batch`, `lr`: standard training hyperparameters (number of epochs, minibatch size, and learning rate).
 - `objective`: selects the loss used during training. `euler_fb_aio` selects the Fischer–Burmeister AiO objective (N=2). `euler_fb_bcmc` selects the bias-corrected Monte Carlo (bc-MC) estimator that generalizes AiO to `N ≥ 2` shocks.
   - `n_mc`: number of shocks `N` used in bc-MC/AiO. Must be `≥ 2` for bc-MC.
-  - `bcmc_budget_T` (optional): total function-evaluation budget `T`. The solver selects an effective `N` so that `M⋅⌊N(N-1)/2⌋ ≈ T` where `M` is the minibatch size.
-  - `bcmc_auto_N` (optional): reserved for automatic variance-minimizing `N` selection.
+  - `bcmc_budget_T` (optional): total function-evaluation budget `T`. The solver selects an effective `N` so that `M⋅⌊N(N-1)/2⌋ ≈ T` where `M` is the minibatch size. If `bcmc_auto_N=true` and this field is omitted, a default budget is derived from the initial `n_mc` and `samples_per_epoch`.
+  - `bcmc_auto_N` (optional): enable automatic selection of `N` under a fixed budget (MVUE bc-MC). The effective `N` used per batch is reported in diagnostics as `n_eff`.
   - `bcmc_update_every` (optional): epochs between auto-`N` updates.
 - `v_h`: relative weight applied to the AiO penalty term (tuning knob).
 - `w_min`, `w_max`: enforce a sampling window on cash-on-hand when drawing minibatches; training batches will be sampled so that `w ∈ [w_min, w_max]`.
@@ -330,4 +330,3 @@ Field notes:
 - `verbose`: enables extra logging during training (includes periodic validation diagnostics such as `kt_mean`, `aio_mean` or `bcmc_mean`, and `max_abs_q`).
 
 If you want early stopping or checkpointing for long runs, consider adding those options under `solver` and wiring them into the training loop (`train_consumption_network!`) — I can add examples if you'd like.
-

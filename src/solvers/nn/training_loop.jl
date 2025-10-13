@@ -159,6 +159,16 @@ function solver_settings(
     bcmc_auto_N = Bool(get_option(opts, :bcmc_auto_N, false))
     bcmc_update_every = max(Int(get_option(opts, :bcmc_update_every, 10)), 1)
 
+    # If Auto-N is requested but no explicit budget provided, derive a
+    # default pairwise budget from the initial configuration to keep total
+    # work roughly constant across updates. We use the samples_per_epoch as a
+    # proxy for the minibatch size M and pairs ~ N(N-1)/2.
+    if bcmc_auto_N && bcmc_budget_T === nothing
+        pairs0 = max(div(n_mc * (n_mc - 1), 2), 1)
+        bcmc_budget_T = samples_per_epoch * pairs0
+        @info "Auto-N active without explicit budget: deriving bcmc_budget_T=$(bcmc_budget_T) from n_mc=$(n_mc) and M≈$(samples_per_epoch)"
+    end
+
     if objective === :euler_fb_bcmc
         if n_mc < 2
             throw(ArgumentError("objective :euler_fb_bcmc requires n_mc ≥ 2 (got $(n_mc))"))
@@ -733,23 +743,48 @@ function train_consumption_network!(
                             bcmc_val =
                                 hasproperty(aux, :bcmc_mean) ? getfield(aux, :bcmc_mean) :
                                 NaN
+                            n_eff =
+                                hasproperty(aux, :n_eff) ? getfield(aux, :n_eff) : missing
                             if hasproperty(aux, :gvar_mean)
-                                @printf(
-                                    "[VAL] Epoch %4d: kt_mean=%.6g bcmc_mean=%.6g gvar=%.6g max_abs_q=%.6g\n",
-                                    epoch,
-                                    aux.kt_mean,
-                                    bcmc_val,
-                                    getfield(aux, :gvar_mean),
-                                    aux.max_abs_q,
-                                )
+                                if n_eff === missing
+                                    @printf(
+                                        "[VAL] Epoch %4d: kt_mean=%.6g bcmc_mean=%.6g gvar=%.6g max_abs_q=%.6g\n",
+                                        epoch,
+                                        aux.kt_mean,
+                                        bcmc_val,
+                                        getfield(aux, :gvar_mean),
+                                        aux.max_abs_q,
+                                    )
+                                else
+                                    @printf(
+                                        "[VAL] Epoch %4d: kt_mean=%.6g bcmc_mean=%.6g gvar=%.6g N=%.0f max_abs_q=%.6g\n",
+                                        epoch,
+                                        aux.kt_mean,
+                                        bcmc_val,
+                                        getfield(aux, :gvar_mean),
+                                        Float64(n_eff),
+                                        aux.max_abs_q,
+                                    )
+                                end
                             else
-                                @printf(
-                                    "[VAL] Epoch %4d: kt_mean=%.6g bcmc_mean=%.6g max_abs_q=%.6g\n",
-                                    epoch,
-                                    aux.kt_mean,
-                                    bcmc_val,
-                                    aux.max_abs_q,
-                                )
+                                if n_eff === missing
+                                    @printf(
+                                        "[VAL] Epoch %4d: kt_mean=%.6g bcmc_mean=%.6g max_abs_q=%.6g\n",
+                                        epoch,
+                                        aux.kt_mean,
+                                        bcmc_val,
+                                        aux.max_abs_q,
+                                    )
+                                else
+                                    @printf(
+                                        "[VAL] Epoch %4d: kt_mean=%.6g bcmc_mean=%.6g N=%.0f max_abs_q=%.6g\n",
+                                        epoch,
+                                        aux.kt_mean,
+                                        bcmc_val,
+                                        Float64(n_eff),
+                                        aux.max_abs_q,
+                                    )
+                                end
                             end
                         else
                             # Default to AiO-style logging when active or when bcmc fields missing
