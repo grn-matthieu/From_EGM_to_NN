@@ -11,4 +11,5 @@ using .TestUtils
     include(joinpath(@__DIR__, "integration", "core_pipeline_tests.jl"))
     include(joinpath(@__DIR__, "integration", "simulation_analysis_tests.jl"))
     include(joinpath(@__DIR__, "integration", "nn_solver_tests.jl"))
+    include(joinpath(@__DIR__, "integration", "nn_bcmc_tests.jl"))
 end
