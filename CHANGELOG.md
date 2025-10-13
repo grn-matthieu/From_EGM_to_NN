@@ -1,3 +1,40 @@
+## [0.8.0] - 2025-10-13
+### Added
+- CSVAR model: new consumer-saving VAR variant with builders/helpers and configs.
+- EGM kernel: CSVAR wiring; integration now supports MC and Gauss–Hermite.
+- Projection kernel: CSVAR support.
+- Perturbation kernel: CSVAR support and graceful fallback for unsupported combos.
+- NN solver: CSVAR support end-to-end, incl. evaluation/diagnostics and objective auto-pick.
+- Method adapters: propagate tensor metadata; centralized warm-start/policy validation.
+- Utilities: helpers for CSVAR-shaped objects and shared method utilities.
+
+### Changed
+- API/Helpers: refactor `solve` into focused helpers; refactor `EGM.solve` helpers.
+- Validation: decomposed `validate_config` into clearer sections; configs updated to use Σ (Sigma).
+- Policy/value layout: VF module accepts matrix-shaped policies; warm start and policy layout updated.
+- Integration: factored EGM integration steps into the integration module; replaced placeholders with real MC + GH.
+- Style: CRRA parameter renamed from sigma to gamma for clarity.
+
+### Fixed
+- Determinism: enforced RNG and determinism rules across kernels; projection RNG handling corrected.
+- CSVAR parity: NN kernel now matches CS (non-VAR) outputs; d=1 CSVAR edge-cases handled in Perturbation.
+- Tensor grids: EGM kernel updated to operate on tensor grids; model adapters wire tensor grid when d>1 and expose metadata.
+- Gradients: removed array mutation patterns to keep AD safe in NN paths.
+- Tests/configs: baseline comparisons (N=1), config alignment, and tolerances tuned for CI.
+
+### Tests
+- Added unit tests for CSVAR utilities and model handling across solvers.
+- Added unit tests for EGM tensor kernel and comparisons CSVAR (d=1) vs CS.
+- Added integration tests for CSVAR solvers; refreshed test procedures.
+
+### Docs
+- README updates for CSVAR model and usage.
+- Cleaned deprecated release notes.
+
+### CI/Build/Chore
+- Manifest refresh (2025-10-12) and pre-commit housekeeping; removed deprecated scripts.
+- Lowered residual tolerance in CI smoke to stabilize runs.
+
 ## [0.7.0] - 2025-10-08
 - Refactor + change test procedure to match with higher standards
 - Clean the NN repo for pollution in the solvers; now yields acceptable results
