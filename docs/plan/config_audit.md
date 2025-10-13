@@ -88,7 +88,7 @@ EGM method options (from `src/methods/EGM.jl`):
 
 NN method options (from `src/methods/NN.jl` and `src/solvers/nn/`):
 
-- `solver.objective`: default `:euler_fb_aio`; `:euler` restores the legacy Euler residual loss.
+- `solver.objective`: default `:euler_fb_aio`; `:euler` restores the legacy Euler residual loss. New: `:euler_fb_bcmc` uses the bias-corrected Monte Carlo (bc-MC) operator with `n_mc ≥ 2` shocks per state.
 - `solver.v_h`: default `0.5`, clamped to `[0.2, 5.0]` for stability.
 - `solver.w_min`: default `0.1` – lower bound on cash-on-hand samples drawn for training.
 - `solver.w_max`: default `4.0` – upper bound on sampled cash-on-hand.
@@ -319,13 +319,15 @@ solver:
 Field notes:
 - `method`: must be `NN` to select the neural-network solver adapter.
 - `epochs`, `batch`, `lr`: standard training hyperparameters (number of epochs, minibatch size, and learning rate).
-- `objective`: selects the loss used during training. `euler_fb_aio` selects the Fischer–Burmeister AiO objective implemented in the NN kernel.
+- `objective`: selects the loss used during training. `euler_fb_aio` selects the Fischer–Burmeister AiO objective (N=2). `euler_fb_bcmc` selects the bias-corrected Monte Carlo (bc-MC) estimator that generalizes AiO to `N ≥ 2` shocks.
+  - `n_mc`: number of shocks `N` used in bc-MC/AiO. Must be `≥ 2` for bc-MC.
+  - `bcmc_budget_T` (optional): total function-evaluation budget `T`. The solver selects an effective `N` so that `M⋅⌊N(N-1)/2⌋ ≈ T` where `M` is the minibatch size.
+  - `bcmc_auto_N` (optional): reserved for automatic variance-minimizing `N` selection.
+  - `bcmc_update_every` (optional): epochs between auto-`N` updates.
 - `v_h`: relative weight applied to the AiO penalty term (tuning knob).
 - `w_min`, `w_max`: enforce a sampling window on cash-on-hand when drawing minibatches; training batches will be sampled so that `w ∈ [w_min, w_max]`.
 - `sigma_shocks`: optional override for the shock standard deviation used during training (if provided it will be used instead of the model's default shock std).
-- `verbose`: enables extra logging during training (includes periodic validation diagnostics such as `kt_mean`, `aio_mean`, `max_abs_q`).
+- `verbose`: enables extra logging during training (includes periodic validation diagnostics such as `kt_mean`, `aio_mean` or `bcmc_mean`, and `max_abs_q`).
 
 If you want early stopping or checkpointing for long runs, consider adding those options under `solver` and wiring them into the training loop (`train_consumption_network!`) — I can add examples if you'd like.
-
-
 
