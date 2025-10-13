@@ -1,9 +1,10 @@
 module CSVarUtils
 
-using LinearAlgebra: Cholesky, Symmetric, cholesky, mul!
+using LinearAlgebra: Cholesky, Symmetric, cholesky, mul!, diag
 using Random: AbstractRNG, default_rng, randn, randn!
 
 export csvar_income,
+    csvar_component_log_means,
     csvar_state_matrix,
     csvar_state_income,
     csvar_state_incomes,
@@ -60,28 +61,59 @@ end
 """
     csvar_income(y)
 
-Return current-period income implied by state `y`. For vector states the income
-is the mean of the components. Batched states (one per column) are handled when
-`y` is a matrix, returning the corresponding income for each column.
+Return current-period income implied by state `y`.
+
+- Scalar states: interpreted as log income; returns `exp(y)`.
+- Vector states: income is the sum of `exp` of each component.
+- Matrix states (columns = state vectors): return the column-wise sum of `exp`.
 """
-csvar_income(y::Number) = float(y)
+csvar_income(y::Number) = exp(float(y))
 
 function csvar_income(y::AbstractVector)
     n = length(y)
     n > 0 ||
         throw(ArgumentError("csvar_income requires a non-empty state vector, got length 0"))
-    return sum(y) / n
+    return sum(exp.(y))
 end
 
 function csvar_income(y::AbstractMatrix)
     d = size(y, 1)
     d > 0 ||
         throw(ArgumentError("csvar_income requires at least one state dimension, got 0"))
-    totals = sum(y; dims = 1)
-    return vec(totals) ./ d
+    totals = sum(exp.(y); dims = 1)
+    return vec(totals)
 end
 
 csvar_income(states::AbstractVector{<:AbstractVector}) = map(csvar_income, states)
+
+"""
+    csvar_component_log_means(params)
+
+Given CSVAR parameters with target component incomes `params.y` (in levels) and
+covariance `params.Σ`, return the implied log means μ such that
+`E[exp(y_i)] = params.y[i]` for each component.
+"""
+function csvar_component_log_means(params)
+    targets =
+        hasproperty(params, :y) && params.y isa AbstractVector ?
+        Float64.(collect(params.y)) : Float64[Float64(getproperty(params, :y))]
+    y_dim = length(targets)
+    σ2 = zeros(Float64, y_dim)
+    if hasproperty(params, :Σ) && params.Σ !== nothing
+        Σ = Matrix{Float64}(params.Σ)
+        σ2 = diag(Σ)
+    end
+    μ = Vector{Float64}(undef, y_dim)
+    for i = 1:y_dim
+        target = targets[i]
+        target <= 0 && error(
+            "csvar_component_log_means requires positive income targets, got $(target)",
+        )
+        var_i = i <= length(σ2) ? max(σ2[i], 0.0) : 0.0
+        μ[i] = log(target) - 0.5 * var_i
+    end
+    return μ
+end
 
 """
     csvar_state_matrix(y, y_dim)

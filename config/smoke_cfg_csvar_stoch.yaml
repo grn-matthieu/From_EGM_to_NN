@@ -2,20 +2,20 @@ model:
   name: cs_vec
 
 params:
-  β: 0.96
+  β: 0.9
   γ: 2.0
   r: 0.02
   y: [0.6, 0.4]
   A:
-    - [0, 0]
-    - [0, 0]
+    - [0.9, 0]
+    - [0, 0.9]
   Σ:
-    - [0.5, 0.2]
-    - [0.2, 0.5]
+    - [0.05, 0.002]
+    - [0.002, 0.05]
 grids:
   Na: 40
   a_min: 0.0
-  a_max: 15.0
+  a_max: 10.0
 
 utility:
   u_type: CRRA
@@ -46,15 +46,15 @@ solver:
     epochs: 5000
     batch: 16
     lr: 1.0e-3
-    hid1: 16
-    hid2: 16
+    hid1: 64
+    hid2: 64
     n_mc: 16
     resample_every: 1
     samples_per_epoch: 64
     objective: euler_fb_bcmc
     v_h: 0.5
     w_min: 0.1
-    w_max: 4.0
+    w_max: 10.0
     sigma_shocks: null
     target_loss: 1.0e-4
     use_cuda: false

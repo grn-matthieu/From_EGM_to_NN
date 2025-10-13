@@ -13,7 +13,7 @@ using ..PolicyUtils: clamp_policy!, compute_binding_tolerance, rmse_nonbinding
 using ..SolverPlaceholders: build_placeholder_solution
 using ..SolverIntegration: integrate_expectation, discrete_expectation
 using Random: default_rng
-using ..CSVarUtils: csvar_income
+using ..CSVarUtils: csvar_income, csvar_component_log_means
 using Statistics: mean
 using ForwardDiff
 using LinearAlgebra
@@ -196,7 +196,7 @@ function solve_perturbation_det(
     Na = g[:a].N
     bind_tol = compute_binding_tolerance(a_min, a_max, Na; floor = DEFAULT_BINDING_TOL)
     R = 1 + p.r
-    ȳ = hasproperty(p, :y_dim) ? csvar_income(p.y) : p.y
+    ȳ = hasproperty(p, :y_dim) ? csvar_income(csvar_component_log_means(p)) : p.y
 
     ā = a_bar === nothing ? _steady_state_asset(p, g) : a_bar
     c̄ = ȳ + p.r * ā
@@ -450,7 +450,7 @@ function solve_perturbation_csvar(
     local_rng = rng === nothing ? default_rng() : rng
 
     if maximum(abs.(S.Σ)) <= eps(eltype(S.Σ))
-        p_det = merge(p, (y = csvar_income(p.y),))
+        p_det = merge(p, (y = csvar_income(csvar_component_log_means(p)),))
         p_det = hasproperty(p_det, :y_dim) ? merge(p_det, (y_dim = 1,)) : p_det
         return solve_perturbation_det(
             p_det,
@@ -472,7 +472,7 @@ function solve_perturbation_csvar(
     Na = g[:a].N
     bind_tol = compute_binding_tolerance(a_min, a_max, Na; floor = DEFAULT_BINDING_TOL)
 
-    ȳ_vec = Float64.(p.y)
+    ȳ_vec = Float64.(csvar_component_log_means(p))
     d = length(ȳ_vec)
     ȳ = csvar_income(ȳ_vec)
 

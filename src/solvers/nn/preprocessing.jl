@@ -2,6 +2,7 @@ import ChainRulesCore: @non_differentiable
 using CUDA: cu, CuArray, CUDA
 using Statistics: mean
 using LinearAlgebra: diag
+using ..CSVarUtils: csvar_component_log_means
 
 struct ScalarParams
     γ::Float64
@@ -19,12 +20,17 @@ struct FeatureScaler
     w_min::Float32
     w_range::Float32
     has_shocks::Bool
+    csvar_mode::Bool
 end
 
 function _income_bounds(P, S)
-    μ_vec =
-        hasproperty(P, :y) && P.y isa AbstractVector ? Float64.(collect(P.y)) :
-        [Float64(getfield(P, :y))]
+    if hasproperty(P, :A) && hasproperty(P, :Σ)
+        μ_vec = csvar_component_log_means(P)
+    else
+        μ_vec =
+            hasproperty(P, :y) && P.y isa AbstractVector ? Float64.(collect(P.y)) :
+            [Float64(getfield(P, :y))]
+    end
     d = length(μ_vec)
     lower = Vector{Float64}(undef, d)
     upper = Vector{Float64}(undef, d)
@@ -62,11 +68,20 @@ end
 function FeatureScaler(P, G, S, settings)
     lower, upper = _income_bounds(P, S)
     y_dim = length(lower)
-    mean_lower = mean(lower)
-    mean_upper = mean(upper)
+    is_csvar = hasproperty(P, :A) && hasproperty(P, :Σ)
+    if is_csvar
+        income_lower = sum(exp.(lower))
+        income_upper = sum(exp.(upper))
+    else
+        income_lower = y_dim > 1 ? sum(lower) : mean(lower)
+        income_upper = y_dim > 1 ? sum(upper) : mean(upper)
+    end
+    mean_lower = income_lower
+    mean_upper = income_upper
     mean_min = Float32(mean_lower)
     mean_range = max(Float32(mean_upper - mean_lower), 1.0f-6)
-    if y_dim > 1
+    include_components = is_csvar ? true : y_dim > 1
+    if include_components
         y_min_vec = Float32.(lower)
         y_range_vec = Float32.(max.(upper - lower, fill(1e-6, y_dim)))
     else
@@ -86,6 +101,7 @@ function FeatureScaler(P, G, S, settings)
         w_min,
         w_range,
         settings.has_shocks,
+        is_csvar,
     )
 end
 
@@ -145,7 +161,11 @@ function build_feature_batch_from_states(
     y_dim > 0 || error("build_feature_batch_from_states requires positive state dimension")
     feature_dim = y_dim + 2
     X = Matrix{Float32}(undef, feature_dim, n)
-    mean_vals = vec(sum(y_components; dims = 1)) ./ y_dim
+    if scaler.csvar_mode
+        mean_vals = vec(sum(exp.(y_components); dims = 1))
+    else
+        mean_vals = vec(sum(y_components; dims = 1)) ./ y_dim
+    end
     X[1, :] .= Float32.(mean_vals)
     for j = 1:y_dim
         X[1+j, :] .= Float32.(y_components[j, :])
@@ -172,7 +192,10 @@ function denormalize_feature_batch(scaler::FeatureScaler, batch::AbstractMatrix)
         ((B .+ one(T)) ./ T(2)) .* r .+ m        # retourne une nouvelle matrice
     end
 
-    return mean_vals, comps, T.(batch[end, :])
+    # Denormalize cash-on-hand as well (was mistakenly returned in [-1, 1])
+    w_vals = ((batch[end, :] .+ one(T)) ./ T(2)) .* T(scaler.w_range) .+ T(scaler.w_min)
+
+    return mean_vals, comps, w_vals
 end
 
 # GPU in-place version without views nor scalar indexing

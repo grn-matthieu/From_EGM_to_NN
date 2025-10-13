@@ -15,7 +15,7 @@ using ..PolicyUtils:
     clamp_policy!, compute_binding_tolerance, init_consumption_det, rmse_nonbinding
 using ..CommonValidators: is_nondec
 using ..SolverIntegration: integrate_expectation, discrete_expectation
-using ..CSVarUtils: csvar_income
+using ..CSVarUtils: csvar_income, csvar_component_log_means
 using Statistics: mean
 using Random: default_rng
 using LinearAlgebra: dot
@@ -70,7 +70,8 @@ function solve_projection_det(
     bind_tol = compute_binding_tolerance(a_min, a_max, Na; floor = DEFAULT_BINDING_TOL)
     β = getproperty(model_params, Β_SYM)
     income =
-        hasproperty(model_params, :y_dim) ? csvar_income(model_params.y) : model_params.y
+        hasproperty(model_params, :y_dim) ?
+        csvar_income(csvar_component_log_means(model_params)) : model_params.y
     R = 1 + model_params.r
 
     candidate_orders = isempty(orders) ? Int[Na-1] : clamp_orders(orders, Na - 1)
@@ -411,7 +412,8 @@ function solve_projection_csvar(
     a_val = gauss_lobatto_or_midpoint(Nval, a_min, a_max)
     bind_tol = compute_binding_tolerance(a_min, a_max, Na; floor = DEFAULT_BINDING_TOL)
 
-    income = csvar_income(model_params.y)
+    log_means = Float64.(csvar_component_log_means(model_params))
+    income = csvar_income(log_means)
     β = getproperty(model_params, Β_SYM)
     R = 1 + model_params.r
 
@@ -436,7 +438,7 @@ function solve_projection_csvar(
     cmin = 1e-12
     available_grid = income .+ R .* a_grid .- a_min
 
-    y_state = model_params.y
+    y_state = log_means
 
     for order in candidate_orders
         B = B_cache[:, 1:(order+1)]

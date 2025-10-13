@@ -4,6 +4,7 @@ import Zygote
 import Adapt
 using Lux: fmap
 using ChainRulesCore: ignore_derivatives
+using LinearAlgebra: diag
 
 include("preprocessing.jl")
 
@@ -129,7 +130,10 @@ function detect_cuda_preference(objective, opts)
 end
 
 function solver_settings(
-    opts;
+    opts,
+    P = nothing,
+    G = nothing,
+    S = nothing;
     has_shocks::Bool = false,
     objective_default::Symbol = :euler_fb_aio,
 )
@@ -141,14 +145,66 @@ function solver_settings(
     # resample every epoch by default for stability
     resample_interval = max(Int(get_option(opts, :resample_every, 1)), 0)
     target_loss = Float32(get_option(opts, :target_loss, 2e-4))
-    patience = max(Int(get_option(opts, :patience, 200)), 0)
+    # Default: disable early stopping unless explicitly requested
+    patience = max(Int(get_option(opts, :patience, 0)), 0)
     hid1 = max(Int(get_option(opts, :hid1, 128)), 1)
     hid2 = max(Int(get_option(opts, :hid2, 128)), 1)
     objective = Symbol(get_option(opts, :objective, objective_default))
     # clamp v_h to a broader safe range [0.2, 5.0] to allow more tuning flexibility
     v_h = clamp(Float64(get_option(opts, :v_h, 0.5)), 0.2, 5.0)
-    w_min = Float32(get_option(opts, :w_min, 0.1))
-    w_max = Float32(get_option(opts, :w_max, 4.0))
+    # Auto-derive a sensible cash-on-hand range if not provided
+    w_min_opt = get_option(opts, :w_min, nothing)
+    w_max_opt = get_option(opts, :w_max, nothing)
+    # Compute implied w-range from asset bounds and income variability when possible
+    function income_bounds(params, shocks)
+        if params === nothing
+            return (0.0, 1.0)
+        end
+        # CSVAR: components follow log-Gaussian process. Use log means adjusted for variance.
+        if hasproperty(params, :A) && hasproperty(params, :Σ)
+            μ_log = csvar_component_log_means(params)
+            Σ = Matrix{Float64}(params.Σ)
+            σ = sqrt.(max.(diag(Σ), 0.0))
+            lower = sum(exp.(μ_log .- 3 .* σ))
+            upper = sum(exp.(μ_log .+ 3 .* σ))
+            return (lower, upper)
+        end
+        # AR(1) log-income (stochastic): y is log-mean, use exp(μ ± 3σ)
+        if shocks !== nothing || has_shocks
+            μ = hasproperty(params, :y) ? Float64(getfield(params, :y)) : 0.0
+            σ = hasproperty(params, :σ_shock) ? Float64(getfield(params, :σ_shock)) : 0.0
+            return (exp(μ - 3σ), exp(μ + 3σ))
+        end
+        # Deterministic: take income level(s)
+        if hasproperty(params, :y) && params.y isa AbstractVector
+            return (
+                mean(exp.(Float64.(collect(params.y)))),
+                mean(exp.(Float64.(collect(params.y)))),
+            )
+        else
+            return (exp(Float64(getfield(params, :y))), exp(Float64(getfield(params, :y))))
+        end
+    end
+    function w_bounds(params, grids, shocks)
+        (inc_lo, inc_hi) = income_bounds(params, shocks)
+        if grids === nothing
+            return (inc_lo, inc_hi)
+        end
+        a_min = Float64(getproperty(grids[:a], :min))
+        a_max = Float64(getproperty(grids[:a], :max))
+        Rg =
+            1.0 + Float64(
+                get_option(
+                    params,
+                    :r,
+                    hasproperty(params, :r) ? getfield(params, :r) : 0.0,
+                ),
+            )
+        return (Rg * a_min + inc_lo, Rg * a_max + inc_hi)
+    end
+    (auto_w_min, auto_w_max) = w_bounds(P, G, S)
+    w_min = Float32(w_min_opt === nothing ? auto_w_min : Float64(w_min_opt))
+    w_max = Float32(w_max_opt === nothing ? auto_w_max : Float64(w_max_opt))
     samples_per_epoch = max(Int(get_option(opts, :samples_per_epoch, 64)), 1)
     sigma_shocks = get_option(opts, :sigma_shocks, nothing)
     use_cuda = detect_cuda_preference(objective, opts)
@@ -458,6 +514,8 @@ function flatten_sum_squares(x)
     end
 end
 
+using ..CSVarUtils: csvar_component_log_means
+
 function create_training_batch(
     G,
     S,
@@ -488,12 +546,25 @@ function create_training_batch(
 
     Rg = 1.0f0 + Float32(P_resid.r)
     base_P = P === nothing ? P_resid : P
-    y_levels =
-        hasproperty(base_P, :y) && base_P.y isa AbstractVector ?
-        Float32.(collect(base_P.y)) : Float32[Float32(getfield(base_P, :y))]
-    y_dim = length(y_levels)
-    extra_cols = y_dim > 1 ? y_dim : 0
-    feature_dim = 1 + extra_cols + 1
+    is_csvar = hasproperty(base_P, :A) && hasproperty(base_P, :Σ)
+    if is_csvar
+        log_means = csvar_component_log_means(base_P)
+        y_dim = length(log_means)
+        extra_cols = y_dim
+        income_targets =
+            hasproperty(base_P, :y) && base_P.y isa AbstractVector ?
+            Float64.(collect(base_P.y)) : Float64[Float64(getfield(base_P, :y))]
+        base_income = sum(income_targets)
+        feature_dim = 1 + extra_cols + 1
+    else
+        y_levels =
+            hasproperty(base_P, :y) && base_P.y isa AbstractVector ?
+            Float32.(collect(base_P.y)) : Float32[Float32(getfield(base_P, :y))]
+        y_dim = length(y_levels)
+        extra_cols = y_dim > 1 ? y_dim : 0
+        feature_dim = 1 + extra_cols + 1
+        base_income = mean(y_levels)
+    end
     a_min = Float32(G[:a].min)
     a_max = Float32(G[:a].max)
 
@@ -517,25 +588,31 @@ function create_training_batch(
         m = max(want - filled, 4096)
         a_draw = rand(rng, Float32, m) .* (a_max - a_min) .+ a_min
         z_draw = rand(rng, Float32, m) .* (z_max - z_min) .+ z_min
-        if extra_cols > 0 &&
+        if is_csvar &&
            hasproperty(base_P, :Σ) &&
            !isnothing(S) &&
            hasproperty(S, :process) &&
            S.process == :gaussian_linear
             Σ = Matrix{Float64}(base_P.Σ)
             chol = cholesky(Symmetric(Σ), check = false).L
-            μ_vec = Float64.(y_levels)
             comps_tmp = Matrix{Float32}(undef, extra_cols, m)
             @inbounds for i = 1:m
                 ε = randn(rng, Float64, y_dim)
-                y_vec = μ_vec .+ chol * ε
+                y_vec = log_means .+ chol * ε
                 comps_tmp[:, i] .= Float32.(y_vec)
             end
-            mean_draw = vec(mean(comps_tmp; dims = 1))
+            mean_draw = vec(sum(exp.(comps_tmp); dims = 1))
         else
-            mean_draw = fill(Float32(mean(y_levels)), m)
             if extra_cols > 0
-                comps_tmp = repeat(reshape(Float32.(y_levels), extra_cols, 1), 1, m)
+                if is_csvar
+                    comps_tmp = repeat(reshape(Float32.(log_means), extra_cols, 1), 1, m)
+                    mean_draw = vec(sum(exp.(comps_tmp); dims = 1))
+                else
+                    comps_tmp = repeat(reshape(Float32.(y_levels), extra_cols, 1), 1, m)
+                    mean_draw = vec(mean(comps_tmp; dims = 1))
+                end
+            else
+                mean_draw = fill(Float32(base_income), m)
             end
         end
         w_draw = @. Rg * a_draw + Float32(mean_draw)
@@ -815,7 +892,12 @@ function train_consumption_network!(
                 @warn "Validation logging failed" error = err
             end
         end
-        if best_loss ≤ settings.target_loss && stall_epochs ≥ settings.patience
+        # Early stop only when patience > 0 and the loss has stayed below the
+        # target for at least `patience` epochs. With patience==0 (default), run
+        # for the full number of epochs.
+        if settings.patience > 0 &&
+           best_loss ≤ settings.target_loss &&
+           stall_epochs ≥ settings.patience
             stored_state = maybe_to_host(best_state, settings)
             return TrainingResult(
                 stored_state,

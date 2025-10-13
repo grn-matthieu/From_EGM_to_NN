@@ -174,8 +174,31 @@ function solve_nn(model; opts = nothing, rng = nothing)
     has_shocks = !isnothing(S) && !is_csvar
     objective_default =
         is_csvar ? :euler_residual : has_shocks ? :euler_fb_aio : :euler_residual
+
+    # If provided w-range misses most of the model's cash-on-hand grid, expand it
+    X_tmp, w_grid_model = det_forward_inputs(G, P)
+    w_lo_cfg = hasproperty(opts, :w_min) ? getfield(opts, :w_min) : nothing
+    w_hi_cfg = hasproperty(opts, :w_max) ? getfield(opts, :w_max) : nothing
+    use_opts = opts
+    if w_lo_cfg !== nothing && w_hi_cfg !== nothing
+        in_win =
+            (w_grid_model .>= Float32(w_lo_cfg)) .& (w_grid_model .<= Float32(w_hi_cfg))
+        frac = sum(in_win) / max(length(in_win), 1)
+        if frac < 0.8
+            auto_lo = minimum(w_grid_model)
+            auto_hi = maximum(w_grid_model)
+            @info "Expanding NN training w-range to cover grid" cfg =
+                (w_min = w_lo_cfg, w_max = w_hi_cfg) auto =
+                (w_min = auto_lo, w_max = auto_hi) frac_in_window = frac
+            use_opts = merge(opts, (w_min = Float64(auto_lo), w_max = Float64(auto_hi)))
+        end
+    end
+
     settings = solver_settings(
-        opts;
+        use_opts,
+        P,
+        G,
+        S;
         has_shocks = has_shocks,
         objective_default = objective_default,
     )
@@ -308,7 +331,8 @@ function loss_euler_fb_aio_ar1!(chain, ps, st, batch, model_cfg, rng)
     z0 = log.(y0) .- μ
     out, st1 = Lux.apply(chain, batch, ps, st)
     c0 = vec(phi_to_consumption(out[:Φ], w0; min_c = C_MIN))
-    h = T.(vec(ensure_row(out[:h])))
+    # eta is a non-negative, dimensionless scaled multiplier proxy (≈ h/u'(c0))
+    eta = T.(vec(ensure_row(out[:h])))
     a_term = @. one(T) - c0 / w0
 
     ρ = T(P.ρ_shock)
@@ -355,11 +379,14 @@ function loss_euler_fb_aio_ar1!(chain, ps, st, batch, model_cfg, rng)
     q1 = @. β * Rg * uprime(c1) / uprime(c0)
     q2 = @. β * Rg * uprime(c2) / uprime(c0)
 
-    fb_term = fb(a_term, @. one(T) - h)
+    # Complementarity between non-negativity (a_term >= 0) and multiplier eta >= 0
+    fb_term = fb(a_term, eta)
     kt = @. fb_term^2
-    gh1 = clamp.(q1 .- h, -T(1e3), T(1e3))
-    gh2 = clamp.(q2 .- h, -T(1e3), T(1e3))
-    aio_pen = (gh1 .* gh2) .^ 2
+    # Euler-KKT residuals r = 1 - q - eta
+    r1 = @. one(T) - q1 - eta
+    r2 = @. one(T) - q2 - eta
+    # Use product-squared to align with bc-MC N=2 equivalence
+    aio_pen = (r1 .* r2) .^ 2
 
     v_h = hasproperty(model_cfg, :v_h) ? T(getfield(model_cfg, :v_h)) : one(T)
     loss_vec = kt .+ v_h .* aio_pen
@@ -389,7 +416,7 @@ function loss_euler_fb_aio_csvar!(chain, ps, st, batch, model_cfg, rng)
 
     out, st1 = Lux.apply(chain, batch, ps, st)
     c0 = vec(phi_to_consumption(out[:Φ], w0; min_c = C_MIN))
-    h = T.(vec(ensure_row(out[:h])))
+    eta = T.(vec(ensure_row(out[:h])))
     a_term = @. one(T) - c0 / w0
     a_curr = @. w0 - c0
 
@@ -434,11 +461,11 @@ function loss_euler_fb_aio_csvar!(chain, ps, st, batch, model_cfg, rng)
     q1 = @. β * Rg * uprime(c1) / uprime(c0)
     q2 = @. β * Rg * uprime(c2) / uprime(c0)
 
-    fb_term = fb(a_term, @. one(T) - h)
+    fb_term = fb(a_term, eta)
     kt = @. fb_term^2
-    gh1 = clamp.(q1 .- h, -T(1e3), T(1e3))
-    gh2 = clamp.(q2 .- h, -T(1e3), T(1e3))
-    aio_pen = (gh1 .* gh2) .^ 2
+    r1 = @. one(T) - q1 - eta
+    r2 = @. one(T) - q2 - eta
+    aio_pen = (r1 .* r2) .^ 2
 
     loss_vec = kt .+ v_h .* aio_pen
     max_abs_q = maximum(abs.(vcat(q1, q2)))
@@ -471,7 +498,7 @@ function loss_euler_fb_bcmc_ar1!(chain, ps, st, batch, model_cfg, rng)
 
     out, st1 = Lux.apply(chain, batch, ps, st)
     c0 = vec(phi_to_consumption(out[:Φ], w0; min_c = C_MIN))
-    h = T.(vec(ensure_row(out[:h])))
+    eta = T.(vec(ensure_row(out[:h])))
     a_term = @. one(T) - c0 / w0
     a_curr = @. w0 - c0
 
@@ -511,14 +538,14 @@ function loss_euler_fb_bcmc_ar1!(chain, ps, st, batch, model_cfg, rng)
     σ_shocks = T(P.σ_shock)
     v_h = hasproperty(model_cfg, :v_h) ? T(getfield(model_cfg, :v_h)) : one(T)
 
-    fb_term = fb(a_term, @. one(T) - h)
+    fb_term = fb(a_term, eta)
     kt = @. fb_term^2
 
     # Non-mutating accumulators (same shape as h)
-    g_sum = zero.(h)        # accumulates (g^2) across draws
-    g_sumsq = zero.(h)      # accumulates (g^2)^2 across draws
-    r_sum = zero.(h)        # accumulates g across draws (for variance diagnostics)
-    r_sumsq = zero.(h)      # accumulates g^2 across draws (for variance diagnostics)
+    g_sum = zero.(eta)        # accumulates (g^2) across draws
+    g_sumsq = zero.(eta)      # accumulates (g^2)^2 across draws
+    r_sum = zero.(eta)        # accumulates g across draws (for variance diagnostics)
+    r_sumsq = zero.(eta)      # accumulates g^2 across draws (for variance diagnostics)
     max_abs_q = zero(T)
 
     component_levels =
@@ -557,7 +584,7 @@ function loss_euler_fb_bcmc_ar1!(chain, ps, st, batch, model_cfg, rng)
         qn = β .* Rg .* uprime(cn) ./ uprime(c0)
         max_abs_q = max(max_abs_q, maximum(abs.(qn)))
 
-        residual = clamp.(qn .- h, -T(1e3), T(1e3))
+        residual = @. one(T) - qn - eta
         residual_sq = residual .* residual
         g_sum = g_sum .+ residual_sq
         g_sumsq = g_sumsq .+ residual_sq .* residual_sq
@@ -620,7 +647,7 @@ function loss_euler_fb_bcmc_csvar!(chain, ps, st, batch, model_cfg, rng)
 
     out, st1 = Lux.apply(chain, batch, ps, st)
     c0 = vec(phi_to_consumption(out[:Φ], w0; min_c = C_MIN))
-    h = T.(vec(ensure_row(out[:h])))
+    eta = T.(vec(ensure_row(out[:h])))
     a_term = @. one(T) - c0 / w0
     a_curr = @. w0 - c0
 
@@ -661,13 +688,13 @@ function loss_euler_fb_bcmc_csvar!(chain, ps, st, batch, model_cfg, rng)
     chol = cholesky(Symmetric(Σ), check = false)
     L = Matrix{T}(chol.L)
 
-    fb_term = fb(a_term, @. one(T) - h)
+    fb_term = fb(a_term, eta)
     kt = @. fb_term^2
 
-    g_sum = zero.(h)
-    g_sumsq = zero.(h)
-    r_sum = zero.(h)
-    r_sumsq = zero.(h)
+    g_sum = zero.(eta)
+    g_sumsq = zero.(eta)
+    r_sum = zero.(eta)
+    r_sumsq = zero.(eta)
     max_abs_q = zero(T)
 
     for draw = 1:N
@@ -688,7 +715,7 @@ function loss_euler_fb_bcmc_csvar!(chain, ps, st, batch, model_cfg, rng)
         q_next = β .* Rg .* uprime(c_next) ./ uprime(c0)
         max_abs_q = max(max_abs_q, maximum(abs.(q_next)))
 
-        residual = clamp.(q_next .- h, -T(1e3), T(1e3))
+        residual = @. one(T) - q_next - eta
         residual_sq = residual .* residual
         g_sum = g_sum .+ residual_sq
         g_sumsq = g_sumsq .+ residual_sq .* residual_sq

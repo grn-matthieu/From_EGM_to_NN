@@ -10,7 +10,7 @@ using Random
 using Random: randn!
 using Lux: fmap
 using LinearAlgebra: cholesky, mul!, Symmetric
-using ..CSVarUtils: csvar_income
+using ..CSVarUtils: csvar_income, csvar_component_log_means
 
 # Local sigmoid function to avoid NNlib dependency
 @inline sigmoid(x) = 1 / (1 + exp(-x))
@@ -190,9 +190,7 @@ function evaluate_csvar(
     U,
     rng::AbstractRNG,
 )
-    y_state =
-        hasproperty(P, :y) && P.y isa AbstractVector ? Float32.(collect(P.y)) :
-        Float32[Float32(P_resid.y)]
+    y_state = Float32.(csvar_component_log_means(P))
     y_dim = length(y_state)
     y_dim > 0 || error("CSVAR evaluation requires a positive state dimension")
 
@@ -291,7 +289,10 @@ function evaluate_solution(
     local_settings =
         settings === nothing ?
         solver_settings(
-            nothing;
+            nothing,
+            P,
+            G,
+            S;
             has_shocks = scaler.has_shocks,
             objective_default = is_csvar_problem(P, S) ? :euler_residual :
                                 (scaler.has_shocks ? :euler_fb_aio : :euler_residual),

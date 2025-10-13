@@ -7,6 +7,7 @@ remains focused on the training logic.
 
 using CUDA: cu
 using Statistics: mean
+using ..CSVarUtils: csvar_component_log_means
 
 # -- Generic helpers ---------------------------------------------------------
 
@@ -87,19 +88,31 @@ stoch_loss(resid) = float32_loss(sum(abs2, resid))
 function det_forward_inputs(G, P_full)
     a_grid_f32 = float32_vector(G[:a].grid)
     Rg = 1.0f0 + Float32(P_full.r)
-    y_logs =
-        hasproperty(P_full, :y) && P_full.y isa AbstractVector ?
-        Float32.(collect(P_full.y)) : Float32[Float32(getfield(P_full, :y))]
-    y_levels = exp.(y_logs)
-    mean_income = mean(y_levels)
-    extra_cols = length(y_levels) > 1 ? length(y_levels) : 0
+    # Interpret income depending on model type:
+    # - AR(1) log-income: `y` is a log level -> use exp(y)
+    # - CSVAR: `y` components are levels already -> no exp
+    is_csvar = hasproperty(P_full, :A) && hasproperty(P_full, :Σ)
+    if is_csvar
+        log_means = Float32.(csvar_component_log_means(P_full))
+        mean_income = sum(exp.(log_means))
+        component_rows = log_means
+    else
+        y_raw =
+            hasproperty(P_full, :y) && P_full.y isa AbstractVector ?
+            Float32.(collect(P_full.y)) : Float32[Float32(getfield(P_full, :y))]
+        component_rows = y_raw
+        mean_income = mean(exp.(y_raw))  # deterministic AR(1) path uses exp(y)
+    end
+    extra_cols =
+        is_csvar ? length(component_rows) :
+        (length(component_rows) > 1 ? length(component_rows) : 0)
     feature_dim = 1 + extra_cols + 1
     w_grid = @. Rg * a_grid_f32 + Float32(mean_income)
     X = Matrix{Float32}(undef, feature_dim, length(a_grid_f32))
     X[1, :] .= Float32(mean_income)
     if extra_cols > 0
         for j = 1:extra_cols
-            X[1+j, :] .= y_levels[j]
+            X[1+j, :] .= component_rows[j]
         end
     end
     X[end, :] .= w_grid

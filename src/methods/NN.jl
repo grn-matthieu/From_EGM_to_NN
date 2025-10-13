@@ -25,6 +25,7 @@ function build_nn_method(cfg::NamedTuple)
     nn_cfg = solver_cfg.nn
     return NNMethod((
         name = maybe(cfg, :method, solver_cfg.method),
+        tol = maybe(cfg, :tol, solver_cfg.tol),
         # Paper defaults: 50_000 epochs, ADAM lr = 1e-3, batch = 64
         epochs = nn_cfg.epochs,
         batch = nn_cfg.batch,
@@ -75,6 +76,9 @@ function solve(
     ee_vec = ee isa AbstractMatrix ? vec(maximum(ee, dims = 2)) : ee
     ee_mat = ee isa AbstractMatrix ? ee : nothing
     ee_mean = ee_mat === nothing ? mean_abs_error(ee_vec) : mean_abs_error(ee_mat)
+    # Determine convergence using Euler error vs global solver tolerance when available
+    tol = hasproperty(method.opts, :tol) ? getfield(method.opts, :tol) : nothing
+    conv_flag = tol === nothing ? false : (isfinite(ee_mean) && ee_mean ≤ tol)
     delta_pol = hasproperty(sol, :delta_pol) ? sol.delta_pol : missing
     agrid = g.a.grid
 
@@ -116,9 +120,10 @@ function solve(
     metadata = Dict{Symbol,Any}(
         :iters => sol.iters,
         :max_it => sol.opts.epochs,
-        :converged => sol.converged,
+        # Override kernel's convergence with Euler-error based criterion
+        :converged => conv_flag,
         :max_resid => sol.max_resid,
-        :tol => nothing,
+        :tol => tol,
         :delta_pol => delta_pol,
         :mean_ee => ee_mean,
         :julia_version => string(VERSION),
