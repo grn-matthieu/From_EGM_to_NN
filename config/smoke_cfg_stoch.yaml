@@ -48,14 +48,17 @@ solver:
     hid1: 64
     hid2: 64
     samples_per_epoch: 2048
-    objective: euler_fb_aio
+    objective: euler_fb_bcmc
     v_h: 2.0
     w_min: 0.1
     w_max: 4.0
     sigma_shocks: 0.1
     target_loss: 1e-10
     use_cuda: false
-    n_mc: 32
+    n_mc: 16
+    bcmc_auto_N: false
+    bcmc_budget_T: null
+    bcmc_update_every: 10
 
 shocks:
   active: true
