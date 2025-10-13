@@ -729,13 +729,40 @@ function train_consumption_network!(
                 if :fb in keys(val_diag)
                     aux = val_diag.fb
                     try
-                        @printf(
-                            "[VAL] Epoch %4d: kt_mean=%.6g aio_mean=%.6g max_abs_q=%.6g\n",
-                            epoch,
-                            aux.kt_mean,
-                            aux.aio_mean,
-                            aux.max_abs_q
-                        )
+                        if settings.objective === :euler_fb_bcmc
+                            bcmc_val =
+                                hasproperty(aux, :bcmc_mean) ? getfield(aux, :bcmc_mean) :
+                                NaN
+                            if hasproperty(aux, :gvar_mean)
+                                @printf(
+                                    "[VAL] Epoch %4d: kt_mean=%.6g bcmc_mean=%.6g gvar=%.6g max_abs_q=%.6g\n",
+                                    epoch,
+                                    aux.kt_mean,
+                                    bcmc_val,
+                                    getfield(aux, :gvar_mean),
+                                    aux.max_abs_q,
+                                )
+                            else
+                                @printf(
+                                    "[VAL] Epoch %4d: kt_mean=%.6g bcmc_mean=%.6g max_abs_q=%.6g\n",
+                                    epoch,
+                                    aux.kt_mean,
+                                    bcmc_val,
+                                    aux.max_abs_q,
+                                )
+                            end
+                        else
+                            # Default to AiO-style logging when active or when bcmc fields missing
+                            aio_val =
+                                hasproperty(aux, :aio_mean) ? getfield(aux, :aio_mean) : NaN
+                            @printf(
+                                "[VAL] Epoch %4d: kt_mean=%.6g aio_mean=%.6g max_abs_q=%.6g\n",
+                                epoch,
+                                aux.kt_mean,
+                                aio_val,
+                                aux.max_abs_q,
+                            )
+                        end
                     catch
                         @printf(
                             "[VAL] Epoch %4d: diagnostics present but failed to print (missing fields)\n",

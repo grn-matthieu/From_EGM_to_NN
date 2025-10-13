@@ -487,8 +487,10 @@ function loss_euler_fb_bcmc_ar1!(chain, ps, st, batch, model_cfg, rng)
     fb_term = fb(a_term, @. one(T) - h)
     kt = @. fb_term^2
 
-    g_sum = zero(h)
-    g_sumsq = zero(h)
+    g_sum = zero(h)        # accumulates (g^2) across draws
+    g_sumsq = zero(h)      # accumulates (g^2)^2 across draws
+    r_sum = zero(h)        # accumulates g across draws (for variance diagnostics)
+    r_sumsq = zero(h)      # accumulates g^2 across draws (for variance diagnostics)
     residual = similar(h)
     residual_sq = similar(h)
     max_abs_q = zero(T)
@@ -533,15 +535,31 @@ function loss_euler_fb_bcmc_ar1!(chain, ps, st, batch, model_cfg, rng)
         @. residual_sq = residual * residual
         @. g_sum += residual_sq
         @. g_sumsq += residual_sq * residual_sq
+        @. r_sum += residual
+        @. r_sumsq += residual_sq
     end
 
     denom = T(N) * (T(N) - one(T))
     bcmc = similar(h)
     @. bcmc = (g_sum * g_sum - g_sumsq) / denom
 
+    # Optional diagnostics: empirical variance of g across draws per state, averaged
+    invN = one(T) / T(N)
+    var_vec = similar(h)
+    @. var_vec = clamp(r_sumsq * invN - (r_sum * invN) * (r_sum * invN), 0, T(Inf))
+    gvar_mean = mean(var_vec)
+
     loss_vec = kt .+ v_h .* bcmc
     return mean(loss_vec),
-    (st1, (; kt_mean = mean(kt), bcmc_mean = mean(bcmc), max_abs_q = max_abs_q))
+    (
+        st1,
+        (;
+            kt_mean = mean(kt),
+            bcmc_mean = mean(bcmc),
+            gvar_mean = gvar_mean,
+            max_abs_q = max_abs_q,
+        ),
+    )
 end
 
 function loss_euler_fb_bcmc_csvar!(chain, ps, st, batch, model_cfg, rng)
@@ -592,6 +610,8 @@ function loss_euler_fb_bcmc_csvar!(chain, ps, st, batch, model_cfg, rng)
 
     g_sum = zero(h)
     g_sumsq = zero(h)
+    r_sum = zero(h)
+    r_sumsq = zero(h)
     residual = similar(h)
     residual_sq = similar(h)
     max_abs_q = zero(T)
@@ -618,15 +638,30 @@ function loss_euler_fb_bcmc_csvar!(chain, ps, st, batch, model_cfg, rng)
         @. residual_sq = residual * residual
         @. g_sum += residual_sq
         @. g_sumsq += residual_sq * residual_sq
+        @. r_sum += residual
+        @. r_sumsq += residual_sq
     end
 
     denom = T(N) * (T(N) - one(T))
     bcmc = similar(h)
     @. bcmc = (g_sum * g_sum - g_sumsq) / denom
 
+    invN = one(T) / T(N)
+    var_vec = similar(h)
+    @. var_vec = clamp(r_sumsq * invN - (r_sum * invN) * (r_sum * invN), 0, T(Inf))
+    gvar_mean = mean(var_vec)
+
     loss_vec = kt .+ v_h .* bcmc
     return mean(loss_vec),
-    (st1, (; kt_mean = mean(kt), bcmc_mean = mean(bcmc), max_abs_q = max_abs_q))
+    (
+        st1,
+        (;
+            kt_mean = mean(kt),
+            bcmc_mean = mean(bcmc),
+            gvar_mean = gvar_mean,
+            max_abs_q = max_abs_q,
+        ),
+    )
 end
 
 end # module
