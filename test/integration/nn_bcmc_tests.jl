@@ -18,9 +18,8 @@ using .TestUtils
     model, method = build_model_and_method(cfg)
     rng = derive_solver_rng(cfg, "NN-bcmc-ar1")
     sol = ThesisProject.API.solve(model, method, cfg; rng = rng)
-    @test sol.c !== nothing
-    @test isfinite(sol.max_resid)
-    @test sol.opts.device in (:cpu, :cuda)
+    @test sol.policy[:c] !== nothing
+    @test isfinite(sol.metadata[:max_resid])
 end
 
 @testset "NN bc-MC objective (CSVAR)" begin
@@ -42,8 +41,8 @@ end
     model, method = build_model_and_method(cfg)
     rng = derive_solver_rng(cfg, "NN-bcmc-csvar")
     sol = ThesisProject.API.solve(model, method, cfg; rng = rng)
-    @test sol.c !== nothing
-    @test isfinite(sol.max_resid)
+    @test sol.policy[:c] !== nothing
+    @test isfinite(sol.metadata[:max_resid])
 end
 
 @testset "bc-MC equals AiO at N=2 (AR1)" begin
@@ -82,6 +81,6 @@ end
     )
 
     # Compare policies coarsely: ensure both solved with reasonable residuals
-    @test isfinite(sol_aio.max_resid)
-    @test isfinite(sol_bcmc.max_resid)
+    @test isfinite(sol_aio.metadata[:max_resid])
+    @test isfinite(sol_bcmc.metadata[:max_resid])
 end

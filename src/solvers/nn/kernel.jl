@@ -514,12 +514,11 @@ function loss_euler_fb_bcmc_ar1!(chain, ps, st, batch, model_cfg, rng)
     fb_term = fb(a_term, @. one(T) - h)
     kt = @. fb_term^2
 
-    g_sum = zero(h)        # accumulates (g^2) across draws
-    g_sumsq = zero(h)      # accumulates (g^2)^2 across draws
-    r_sum = zero(h)        # accumulates g across draws (for variance diagnostics)
-    r_sumsq = zero(h)      # accumulates g^2 across draws (for variance diagnostics)
-    residual = similar(h)
-    residual_sq = similar(h)
+    # Non-mutating accumulators (same shape as h)
+    g_sum = zero.(h)        # accumulates (g^2) across draws
+    g_sumsq = zero.(h)      # accumulates (g^2)^2 across draws
+    r_sum = zero.(h)        # accumulates g across draws (for variance diagnostics)
+    r_sumsq = zero.(h)      # accumulates g^2 across draws (for variance diagnostics)
     max_abs_q = zero(T)
 
     component_levels =
@@ -527,9 +526,9 @@ function loss_euler_fb_bcmc_ar1!(chain, ps, st, batch, model_cfg, rng)
 
     for draw = 1:N
         ε = randn_like(rng, z0)
-        z_next = @. ρ * z0 + σ_shocks * ε
+        z_next = ρ .* z0 .+ σ_shocks .* ε
         y_next = exp.(μ .+ z_next)
-        w_next = @. Rg * a_curr + y_next
+        w_next = Rg .* a_curr .+ y_next
 
         Xn = ignore_derivatives() do
             if feature_dim == 2
@@ -555,25 +554,23 @@ function loss_euler_fb_bcmc_ar1!(chain, ps, st, batch, model_cfg, rng)
 
         outn, st1 = Lux.apply(chain, Xn, ps, st1)
         cn = vec(phi_to_consumption(outn[:Φ], w_next; min_c = C_MIN))
-        qn = @. β * Rg * uprime(cn) / uprime(c0)
+        qn = β .* Rg .* uprime(cn) ./ uprime(c0)
         max_abs_q = max(max_abs_q, maximum(abs.(qn)))
 
-        @. residual = clamp(qn - h, -T(1e3), T(1e3))
-        @. residual_sq = residual * residual
-        @. g_sum += residual_sq
-        @. g_sumsq += residual_sq * residual_sq
-        @. r_sum += residual
-        @. r_sumsq += residual_sq
+        residual = clamp.(qn .- h, -T(1e3), T(1e3))
+        residual_sq = residual .* residual
+        g_sum = g_sum .+ residual_sq
+        g_sumsq = g_sumsq .+ residual_sq .* residual_sq
+        r_sum = r_sum .+ residual
+        r_sumsq = r_sumsq .+ residual_sq
     end
 
     denom = T(N) * (T(N) - one(T))
-    bcmc = similar(h)
-    @. bcmc = (g_sum * g_sum - g_sumsq) / denom
+    bcmc = (g_sum .* g_sum .- g_sumsq) ./ denom
 
     # Optional diagnostics: empirical variance of g across draws per state, averaged
     invN = one(T) / T(N)
-    var_vec = similar(h)
-    @. var_vec = clamp(r_sumsq * invN - (r_sum * invN) * (r_sum * invN), 0, T(Inf))
+    var_vec = clamp.(r_sumsq .* invN .- (r_sum .* invN) .* (r_sum .* invN), zero(T), T(Inf))
     gvar_mean = mean(var_vec)
 
     # Update Auto-N moment estimates for the next call
@@ -667,12 +664,10 @@ function loss_euler_fb_bcmc_csvar!(chain, ps, st, batch, model_cfg, rng)
     fb_term = fb(a_term, @. one(T) - h)
     kt = @. fb_term^2
 
-    g_sum = zero(h)
-    g_sumsq = zero(h)
-    r_sum = zero(h)
-    r_sumsq = zero(h)
-    residual = similar(h)
-    residual_sq = similar(h)
+    g_sum = zero.(h)
+    g_sumsq = zero.(h)
+    r_sum = zero.(h)
+    r_sumsq = zero.(h)
     max_abs_q = zero(T)
 
     for draw = 1:N
@@ -682,7 +677,7 @@ function loss_euler_fb_bcmc_csvar!(chain, ps, st, batch, model_cfg, rng)
             inc = collect(map(i -> T(csvar_income(view(y_, :, i))), 1:n))
             (y_, inc)
         end
-        w_next = @. Rg * a_curr + income_next
+        w_next = Rg .* a_curr .+ income_next
 
         Xn = ignore_derivatives() do
             build_feature_batch_from_states(scaler, y_next, w_next)
@@ -690,24 +685,22 @@ function loss_euler_fb_bcmc_csvar!(chain, ps, st, batch, model_cfg, rng)
 
         outn, st1 = Lux.apply(chain, Xn, ps, st1)
         c_next = vec(phi_to_consumption(outn[:Φ], w_next; min_c = C_MIN))
-        q_next = @. β * Rg * uprime(c_next) / uprime(c0)
+        q_next = β .* Rg .* uprime(c_next) ./ uprime(c0)
         max_abs_q = max(max_abs_q, maximum(abs.(q_next)))
 
-        @. residual = clamp(q_next - h, -T(1e3), T(1e3))
-        @. residual_sq = residual * residual
-        @. g_sum += residual_sq
-        @. g_sumsq += residual_sq * residual_sq
-        @. r_sum += residual
-        @. r_sumsq += residual_sq
+        residual = clamp.(q_next .- h, -T(1e3), T(1e3))
+        residual_sq = residual .* residual
+        g_sum = g_sum .+ residual_sq
+        g_sumsq = g_sumsq .+ residual_sq .* residual_sq
+        r_sum = r_sum .+ residual
+        r_sumsq = r_sumsq .+ residual_sq
     end
 
     denom = T(N) * (T(N) - one(T))
-    bcmc = similar(h)
-    @. bcmc = (g_sum * g_sum - g_sumsq) / denom
+    bcmc = (g_sum .* g_sum .- g_sumsq) ./ denom
 
     invN = one(T) / T(N)
-    var_vec = similar(h)
-    @. var_vec = clamp(r_sumsq * invN - (r_sum * invN) * (r_sum * invN), 0, T(Inf))
+    var_vec = clamp.(r_sumsq .* invN .- (r_sum .* invN) .* (r_sum .* invN), zero(T), T(Inf))
     gvar_mean = mean(var_vec)
 
     # Update Auto-N moment estimates for the next call
