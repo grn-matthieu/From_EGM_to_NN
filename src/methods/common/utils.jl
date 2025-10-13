@@ -1,0 +1,223 @@
+module MethodUtils
+
+using Base: @views
+using ..CommonValidators: is_nondec, is_nondec_tensor, is_positive, respects_amin
+using ..CSVarUtils: csvar_state_incomes, csvar_state_matrix
+export build_consumption_initializer,
+    validate_policy!, DEFAULT_VALIDATION_CHECKS, is_csvar_model, summarise_euler_errors
+
+const BASIC_WARM_STARTS = (:default, :half_resources, :none)
+const DEFAULT_VALIDATION_CHECKS =
+    (:c_positive, :a_above_min, :c_monotone_nondec, :a_monotone_nondec)
+
+@inline _normalize_warm_start(warm_start) = Symbol(lowercase(string(warm_start)))
+
+"""
+    build_consumption_initializer(p, g; shocks=nothing, warm_start=:default, custom_c=nothing)
+
+Return an initial consumption policy for warm starts shared across solver adapters.
+Defaults to `nothing` so solver kernels pick their internal initialisations.
+"""
+function build_consumption_initializer(
+    p,
+    g;
+    shocks = nothing,
+    warm_start::Symbol = :default,
+    custom_c = nothing,
+)
+    warm = _normalize_warm_start(warm_start)
+    if shocks === nothing
+        return _build_c_init_det(p, g, warm, custom_c)
+    else
+        return _build_c_init_stoch(p, g, shocks, warm, custom_c)
+    end
+end
+
+function _build_c_init_det(p, g, warm::Symbol, custom_c)
+    a_grid = g[:a].grid
+    a_min = g[:a].min
+    R = 1 + p.r
+    csvar = is_csvar_model(p)
+
+    if warm == :steady_state
+        if csvar
+            y_state = csvar_state_matrix(p.y, p.y_dim)
+            incomes = csvar_state_incomes(y_state)
+            Ny = length(incomes)
+            Na = length(a_grid)
+            c = Array{Float64}(undef, Na, Ny)
+            tmp = similar(a_grid, Float64)
+            @inbounds for (j, y_val) in enumerate(incomes)
+                @inbounds for (i, a) in enumerate(a_grid)
+                    cval = y_val + R * a - a
+                    cmax = y_val + R * a - a_min
+                    tmp[i] = clamp(cval, 1e-12, cmax)
+                end
+                @views c[:, j] .= tmp
+            end
+            return c
+        else
+            income = p.y
+            c = similar(a_grid, Float64)
+            @inbounds for (i, a) in enumerate(a_grid)
+                cval = income + R * a - a
+                cmax = income + R * a - a_min
+                c[i] = clamp(cval, 1e-12, cmax)
+            end
+            return c
+        end
+    elseif warm in BASIC_WARM_STARTS
+        return nothing
+    else
+        if custom_c === nothing
+            return nothing
+        elseif custom_c isa AbstractArray
+            return copy(custom_c)
+        else
+            error("custom deterministic warm-start must be an array")
+        end
+    end
+end
+
+@inline function is_csvar_model(params)
+    hasproperty(params, :y_dim) && getproperty(params, :y_dim) > 1
+end
+
+@inline function _extract_tensor_shape(entry)
+    if entry === nothing
+        return nothing
+    elseif hasproperty(entry, :tensor_shape)
+        ts = getproperty(entry, :tensor_shape)
+        return ts === nothing ? nothing : (ts isa Tuple ? ts : nothing)
+    else
+        return nothing
+    end
+end
+
+function summarise_euler_errors(resid; mask_first_row::Bool = false)
+    if !(resid isa AbstractArray)
+        return resid, nothing
+    end
+
+    if ndims(resid) <= 1
+        if mask_first_row && length(resid) >= 1
+            v = float.(resid)               # allow NaN
+            v[begin] = NaN
+            return v, nothing
+        else
+            return resid, nothing
+        end
+    end
+
+    rows = size(resid, 1)
+    mat = reshape(resid, rows, :)
+    work = mask_first_row ? float.(mat) : mat
+    if mask_first_row && rows >= 1
+        work[1, :] .= NaN
+    end
+
+    vals = vec(maximum(work; dims = 2))     # avoid name clash with `vec` variable
+    return vals, work
+end
+
+function _build_c_init_stoch(p, g, shocks, warm::Symbol, custom_c)
+    a_grid = g[:a].grid
+    a_min = g[:a].min
+    R = 1 + p.r
+
+    if is_csvar_model(p)
+        return _build_c_init_det(p, g, warm, custom_c)
+    elseif warm == :steady_state
+        z_grid = shocks.zgrid
+        Na = length(a_grid)
+        Nz = length(z_grid)
+        c = Array{Float64}(undef, Na, Nz)
+        tmp = similar(a_grid, Float64)
+        @inbounds for (j, z) in enumerate(z_grid)
+            y = exp(z)
+            @inbounds for (i, a) in enumerate(a_grid)
+                cval = y + R * a - a
+                cmax = y + R * a - a_min
+                tmp[i] = clamp(cval, 1e-12, cmax)
+            end
+            @views c[:, j] .= tmp
+        end
+        return c
+    elseif warm in BASIC_WARM_STARTS
+        return nothing
+    else
+        return custom_c === nothing ? nothing : copy(custom_c)
+    end
+end
+
+"""
+    validate_policy!(metadata, policy, amin; method_name, verbose=false, checks=DEFAULT_VALIDATION_CHECKS)
+
+Run common monotonicity/positivity checks on the solution policy. Results are
+stored in-place in `metadata` under `:valid` and `:validation` (when invalid).
+Returns the boolean validity flag.
+"""
+function validate_policy!(
+    metadata::Dict{Symbol,Any},
+    policy::Dict{Symbol,Any},
+    amin::Real;
+    method_name::AbstractString = "Solver",
+    verbose::Bool = false,
+    checks = DEFAULT_VALIDATION_CHECKS,
+)
+    c_val = policy[:c].value
+    a_val = policy[:a].value
+
+    tensor_shape = _extract_tensor_shape(policy[:c])
+    tensor_shape === nothing && (tensor_shape = _extract_tensor_shape(policy[:a]))
+    dims_to_check = nothing
+    c_tensor = c_val
+    a_tensor = a_val
+    if tensor_shape !== nothing
+        total = prod(tensor_shape)
+        first_dim_c = size(c_val, 1)
+        first_dim_a = size(a_val, 1)
+        if first_dim_c == total && first_dim_a == total
+            extra_c = ndims(c_val) <= 1 ? () : Base.tail(size(c_val))
+            extra_a = ndims(a_val) <= 1 ? () : Base.tail(size(a_val))
+            c_tensor = reshape(c_val, (tensor_shape..., extra_c...))
+            a_tensor = reshape(a_val, (tensor_shape..., extra_a...))
+            dims_to_check = collect(1:length(tensor_shape))
+        end
+    end
+
+    violations = Dict{Symbol,Any}()
+    valid = true
+
+    for check in checks
+        result =
+            check === :c_positive ? is_positive(c_val) :
+            check === :a_above_min ? respects_amin(a_val, amin) :
+            check === :c_monotone_nondec ?
+            (
+                dims_to_check === nothing ? is_nondec(c_val) :
+                is_nondec_tensor(c_tensor, dims_to_check)
+            ) :
+            check === :a_monotone_nondec ?
+            (
+                dims_to_check === nothing ? is_nondec(a_val) :
+                is_nondec_tensor(a_tensor, dims_to_check)
+            ) : error("Unknown validation check: $(check)")
+        violations[check] = result
+        valid &= result
+    end
+
+    metadata[:valid] = valid
+    if !valid
+        metadata[:validation] = violations
+        if verbose
+            @warn "$(method_name) solution failed monotonicity/positivity checks; marking as invalid." violations
+        else
+            @info "$(method_name) solution failed validation; set solver.verbose=true for details."
+        end
+    end
+
+    return valid
+end
+
+end # module

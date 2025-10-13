@@ -25,6 +25,7 @@ include("utils/Diagnostics.jl")
 # 3) shared + models + model builder
 include("models/shared/Shocks.jl")
 include("models/baseline/ConsumerSaving.jl")
+include("models/baseline/ConsumerSavingVAR.jl")
 include("core/model_factory.jl")
 
 # 4) solvers (pure kernels)
@@ -34,6 +35,9 @@ include("solvers/common/policy_utils.jl")
 include("solvers/common/value_fun.jl")
 include("solvers/common/chebyshev.jl")
 include("solvers/common/residuals.jl")
+include("solvers/common/placeholders.jl")
+include("solvers/common/csvar_utils.jl")
+include("solvers/common/integration.jl")
 include("solvers/common/validators.jl")
 
 # projection solver
@@ -50,6 +54,7 @@ include("solvers/nn/data_nn.jl")
 include("solvers/nn/kernel.jl")
 
 # 5) methods (adapters)
+include("methods/common/utils.jl")
 include("methods/EGM.jl")
 include("methods/Projection.jl")
 include("methods/Perturbation.jl")

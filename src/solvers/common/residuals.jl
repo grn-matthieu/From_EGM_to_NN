@@ -34,12 +34,12 @@ function euler_resid_det(params, c::AbstractVector, c_next::AbstractVector)
     @assert length(c) == length(c_next)
     T = _T(c, c_next)
     β = T(params.β)
-    σ = T(params.σ)
+    γ = T(params.γ)
     R = T(1) + T(params.r)
     ϵ = _eps(T)
     c0 = max.(T.(c), ϵ)
     c1 = max.(T.(c_next), ϵ)
-    abs.(T(1) .- (β * R) .* (c0 ./ c1) .^ σ)
+    abs.(T(1) .- (β * R) .* (c0 ./ c1) .^ γ)
 end
 
 """
@@ -75,12 +75,12 @@ function euler_resid_det!(
 )
     @assert length(resid) == length(c) == length(c_next)
     β = params.β
-    σ = params.σ
+    γ = params.γ
     R = 1 + params.r
     @inbounds for i in eachindex(resid)
         c0 = c[i] <= 1e-12 ? 1e-12 : c[i]
         c1 = c_next[i] <= 1e-12 ? 1e-12 : c_next[i]
-        resid[i] = abs(1 - β * R * (c0 / c1)^σ)
+        resid[i] = abs(1 - β * R * (c0 / c1)^γ)
     end
     resid
 end
@@ -104,7 +104,7 @@ function euler_resid_stoch(
 
     T = _T(a_grid, z_grid, Π, c)
     β = T(params.β)
-    σ = T(params.σ)
+    γ = T(params.γ)
     R = T(1) + T(params.r)
     ϵ = _eps(T)
 
@@ -120,7 +120,7 @@ function euler_resid_stoch(
             Emu = mapreduce(
                 jp -> begin
                     cp = interp_linear(a, C[:, jp], ap)
-                    ΠT[j, jp] * (max(cp, ϵ) / c_ij)^(-σ)
+                    ΠT[j, jp] * (max(cp, ϵ) / c_ij)^(-γ)
                 end,
                 +,
                 1:Nz;
@@ -140,7 +140,7 @@ function euler_resid_stoch!(resid::AbstractMatrix, params, a_grid, z_grid, Π, c
     Na, Nz = size(c)
     @assert size(resid) == (Na, Nz)
     β = params.β
-    σ = params.σ
+    γ = params.γ
     R = 1 + params.r
     @inbounds for j = 1:Nz
         y = exp(z_grid[j])
@@ -150,7 +150,7 @@ function euler_resid_stoch!(resid::AbstractMatrix, params, a_grid, z_grid, Π, c
             Emu = 0.0
             for jp = 1:Nz
                 cp = interp_linear(a_grid, c[:, jp], ap)
-                Emu += Π[j, jp] * (max(cp, 1e-12) / c_ij)^(-σ)
+                Emu += Π[j, jp] * (max(cp, 1e-12) / c_ij)^(-γ)
             end
             resid[i, j] = abs(1 - β * R * Emu)
         end
@@ -179,7 +179,7 @@ function euler_resid_stoch_interp!(
     Na, Nz = size(c)
     @assert size(resid) == (Na, Nz)
     β = params.β
-    σ = params.σ
+    γ = params.γ
     R = 1 + params.r
     tmp = Vector{eltype(a_grid)}(undef, 1)
     out = Vector{eltype(c)}(undef, 1)
@@ -198,7 +198,7 @@ function euler_resid_stoch_interp!(
                     cp = out[1]
                 end
                 cp = cp <= 1e-12 ? 1e-12 : cp
-                Emu += Π[j, jp] * (cp / c_ij)^(-σ)
+                Emu += Π[j, jp] * (cp / c_ij)^(-γ)
             end
             resid[i, j] = abs(1 - β * R * Emu)
         end

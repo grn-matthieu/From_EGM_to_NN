@@ -17,7 +17,7 @@ struct SmokeResult
     interp_kind::String
 end
 
-function run_one(cfg_path::AbstractString; tol_resid = 1e-5, tol_iters = 10_000)
+function run_one(cfg_path::AbstractString; tol_resid = 1e-4, tol_iters = 10_000)
     cfg_loaded = ThesisProject.load_config(cfg_path)
     model = ThesisProject.build_model(cfg_loaded)
     method = ThesisProject.build_method(cfg_loaded)

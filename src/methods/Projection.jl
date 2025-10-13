@@ -24,6 +24,11 @@ Construct a `ProjectionMethod` using solver options contained in the NamedTuple 
 function build_projection_method(cfg::NamedTuple)
     solver_cfg = cfg.solver
     projection_cfg = solver_cfg.projection
+    integration_raw = maybe(projection_cfg, :integration, :gh)
+    integration_sym = Symbol(lowercase(string(integration_raw)))
+    # Optional integration tuning for CSVAR
+    gh_order = maybe(projection_cfg, :gh_order, 3)
+    nsamples = maybe(projection_cfg, :nsamples, 128)
     return ProjectionMethod((
         name = maybe(cfg, :method, solver_cfg.method),
         tol = solver_cfg.tol,
@@ -32,6 +37,9 @@ function build_projection_method(cfg::NamedTuple)
         verbose = solver_cfg.verbose,
         orders = projection_cfg.orders,
         Nval = projection_cfg.Nval,
+        integration = integration_sym,
+        gh_order = gh_order,
+        nsamples = nsamples,
     ))
 end
 function solve(
@@ -56,6 +64,7 @@ function solve(
             maxit = method.opts.maxit,
             orders = method.opts.orders,
             Nval = method.opts.Nval,
+            rng = rng,
         ) :
         solve_projection_stoch(
             p,
@@ -67,6 +76,10 @@ function solve(
             maxit = method.opts.maxit,
             orders = method.opts.orders,
             Nval = method.opts.Nval,
+            integration_method = method.opts.integration,
+            gh_order = get(method.opts, :gh_order, 3),
+            nsamples = get(method.opts, :nsamples, 128),
+            rng = rng,
         )
 
     ee = sol.resid
@@ -109,6 +122,7 @@ function solve(
         :delta_pol => delta_pol,
         :mean_ee => ee_mean,
         :julia_version => string(VERSION),
+        :integration => get(method.opts, :integration, nothing),
     )
 
     return Solution(

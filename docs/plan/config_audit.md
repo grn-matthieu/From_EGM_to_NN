@@ -98,7 +98,7 @@ NN method options (from `src/methods/NN.jl` and `src/solvers/nn/`):
 
 EGM kernel internals (not user-configurable today; noted for completeness):
 
-- Relaxation `relax = 0.5`, patience `= 50`, small epsilon `≈ 1e-10` for progress detection
+- Relaxation `relax = 0.5`, patience `= 50`, small Σ `≈ 1e-10` for progress detection
 
 
 

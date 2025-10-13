@@ -1,0 +1,63 @@
+model:
+  name: cs_vec
+
+params:
+  β: 0.96
+  γ: 2.0
+  r: 0.02
+  y: [0.6, 0.4]
+  A:
+    - [0, 0]
+    - [0, 0]
+  Σ:
+    - [0.5, 0.2]
+    - [0.2, 0.5]
+grids:
+  Na: 40
+  a_min: 0.0
+  a_max: 15.0
+
+utility:
+  u_type: CRRA
+
+solver:
+  method: NN
+  tol: 1.0e-3
+  tol_pol: 1.0e-6
+  maxit: 5000
+  verbose: true
+  relax: 0.5
+  warm_start: default
+  egm:
+    interp_kind: linear
+  time_iteration:
+    interp_kind: linear
+  projection:
+    orders: [3]
+    Nval: 24
+  perturbation:
+    order: 1
+    a_bar: null
+    h_a: null
+    h_z: null
+    tol_fit: 1.0e-8
+    maxit_fit: 20
+  nn:
+    epochs: 5000
+    batch: 16
+    lr: 1.0e-3
+    hid1: 16
+    hid2: 16
+    n_mc: 16
+    resample_every: 1
+    samples_per_epoch: 64
+    objective: euler_fb_aio
+    v_h: 0.5
+    w_min: 0.1
+    w_max: 4.0
+    sigma_shocks: null
+    target_loss: 1.0e-4
+    use_cuda: false
+
+random:
+  seed: 2025

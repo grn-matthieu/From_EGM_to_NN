@@ -26,28 +26,59 @@ function compute_value_policy(p, g, S, U, policy; tol::Real = 1e-8, maxit::Int =
     catch
     end
 
-    # Deterministic
-    if cpol isa AbstractVector && apol isa AbstractVector
-        V = zeros(Na)
-        tmp = similar(V)
-        V_new = similar(V)
-        u_c = U.u(cpol)
-        for _ = 1:maxit
-            cont = interp_linear!(tmp, agrid, V, apol)
-            @. V_new = u_c + β * cont
-            δ = 0.0
-            @inbounds @simd for i in eachindex(V)
-                d = abs(V_new[i] - V[i])
-                if d > δ
-                    δ = d
+    # Deterministic evaluations cover scalar CS and CSVAR policies, where shocks
+    # may be absent but policies can still be laid out as matrices.
+    if S === nothing
+        if cpol isa AbstractVector && apol isa AbstractVector
+            V = zeros(Na)
+            tmp = similar(V)
+            V_new = similar(V)
+            u_c = U.u(cpol)
+            for _ = 1:maxit
+                cont = interp_linear!(tmp, agrid, V, apol)
+                @. V_new = u_c + β * cont
+                δ = 0.0
+                @inbounds @simd for i in eachindex(V)
+                    d = abs(V_new[i] - V[i])
+                    if d > δ
+                        δ = d
+                    end
                 end
+                if δ < tol
+                    return V_new
+                end
+                V .= V_new
             end
-            if δ < tol
-                return V_new
+            return V
+        elseif cpol isa AbstractMatrix && apol isa AbstractMatrix
+            Nz = size(cpol, 2)
+            V = zeros(Na, Nz)
+            cont = similar(V)
+            tmp = similar(agrid)
+            V_new = similar(V)
+            u_c = U.u(cpol)
+            for _ = 1:maxit
+                @inbounds for j = 1:Nz
+                    interp_linear!(tmp, agrid, view(V, :, j), view(apol, :, j))
+                    @views cont[:, j] .= tmp
+                end
+                @. V_new = u_c + β * cont
+                δ = 0.0
+                @inbounds @simd for idx in eachindex(V)
+                    d = abs(V_new[idx] - V[idx])
+                    if d > δ
+                        δ = d
+                    end
+                end
+                if δ < tol
+                    return V_new
+                end
+                V .= V_new
             end
-            V .= V_new
+            return V
+        else
+            error("Deterministic value evaluation expects vector or matrix policies")
         end
-        return V
     end
 
     # Stochastic

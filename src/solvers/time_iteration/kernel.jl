@@ -24,9 +24,14 @@ using ..PolicyUtils:
     init_consumption_det,
     relaxation_step!,
     rmse_nonbinding
+using ..SolverPlaceholders: build_placeholder_solution
 using Printf
 
-export solve_ti_det, solve_ti_stoch
+export solve_ti_det, solve_ti_stoch, solve_ti_placeholder
+
+@inline function _is_csvar_model(params)
+    hasproperty(params, :y_dim) && getproperty(params, :y_dim) > 1
+end
 
 """
     solve_consumption_root(euler_gap, c_lo, c_hi, root_tol, max_root_iter)
@@ -108,6 +113,24 @@ function solve_ti_det_impl(
     c_init = nothing,
     verbose::Bool = false,
 )
+    if _is_csvar_model(model_params)
+        return solve_ti_placeholder(
+            model_params,
+            model_grids,
+            nothing,
+            model_utility;
+            tol = tol,
+            tol_pol = tol_pol,
+            maxit = maxit,
+            interp_kind = interp_kind,
+            relax = relax,
+            verbose = verbose,
+            c_init = c_init,
+            ϵ = ϵ,
+            note = "Time-iteration is disabled for CSVAR: deterministic EGM already fails when the VAR income dimension exceeds 1, so no TI baseline is tested.",
+        )
+    end
+
     start_time = time_ns()
 
     a_grid = model_grids[:a].grid
@@ -227,6 +250,44 @@ function solve_ti_det_impl(
     )
 end
 
+
+
+function solve_ti_placeholder(
+    model_params,
+    model_grids,
+    model_shocks,
+    model_utility;
+    tol::Real = NaN,
+    tol_pol::Real = NaN,
+    maxit::Int = 0,
+    interp_kind::InterpKind = LinearInterp(),
+    relax::Real = 0.0,
+    verbose::Bool = false,
+    c_init = nothing,
+    ϵ::Real = 0.0,
+    note::AbstractString = "placeholder TimeIteration solution",
+)
+    opts = (;
+        tol = tol,
+        tol_pol = tol_pol,
+        maxit = maxit,
+        interp_kind = interp_kind,
+        relax = relax,
+        verbose = verbose,
+        resid_metric = :placeholder,
+        c_init = c_init,
+        ϵ = ϵ,
+    )
+    return build_placeholder_solution(
+        :TimeIteration,
+        model_params,
+        model_grids,
+        model_shocks;
+        opts = opts,
+        note = note,
+    )
+end
+
 # Monotone cubic variant (PCHIP)
 function solve_ti_det_impl(
     interp_kind::MonotoneCubicInterp,
@@ -241,6 +302,24 @@ function solve_ti_det_impl(
     c_init = nothing,
     verbose::Bool = false,
 )
+    if _is_csvar_model(model_params)
+        return solve_ti_placeholder(
+            model_params,
+            model_grids,
+            nothing,
+            model_utility;
+            tol = tol,
+            tol_pol = tol_pol,
+            maxit = maxit,
+            interp_kind = interp_kind,
+            relax = relax,
+            verbose = verbose,
+            c_init = c_init,
+            ϵ = ϵ,
+            note = "Time-iteration is disabled for CSVAR: deterministic EGM already fails when the VAR income dimension exceeds 1, so no TI baseline is tested.",
+        )
+    end
+
     # For brevity reuse linear implementation but substitute cubic interp where used
     start_time = time_ns()
 

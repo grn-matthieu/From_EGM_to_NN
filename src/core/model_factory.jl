@@ -9,6 +9,7 @@ import ..API: build_model
 
 using ..ModelContract
 using ..ConsumerSaving: build_cs_model
+using ..ConsumerSavingVAR: build_cs_var_model
 
 """
     build_model(cfg::NamedTuple)
@@ -26,6 +27,9 @@ function _build_model(::Val{:cs}, cfg::NamedTuple)
     return build_cs_model(cfg)
 end
 
+function _build_model(::Val{:cs_vec}, cfg::NamedTuple)
+    return build_cs_var_model(cfg)
+end
 
 # Fallback for unknown model types
 function _build_model(model_name::Val, cfg::NamedTuple)

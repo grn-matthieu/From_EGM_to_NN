@@ -20,28 +20,49 @@ struct ConsumerSavingModel <: AbstractModel
     utility::NamedTuple
 end
 
-function build_cs_model(cfg::NamedTuple)
-    params = cfg.params
-    grids_cfg = cfg.grids
+@inline function _build_asset_grid(grids_cfg::NamedTuple; y_dim::Integer = 1)
+    y_dim ≥ 1 || error("y_dim must be ≥ 1")
 
-    # Asset grid (for the cs model)
     a_min = grids_cfg.a_min
     a_max = grids_cfg.a_max
-    Na = grids_cfg.Na
-    agrid = collect(range(a_min, a_max; length = Na))
-    grids = (a = (; grid = agrid, min = a_min, max = a_max, N = Na),)
+    Na_base = grids_cfg.Na
 
-    # Shocks discretization. If a `:shocks` entry exists in the config we
-    # consider it active if any shock-related keys are present or if
-    # `:active` is explicitly true. This makes tests that patch only
-    # `:Nz`/`σ_shock` (without `:active`) behave as authors intended.
+    Na_total = Na_base^y_dim
+    agrid = collect(range(a_min, a_max; length = Na_total))
+    tensor_shape = ntuple(_ -> Na_base, y_dim)
+
+    return (
+        a = (
+            grid = agrid,
+            min = a_min,
+            max = a_max,
+            N = Na_total,
+            N_base = Na_base,
+            tensor_shape = tensor_shape,
+        ),
+    )
+end
+
+function _build_crra_utility(params::NamedTuple)
+    γ = params.γ
+    if isapprox(γ, 1.0; atol = 1e-8)
+        u = (c -> log.(c))
+        u_prime = (c -> 1.0 ./ c)
+        u_prime_inv = (up -> 1.0 ./ up)
+    else
+        u = (c -> (c .^ (1 - γ) .- 1.0) ./ (1.0 - γ))
+        u_prime = (c -> c .^ (-γ))
+        u_prime_inv = (up -> up .^ (-1.0 / γ))
+    end
+    return (; u, u_prime, u_prime_inv, γ)
+end
+
+function _maybe_discretize_shocks(cfg::NamedTuple)
     shocks_cfg = maybe(cfg, :shocks)
     function shocks_specified(sc)
         if sc === nothing
             return false
         end
-        # If active explicitly true, use shocks. Otherwise check for
-        # common shock keys that indicate the user supplied shock specs.
         keys_present = (:Nz, :σ_shock, :ρ_shock, :method, :m)
         if maybe(sc, :active, false)
             return true
@@ -53,29 +74,22 @@ function build_cs_model(cfg::NamedTuple)
         end
         return false
     end
+    return shocks_specified(shocks_cfg) ? discretize(shocks_cfg) : nothing, shocks_cfg
+end
 
-    shocks = shocks_specified(shocks_cfg) ? discretize(shocks_cfg) : nothing
+function build_cs_model(cfg::NamedTuple)
+    params = cfg.params
+    grids = _build_asset_grid(cfg.grids)
 
-    # Augment params with shock-specific scalars expected by some solvers (NN)
+    shocks, shocks_cfg = _maybe_discretize_shocks(cfg)
+
     if shocks !== nothing
-        # copy ρ_shock and σ_shock into params as ρ and σ_shock for backward compatibility
         ρ_shock = maybe(shocks_cfg, :ρ_shock, 0.0)
         σ_shock = maybe(shocks_cfg, :σ_shock, 0.0)
         params = merge(params, (ρ_shock = ρ_shock, σ_shock = σ_shock))
     end
 
-    # Utility closure (CRRA)
-    σ = params.σ
-    if isapprox(σ, 1.0; atol = 1e-8) # handle the extreme case (log)
-        u = (c -> log.(c))
-        u_prime = (c -> 1.0 ./ c)
-        u_prime_inv = (up -> 1.0 ./ up)
-    else
-        u = (c -> (c .^ (1 - σ) .- 1.0) ./ (1.0 - σ))
-        u_prime = (c -> c .^ (-σ))
-        u_prime_inv = (up -> up .^ (-1.0 / σ))
-    end
-    utility = (; u, u_prime, u_prime_inv, σ)
+    utility = _build_crra_utility(params)
 
     return ConsumerSavingModel(params, grids, shocks, utility)
 end
