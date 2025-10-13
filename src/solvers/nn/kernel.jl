@@ -421,4 +421,176 @@ function loss_euler_fb_aio_csvar!(chain, ps, st, batch, model_cfg, rng)
     (st1, (; kt_mean = mean(kt), aio_mean = mean(aio_pen), max_abs_q = max_abs_q))
 end
 
+function loss_euler_fb_bcmc_ar1!(chain, ps, st, batch, model_cfg, rng)
+    P = model_cfg.P
+    U = model_cfg.U
+    scaler = model_cfg.scaler
+    P_resid = model_cfg.P_resid
+    settings = model_cfg.settings
+    uprime = U.u_prime
+
+    T = eltype(batch)
+    C_MIN = T(1e-3)
+
+    Rg = one(T) + T(P.r)
+    μ = T(P_resid.y)
+    feature_dim = size(batch, 1)
+    state_count = size(batch, 2)
+
+    mean_norm = batch[1, :]
+    w_norm = batch[end, :]
+    y0 = ((mean_norm .+ one(T)) ./ T(2)) .* T(scaler.mean_range) .+ T(scaler.mean_min)
+    w0 = ((w_norm .+ one(T)) ./ T(2)) .* T(scaler.w_range) .+ T(scaler.w_min)
+    z0 = log.(y0) .- μ
+
+    out, st1 = Lux.apply(chain, batch, ps, st)
+    c0 = vec(phi_to_consumption(out[:Φ], w0; min_c = C_MIN))
+    h = T.(vec(ensure_row(out[:h])))
+    a_term = @. one(T) - c0 / w0
+    a_curr = @. w0 - c0
+
+    N = settings.n_mc
+    N >= 2 || throw(ArgumentError("objective :euler_fb_bcmc requires n_mc >= 2, got $(N)"))
+
+    β = T(P.β)
+    ρ = T(P.ρ_shock)
+    σ_shocks = T(P.σ_shock)
+    v_h = hasproperty(model_cfg, :v_h) ? T(getfield(model_cfg, :v_h)) : one(T)
+
+    fb_term = fb(a_term, @. one(T) - h)
+    kt = @. fb_term^2
+
+    g_sum = zero(h)
+    g_sumsq = zero(h)
+    residual = similar(h)
+    residual_sq = similar(h)
+    max_abs_q = zero(T)
+
+    component_levels =
+        hasproperty(P, :y) && P.y isa AbstractVector ? T.(exp.(collect(P.y))) : T[]
+
+    for draw = 1:N
+        ε = randn_like(rng, z0)
+        z_next = @. ρ * z0 + σ_shocks * ε
+        y_next = exp.(μ .+ z_next)
+        w_next = @. Rg * a_curr + y_next
+
+        Xn = ignore_derivatives() do
+            if feature_dim == 2
+                X = vcat(
+                    reshape(T.(y_next), 1, state_count),
+                    reshape(T.(w_next), 1, state_count),
+                )
+                normalize_feature_batch(scaler, X)
+            else
+                comps = Matrix{T}(undef, feature_dim - 2, state_count)
+                for j = 1:(feature_dim-2)
+                    level = j <= length(component_levels) ? component_levels[j] : T(exp(μ))
+                    comps[j, :] .= level
+                end
+                X = vcat(
+                    reshape(T.(y_next), 1, state_count),
+                    comps,
+                    reshape(T.(w_next), 1, state_count),
+                )
+                normalize_feature_batch(scaler, X)
+            end
+        end
+
+        outn, st1 = Lux.apply(chain, Xn, ps, st1)
+        cn = vec(phi_to_consumption(outn[:Φ], w_next; min_c = C_MIN))
+        qn = @. β * Rg * uprime(cn) / uprime(c0)
+        max_abs_q = max(max_abs_q, maximum(abs.(qn)))
+
+        @. residual = clamp(qn - h, -T(1e3), T(1e3))
+        @. residual_sq = residual * residual
+        @. g_sum += residual_sq
+        @. g_sumsq += residual_sq * residual_sq
+    end
+
+    denom = T(N) * (T(N) - one(T))
+    bcmc = similar(h)
+    @. bcmc = (g_sum * g_sum - g_sumsq) / denom
+
+    loss_vec = kt .+ v_h .* bcmc
+    return mean(loss_vec),
+    (st1, (; kt_mean = mean(kt), bcmc_mean = mean(bcmc), max_abs_q = max_abs_q))
+end
+
+function loss_euler_fb_bcmc_csvar!(chain, ps, st, batch, model_cfg, rng)
+    P = model_cfg.P
+    U = model_cfg.U
+    scaler = model_cfg.scaler
+    settings = model_cfg.settings
+    uprime = U.u_prime
+
+    T = eltype(batch)
+    C_MIN = T(1e-3)
+    feature_dim = size(batch, 1)
+    n = size(batch, 2)
+
+    mean_vals, comps, w0 = denormalize_feature_batch(scaler, batch)
+    y_dim = size(comps, 1) > 0 ? size(comps, 1) : 1
+    y_matrix = size(comps, 1) == 0 ? reshape(mean_vals, 1, :) : comps
+
+    out, st1 = Lux.apply(chain, batch, ps, st)
+    c0 = vec(phi_to_consumption(out[:Φ], w0; min_c = C_MIN))
+    h = T.(vec(ensure_row(out[:h])))
+    a_term = @. one(T) - c0 / w0
+    a_curr = @. w0 - c0
+
+    N = settings.n_mc
+    N >= 2 || throw(ArgumentError("objective :euler_fb_bcmc requires n_mc >= 2, got $(N)"))
+
+    Rg = one(T) + T(P.r)
+    β = T(P.β)
+    v_h = hasproperty(model_cfg, :v_h) ? T(getfield(model_cfg, :v_h)) : one(T)
+
+    A = Matrix{T}(P.A)
+    Σ = Matrix{Float64}(P.Σ)
+    chol = cholesky(Symmetric(Σ), check = false)
+    L = Matrix{T}(chol.L)
+
+    fb_term = fb(a_term, @. one(T) - h)
+    kt = @. fb_term^2
+
+    g_sum = zero(h)
+    g_sumsq = zero(h)
+    residual = similar(h)
+    residual_sq = similar(h)
+    max_abs_q = zero(T)
+
+    for draw = 1:N
+        ε = randn(rng, T, y_dim, n)
+        y_next, income_next = ignore_derivatives() do
+            y_ = A * y_matrix .+ L * ε
+            inc = collect(map(i -> T(csvar_income(view(y_, :, i))), 1:n))
+            (y_, inc)
+        end
+        w_next = @. Rg * a_curr + income_next
+
+        Xn = ignore_derivatives() do
+            build_feature_batch_from_states(scaler, y_next, w_next)
+        end
+
+        outn, st1 = Lux.apply(chain, Xn, ps, st1)
+        c_next = vec(phi_to_consumption(outn[:Φ], w_next; min_c = C_MIN))
+        q_next = @. β * Rg * uprime(c_next) / uprime(c0)
+        max_abs_q = max(max_abs_q, maximum(abs.(q_next)))
+
+        @. residual = clamp(q_next - h, -T(1e3), T(1e3))
+        @. residual_sq = residual * residual
+        @. g_sum += residual_sq
+        @. g_sumsq += residual_sq * residual_sq
+    end
+
+    denom = T(N) * (T(N) - one(T))
+    bcmc = similar(h)
+    @. bcmc = (g_sum * g_sum - g_sumsq) / denom
+
+    loss_vec = kt .+ v_h .* bcmc
+    return mean(loss_vec),
+    (st1, (; kt_mean = mean(kt), bcmc_mean = mean(bcmc), max_abs_q = max_abs_q))
+end
+
 end # module
