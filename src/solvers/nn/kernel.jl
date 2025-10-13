@@ -261,6 +261,24 @@ function loss_euler_fb_aio!(chain, ps, st, batch, model_cfg, rng)
     end
 end
 
+"""
+Dispatcher for the bias-corrected Monte Carlo FB objective.
+
+Selects AR(1) vs CSVAR variants based on model parameters, mirroring the AiO
+dispatcher.
+"""
+function loss_euler_fb_bcmc!(chain, ps, st, batch, model_cfg, rng)
+    P = model_cfg.P
+    if hasproperty(P, :A) &&
+       hasproperty(P, :Σ) &&
+       hasproperty(P, :y_dim) &&
+       getproperty(P, :y_dim) > 1
+        return loss_euler_fb_bcmc_csvar!(chain, ps, st, batch, model_cfg, rng)
+    else
+        return loss_euler_fb_bcmc_ar1!(chain, ps, st, batch, model_cfg, rng)
+    end
+end
+
 function loss_euler_fb_aio_ar1!(chain, ps, st, batch, model_cfg, rng)
     P = model_cfg.P
     U = model_cfg.U
@@ -449,8 +467,17 @@ function loss_euler_fb_bcmc_ar1!(chain, ps, st, batch, model_cfg, rng)
     a_term = @. one(T) - c0 / w0
     a_curr = @. w0 - c0
 
+    # Determine effective N (number of shocks) possibly from a budget.
     N = settings.n_mc
-    N >= 2 || throw(ArgumentError("objective :euler_fb_bcmc requires n_mc >= 2, got $(N)"))
+    if hasproperty(settings, :bcmc_budget_T) && settings.bcmc_budget_T !== nothing
+        Tbudget = Int(getfield(settings, :bcmc_budget_T))
+        M = state_count
+        # Solve N*(N-1)/2 ≈ T/M for integer N ≥ 2
+        pairs_per_state = max(Tbudget / max(M, 1), 0)
+        approxN = Int(floor((1 + sqrt(1 + 8 * pairs_per_state)) / 2))
+        N = max(approxN, 2)
+    end
+    N >= 2 || throw(ArgumentError("objective :euler_fb_bcmc requires N >= 2 (got $(N))"))
 
     β = T(P.β)
     ρ = T(P.ρ_shock)
@@ -539,8 +566,17 @@ function loss_euler_fb_bcmc_csvar!(chain, ps, st, batch, model_cfg, rng)
     a_term = @. one(T) - c0 / w0
     a_curr = @. w0 - c0
 
+    # Determine effective N (number of shocks) possibly from a budget.
     N = settings.n_mc
-    N >= 2 || throw(ArgumentError("objective :euler_fb_bcmc requires n_mc >= 2, got $(N)"))
+    if hasproperty(settings, :bcmc_budget_T) && settings.bcmc_budget_T !== nothing
+        Tbudget = Int(getfield(settings, :bcmc_budget_T))
+        M = n
+        # Solve N*(N-1)/2 ≈ T/M for integer N ≥ 2
+        pairs_per_state = max(Tbudget / max(M, 1), 0)
+        approxN = Int(floor((1 + sqrt(1 + 8 * pairs_per_state)) / 2))
+        N = max(approxN, 2)
+    end
+    N >= 2 || throw(ArgumentError("objective :euler_fb_bcmc requires N >= 2 (got $(N))"))
 
     Rg = one(T) + T(P.r)
     β = T(P.β)
