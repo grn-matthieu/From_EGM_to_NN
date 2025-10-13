@@ -83,9 +83,9 @@ end
 get_option(opts, key::Symbol, default) =
     opts === nothing ? default : (hasproperty(opts, key) ? getfield(opts, key) : default)
 
-const CUDA_OBJECTIVE = :euler_fb_aio
+const CUDA_OBJECTIVES = (:euler_fb_aio, :euler_fb_bcmc)
 
-maybe_objective_cuda(objective, default) = objective == CUDA_OBJECTIVE ? default : false
+maybe_objective_cuda(objective, default) = objective in CUDA_OBJECTIVES ? default : false
 
 function detect_cuda_preference(objective, opts)
     requested = get_option(opts, :use_cuda, nothing)
@@ -118,8 +118,8 @@ function detect_cuda_preference(objective, opts)
         @warn "CUDA requested but no functional GPU detected. Falling back to CPU." use_cuda =
             false
     end
-    if use_cuda && objective != CUDA_OBJECTIVE
-        @warn "CUDA acceleration currently supported only for objective :$(CUDA_OBJECTIVE); got :$(objective). Falling back to CPU." use_cuda =
+    if use_cuda && !(objective in CUDA_OBJECTIVES)
+        @warn "CUDA acceleration currently supported only for objectives $(CUDA_OBJECTIVES); got :$(objective). Falling back to CPU." use_cuda =
             false
     end
     return use_cuda
@@ -214,16 +214,31 @@ function build_loss_function(
         Rg = one(T) + T(P_resid.r)
         μ = T(P_resid.y)
 
-        # If caller selected the FB AiO objective, delegate to the custom loss
-        if settings.objective == :euler_fb_aio
+        # If caller selected an FB-style objective, delegate to the custom loss
+        if settings.objective in (:euler_fb_aio, :euler_fb_bcmc)
             if !fb_supported(model_cfg)
                 if !fb_warning_emitted[]
-                    @warn "objective :euler_fb_aio requires active stochastic shocks; falling back to :euler_residual"
+                    @warn "objective :$(settings.objective) requires active stochastic shocks; falling back to :euler_residual"
                     fb_warning_emitted[] = true
                 end
             else
-                # loss_euler_fb_aio! returns (loss, (st1, aux_namedtuple))
-                loss_val, st_pack = loss_euler_fb_aio!(model, ps, st, X, model_cfg, rng)
+                objective = settings.objective
+                # the loss routines return (loss, (st1, aux_namedtuple))
+                loss_val, st_pack = if objective == :euler_fb_aio
+                    loss_euler_fb_aio!(model, ps, st, X, model_cfg, rng)
+                else
+                    P_full = model_cfg.P
+                    is_csvar =
+                        hasproperty(P_full, :A) &&
+                        hasproperty(P_full, :Σ) &&
+                        hasproperty(P_full, :y_dim) &&
+                        getproperty(P_full, :y_dim) > 1
+                    if is_csvar
+                        loss_euler_fb_bcmc_csvar!(model, ps, st, X, model_cfg, rng)
+                    else
+                        loss_euler_fb_bcmc_ar1!(model, ps, st, X, model_cfg, rng)
+                    end
+                end
                 st1, aux = st_pack
                 # package diagnostics: include FB aux diagnostics and leave phi/h fields empty
                 diag = (;
