@@ -14,12 +14,19 @@ U = ThesisProject.get_utility(model)
 
 # override légers pour test rapide
 vh = 2.5
-epochs = 50_000
-solver_nt = merge(cfg.solver, (; v_h = vh, epochs = epochs))
-cfg = merge(cfg, (solver = solver_nt,))
+epochs = 1000
+nn_opts = merge(cfg.solver.nn, (; v_h = vh, epochs = epochs))
+solver_opts = merge(cfg.solver, (nn = nn_opts,))
+cfg = merge(cfg, (solver = solver_opts,))
 
 # --- 2) Construire settings + scaler + réseau
-settings = ThesisProject.NNKernel.solver_settings(cfg.solver; has_shocks = !isnothing(S))
+settings = ThesisProject.NNKernel.solver_settings(
+    cfg.solver.nn,
+    P,
+    G,
+    S;
+    has_shocks = !isnothing(S),
+)
 P_resid = ThesisProject.NNKernel.scalar_params(P)
 scaler = ThesisProject.NNKernel.FeatureScaler(P, G, S, settings)
 in_dim = ThesisProject.NNKernel.input_dimension(S)
@@ -57,8 +64,8 @@ val_batch, _ = ThesisProject.NNKernel.create_training_batch(
 )
 
 # dénormalise y,w
-y0 = ((val_batch[1, :] .+ 1.0f0) ./ 2.0f0) .* scaler.y_range .+ scaler.y_min
-w0 = ((val_batch[2, :] .+ 1.0f0) ./ 2.0f0) .* scaler.w_range .+ scaler.w_min
+mean_vals, _, w0 = ThesisProject.NNKernel.denormalize_feature_batch(scaler, val_batch)
+y0 = mean_vals
 
 # passe avant et récupère c, h
 out, _ = Lux.apply(trained, val_batch, params, states)
@@ -70,7 +77,7 @@ a1 = @. w0 - c0
 # --- 5) Monte Carlo 1-step pour q = βR u'(c1)/u'(c0)
 μ = Float32(P_resid.y)
 z0 = log.(y0) .- μ
-ρ = Float32(P.ρ)
+ρ = Float32(P.ρ_shock)
 σϵ = settings.sigma_shocks === nothing ? Float32(P.σ_shock) : Float32(settings.sigma_shocks)
 β = Float32(P.β)
 R = 1.0f0 + Float32(P.r)
@@ -102,12 +109,9 @@ gh = ThesisProject.NNKernel.eval_euler_residuals_gh(
     P = P,
 )
 stats = hasproperty(gh, :stats) ? gh.stats : gh[:stats]
-
-# --- 7) Monotonicité en w (pour y fixé): corrélation Spearman entre w et c
-using StatsBase
-idx = rand(1:length(y0))                     # pick un y
+idx = rand(1:length(y0))
 yy = fill(y0[idx], length(w0))
-ww = sort(w0)                               # grille croissante de w
+ww = sort(w0)
 Xmon = vcat(reshape(yy, 1, :), reshape(ww, 1, :))
 NXm = ThesisProject.NNKernel.normalize_feature_batch(scaler, Xmon)
 outm, _ = Lux.apply(trained, NXm, params, states)
