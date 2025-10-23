@@ -16,6 +16,9 @@ struct NNSolverSettings
     lr_min::Float64
     lr_max::Float64
     lr_decay_horizon::Int
+    lr_schedule::Symbol
+    lr_gamma::Float64
+    lr_milestones::Vector{Int}
     warmup_epochs::Int
     verbose::Bool
     resample_interval::Int
@@ -154,6 +157,55 @@ function solver_settings(
     warmup_epochs = max(Int(get_option(opts, :warmup_epochs, 0)), 0)
     lr_decay_horizon =
         max(Int(get_option(opts, :lr_decay_horizon, epochs - warmup_epochs)), 0)
+    schedule_raw = Symbol(get_option(opts, :lr_schedule, :cosine))
+    lr_schedule = schedule_raw in (:cosine, :exponential) ? schedule_raw : :cosine
+    if schedule_raw ∉ (:cosine, :exponential)
+        @warn "Unknown lr_schedule=$(schedule_raw); defaulting to :cosine"
+    end
+    gamma_opt = get_option(opts, :lr_gamma, nothing)
+    lr_gamma = gamma_opt === nothing ? NaN : Float64(gamma_opt)
+    if !isnan(lr_gamma) && lr_gamma <= 0
+        @warn "Configured lr_gamma=$(lr_gamma) must be positive; ignoring value"
+        lr_gamma = NaN
+    end
+    milestones_opt = get_option(opts, :lr_milestones, nothing)
+    lr_milestones = Int[]
+    if milestones_opt !== nothing
+        try
+            vals = Int.(collect(milestones_opt))
+            vals = filter(>=(1), vals)
+            sort!(vals)
+            unique!(vals)
+            lr_milestones = vals
+        catch err
+            @warn "Failed to parse lr_milestones=$(milestones_opt); ignoring" err = err
+            lr_milestones = Int[]
+        end
+    end
+    if lr_schedule === :exponential
+        if isempty(lr_milestones)
+            steps = max(lr_decay_horizon, 1)
+            if isnan(lr_gamma)
+                if lr_max > lr_min && steps > 0
+                    lr_gamma = (lr_min / lr_max)^(1 / steps)
+                else
+                    lr_gamma = 1.0
+                end
+            end
+        else
+            if isnan(lr_gamma)
+                if lr_max > lr_min
+                    lr_gamma = clamp(lr_min / lr_max, floatmin(Float64), 1.0)
+                else
+                    lr_gamma = 1.0
+                end
+            end
+        end
+        lr_gamma = clamp(lr_gamma, floatmin(Float64), Inf)
+    else
+        lr_gamma = 1.0
+        lr_milestones = Int[]
+    end
     learning_rate = lr_max
     verbose = Bool(get_option(opts, :verbose, false))
     # resample every epoch by default for stability
@@ -254,6 +306,9 @@ function solver_settings(
         lr_min,
         lr_max,
         lr_decay_horizon,
+        lr_schedule,
+        lr_gamma,
+        lr_milestones,
         warmup_epochs,
         verbose,
         resample_interval,
@@ -302,6 +357,43 @@ function cosine_learning_rate(settings::NNSolverSettings, epoch::Int)
     end
     cos_term = 0.5 * (1 + cos(pi * t / horizon))
     return lr_min + (lr_max - lr_min) * cos_term
+end
+
+function exponential_learning_rate(settings::NNSolverSettings, epoch::Int)
+    epoch ≤ 0 && return settings.lr_max
+    warmup = settings.warmup_epochs
+    lr_min = settings.lr_min
+    lr_max = settings.lr_max
+    if warmup > 0 && epoch ≤ warmup
+        frac = epoch / warmup
+        return lr_min + (lr_max - lr_min) * frac
+    end
+    # Steps counted after warmup
+    t = max(epoch - warmup, 0)
+    gamma = settings.lr_gamma
+    milestones = settings.lr_milestones
+    horizon = settings.lr_decay_horizon
+    if isempty(milestones)
+        steps = horizon > 0 ? min(t, horizon) : t
+    else
+        steps = count(m -> epoch ≥ m, milestones)
+    end
+    if steps <= 0
+        return lr_max
+    end
+    new_lr = lr_max * gamma^steps
+    floor_val = max(lr_min, floatmin(Float64))
+    return clamp(new_lr, floor_val, lr_max)
+end
+
+function learning_rate_for_epoch(settings::NNSolverSettings, epoch::Int)
+    if settings.lr_schedule === :cosine
+        return cosine_learning_rate(settings, epoch)
+    elseif settings.lr_schedule === :exponential
+        return exponential_learning_rate(settings, epoch)
+    else
+        return settings.lr_max
+    end
 end
 
 adjust_learning_rate(opt, lr) = opt
@@ -821,7 +913,7 @@ function train_consumption_network!(
     stall_epochs = 0
     current_lr = NaN
     for epoch = 1:settings.epochs
-        new_lr = cosine_learning_rate(settings, epoch)
+        new_lr = learning_rate_for_epoch(settings, epoch)
         if !(
             isfinite(current_lr) && isapprox(new_lr, current_lr; atol = 1e-12, rtol = 1e-6)
         )
