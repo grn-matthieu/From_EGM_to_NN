@@ -45,6 +45,7 @@ solver:
   nn:
     epochs: 5000
     batch: 16
+    optimizer: adam
     lr: 1.0e-3
     lr_min: 1.0e-5
     lr_max: 1.0e-3

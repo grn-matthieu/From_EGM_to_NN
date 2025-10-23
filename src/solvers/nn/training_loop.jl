@@ -5,6 +5,7 @@ import Adapt
 using Lux: fmap
 using ChainRulesCore: ignore_derivatives
 using LinearAlgebra: diag
+using Optimisers
 
 include("preprocessing.jl")
 
@@ -13,6 +14,7 @@ struct NNSolverSettings
     epochs::Int
     batch_choice::Union{Nothing,Int}
     learning_rate::Float64
+    optimizer::Symbol
     lr_min::Float64
     lr_max::Float64
     lr_decay_horizon::Int
@@ -299,10 +301,41 @@ function solver_settings(
         end
     end
 
+    optimizer_raw = get_option(opts, :optimizer, :adam)
+    optimizer = try
+        Symbol(lowercase(String(optimizer_raw)))
+    catch err
+        @warn "Failed to parse optimizer option $(optimizer_raw); defaulting to :adam" err =
+            err
+        :adam
+    end
+    function canonical_optimizer(sym)
+        if sym === :adam
+            return :adam
+        elseif sym in (:rmsprop, :rms_prop)
+            return :rmsprop
+        elseif sym in (:adagrad, :ada_grad)
+            return :adagrad
+        elseif sym in (:sgd, :descent)
+            return :sgd
+        else
+            return nothing
+        end
+    end
+    canonical = canonical_optimizer(optimizer)
+    supported_optimizers = (:adam, :rmsprop, :adagrad, :sgd)
+    if canonical === nothing
+        @warn "Unknown optimizer=$(optimizer_raw); supported options are $(collect(supported_optimizers))" optimizer =
+            :adam
+    else
+        optimizer = canonical
+    end
+
     return NNSolverSettings(
         epochs,
         batch_choice,
         learning_rate,
+        optimizer,
         lr_min,
         lr_max,
         lr_decay_horizon,
@@ -335,8 +368,25 @@ function build_network(input_dim::Int, settings::NNSolverSettings)
     return Chain(Dense(input_dim, h1, relu), Dense(h1, h2, relu), Dense(h2, 1, softplus))
 end
 
-create_optimizer(settings::NNSolverSettings) =
-    Optimisers.OptimiserChain(Optimisers.ClipGrad(0.02), Optimisers.Adam(settings.lr_max))
+function base_optimizer(optimizer::Symbol, lr::Float64)
+    if optimizer === :adam
+        return Optimisers.Adam(lr)
+    elseif optimizer === :rmsprop
+        return Optimisers.RMSProp(lr)
+    elseif optimizer === :adagrad
+        return Optimisers.AdaGrad(lr)
+    elseif optimizer === :sgd
+        return Optimisers.Descent(lr)
+    else
+        @warn "Unsupported optimizer=$(optimizer); falling back to Adam"
+        return Optimisers.Adam(lr)
+    end
+end
+
+function create_optimizer(settings::NNSolverSettings)
+    base = base_optimizer(settings.optimizer, settings.learning_rate)
+    return Optimisers.OptimiserChain(Optimisers.ClipGrad(0.02), base)
+end
 
 function cosine_learning_rate(settings::NNSolverSettings, epoch::Int)
     epoch ≤ 0 && return settings.lr_max
@@ -396,11 +446,61 @@ function learning_rate_for_epoch(settings::NNSolverSettings, epoch::Int)
     end
 end
 
-adjust_learning_rate(opt, lr) = opt
+function adjust_learning_rate(opt, lr)
+    # Prefer explicit handling for common optimisers to avoid MethodErrors
+    # when constructors differ across Optimisers.jl versions.
+    if opt isa Optimisers.Adam
+        # Try keyword-style constructors that recent Optimisers expose.
+        beta = getproperty(opt, :beta)
+        # Try common epsilon field names
+        eps_val =
+            hasproperty(opt, :epsilon) ? getproperty(opt, :epsilon) :
+            (hasproperty(opt, :eps) ? getproperty(opt, :eps) : nothing)
+        try
+            if eps_val === nothing
+                return Optimisers.Adam(; eta = Float64(lr), beta = beta)
+            else
+                return Optimisers.Adam(; eta = Float64(lr), beta = beta, epsilon = eps_val)
+            end
+        catch err
+            # Last-resort: attempt to reconstruct by positional fields (best-effort)
+            try
+                fields = fieldnames(typeof(opt))
+                target = findfirst(
+                    name -> name === :eta || name === :lr || name === :learning_rate,
+                    fields,
+                )
+                if target === nothing
+                    return opt
+                end
+                target_field = fields[target]
+                values = map(fields) do name
+                    name === target_field ? Float64(lr) : getfield(opt, name)
+                end
+                return (typeof(opt))(values...)
+            catch
+                return opt
+            end
+        end
+    end
 
-function adjust_learning_rate(opt::Optimisers.Adam, lr)
-    # Optimisers.Adam constructor takes positional arguments (eta, beta, epsilon)
-    return Optimisers.Adam(lr, opt.beta, opt.epsilon)
+    # Generic fallback: try to locate a common learning-rate-like field and
+    # reconstruct the optimiser. If that fails, return the original optimiser.
+    fields = fieldnames(typeof(opt))
+    target =
+        findfirst(name -> name === :eta || name === :lr || name === :learning_rate, fields)
+    if target === nothing
+        return opt
+    end
+    target_field = fields[target]
+    values = map(fields) do name
+        name === target_field ? lr : getfield(opt, name)
+    end
+    try
+        return (typeof(opt))(values...)
+    catch
+        return opt
+    end
 end
 
 function adjust_learning_rate(opt::Optimisers.OptimiserChain, lr)

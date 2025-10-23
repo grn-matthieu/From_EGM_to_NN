@@ -150,6 +150,7 @@ function build_options_summary(settings, training_result, runtime)
         epochs_run = training_result.epochs_run,
         batch = training_result.batch_size,
         lr = settings.learning_rate,
+        optimizer = settings.optimizer,
         lr_min = settings.lr_min,
         lr_max = settings.lr_max,
         lr_decay_horizon = settings.lr_decay_horizon,
