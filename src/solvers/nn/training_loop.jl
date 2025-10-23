@@ -405,9 +405,8 @@ end
 
 function adjust_learning_rate(opt::Optimisers.OptimiserChain, lr)
     # OptimiserChain stores its stages in the `opts` field
-    new_opts = map(opt.opts) do stage
-        adjust_learning_rate(stage, lr)
-    end
+    # Map over the inner stages and adjust each stage's learning rate.
+    new_opts = map(stage -> adjust_learning_rate(stage, lr), opt.opts)
     return Optimisers.OptimiserChain(new_opts...)
 end
 
@@ -917,7 +916,10 @@ function train_consumption_network!(
         if !(
             isfinite(current_lr) && isapprox(new_lr, current_lr; atol = 1e-12, rtol = 1e-6)
         )
-            apply_optimizer_learning_rate!(train_state, new_lr)
+            # apply_optimizer_learning_rate! may return a new TrainState when using
+            # Lux.Training.TrainState (immutable). Capture and reassign so the
+            # optimizer update takes effect.
+            train_state = apply_optimizer_learning_rate!(train_state, new_lr)
             current_lr = new_lr
         end
         if settings.resample_interval > 0 && epoch % settings.resample_interval == 0
