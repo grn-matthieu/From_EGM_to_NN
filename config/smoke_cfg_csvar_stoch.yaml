@@ -46,6 +46,10 @@ solver:
     epochs: 5000
     batch: 16
     lr: 1.0e-3
+    lr_min: 1.0e-5
+    lr_max: 1.0e-3
+    lr_decay_horizon: 4500
+    warmup_epochs: 100
     hid1: 64
     hid2: 64
     n_mc: 16
