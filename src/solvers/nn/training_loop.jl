@@ -13,6 +13,10 @@ struct NNSolverSettings
     epochs::Int
     batch_choice::Union{Nothing,Int}
     learning_rate::Float64
+    lr_min::Float64
+    lr_max::Float64
+    lr_decay_horizon::Int
+    warmup_epochs::Int
     verbose::Bool
     resample_interval::Int
     target_loss::Float32
@@ -140,7 +144,17 @@ function solver_settings(
     epochs = max(Int(get_option(opts, :epochs, 1000)), 0)
     batch_choice = get_option(opts, :batch, 64)
     batch_choice = isnothing(batch_choice) ? nothing : max(Int(batch_choice), 1)
-    learning_rate = Float64(get_option(opts, :lr, 1e-3))
+    base_lr = Float64(get_option(opts, :lr, 1e-3))
+    lr_max = Float64(get_option(opts, :lr_max, base_lr))
+    lr_min = Float64(get_option(opts, :lr_min, min(base_lr, lr_max)))
+    if lr_min > lr_max
+        @warn "Configured lr_min=$(lr_min) exceeds lr_max=$(lr_max); swapping values"
+        lr_min, lr_max = lr_max, lr_min
+    end
+    warmup_epochs = max(Int(get_option(opts, :warmup_epochs, 0)), 0)
+    lr_decay_horizon =
+        max(Int(get_option(opts, :lr_decay_horizon, epochs - warmup_epochs)), 0)
+    learning_rate = lr_max
     verbose = Bool(get_option(opts, :verbose, false))
     # resample every epoch by default for stability
     resample_interval = max(Int(get_option(opts, :resample_every, 1)), 0)
@@ -237,6 +251,10 @@ function solver_settings(
         epochs,
         batch_choice,
         learning_rate,
+        lr_min,
+        lr_max,
+        lr_decay_horizon,
+        warmup_epochs,
         verbose,
         resample_interval,
         target_loss,
@@ -262,10 +280,68 @@ function build_network(input_dim::Int, settings::NNSolverSettings)
     return Chain(Dense(input_dim, h1, relu), Dense(h1, h2, relu), Dense(h2, 1, softplus))
 end
 
-create_optimizer(settings::NNSolverSettings) = Optimisers.OptimiserChain(
-    Optimisers.ClipGrad(0.02),
-    Optimisers.Adam(settings.learning_rate),
-)
+create_optimizer(settings::NNSolverSettings) =
+    Optimisers.OptimiserChain(Optimisers.ClipGrad(0.02), Optimisers.Adam(settings.lr_max))
+
+function cosine_learning_rate(settings::NNSolverSettings, epoch::Int)
+    epoch ≤ 0 && return settings.lr_max
+    warmup = settings.warmup_epochs
+    lr_min = settings.lr_min
+    lr_max = settings.lr_max
+    if warmup > 0 && epoch ≤ warmup
+        frac = epoch / warmup
+        return lr_min + (lr_max - lr_min) * frac
+    end
+    t = max(epoch - warmup, 0)
+    horizon = settings.lr_decay_horizon
+    if horizon ≤ 0
+        return lr_min
+    end
+    if t ≥ horizon
+        return lr_min
+    end
+    cos_term = 0.5 * (1 + cos(pi * t / horizon))
+    return lr_min + (lr_max - lr_min) * cos_term
+end
+
+adjust_learning_rate(opt, lr) = opt
+
+function adjust_learning_rate(opt::Optimisers.Adam, lr)
+    # Optimisers.Adam constructor takes positional arguments (eta, beta, epsilon)
+    return Optimisers.Adam(lr, opt.beta, opt.epsilon)
+end
+
+function adjust_learning_rate(opt::Optimisers.OptimiserChain, lr)
+    # OptimiserChain stores its stages in the `opts` field
+    new_opts = map(opt.opts) do stage
+        adjust_learning_rate(stage, lr)
+    end
+    return Optimisers.OptimiserChain(new_opts...)
+end
+
+function apply_optimizer_learning_rate!(state, lr)
+    # Support both older `:opt` field and Lux.Training.TrainState's `:optimizer`
+    if hasproperty(state, :opt)
+        current_opt = getfield(state, :opt)
+        updated_opt = adjust_learning_rate(current_opt, lr)
+        if updated_opt !== current_opt
+            setfield!(state, :opt, updated_opt)
+        end
+        return state
+    elseif hasproperty(state, :optimizer)
+        current_opt = getfield(state, :optimizer)
+        updated_opt = adjust_learning_rate(current_opt, lr)
+        if updated_opt === current_opt
+            return state
+        end
+        # Lux.Training.TrainState is immutable; construct a new TrainState
+        mdl = hasproperty(state, :model) ? getfield(state, :model) : nothing
+        ps = hasproperty(state, :parameters) ? getfield(state, :parameters) : nothing
+        st = hasproperty(state, :states) ? getfield(state, :states) : nothing
+        return Lux.Training.TrainState(mdl, ps, st, updated_opt)
+    end
+    return state
+end
 
 function compute_batch_size(total_samples::Int, choice::Union{Nothing,Int})
     return isnothing(choice) ? max(total_samples, 1) :
@@ -743,7 +819,15 @@ function train_consumption_network!(
     best_state = train_state
     best_loss = Inf
     stall_epochs = 0
+    current_lr = NaN
     for epoch = 1:settings.epochs
+        new_lr = cosine_learning_rate(settings, epoch)
+        if !(
+            isfinite(current_lr) && isapprox(new_lr, current_lr; atol = 1e-12, rtol = 1e-6)
+        )
+            apply_optimizer_learning_rate!(train_state, new_lr)
+            current_lr = new_lr
+        end
         if settings.resample_interval > 0 && epoch % settings.resample_interval == 0
             batch, _ = create_training_batch(
                 G,
