@@ -122,25 +122,27 @@ end
 end
 
 @testset "CSVar utilities" begin
-    @test CSVarUtils.csvar_income(4.0) == 4.0
-    @test CSVarUtils.csvar_income([2.0, 4.0]) ≈ 3.0
+    # csvar_income interprets components as log incomes and returns exp-sum
+    @test CSVarUtils.csvar_income(4.0) == exp(4.0)
+    @test CSVarUtils.csvar_income([2.0, 4.0]) ≈ (exp(2.0) + exp(4.0))
     Ymat = [1.0 3.0; 2.0 4.0]
-    @test CSVarUtils.csvar_income(Ymat) ≈ [1.5, 3.5]
+    @test CSVarUtils.csvar_income(Ymat) ≈ [exp(1.0) + exp(2.0), exp(3.0) + exp(4.0)]
     states = [[2.0, 4.0], [0.0, 2.0]]
-    @test CSVarUtils.csvar_income(states) ≈ [3.0, 1.0]
+    @test CSVarUtils.csvar_income(states) ≈ [exp(2.0) + exp(4.0), exp(0.0) + exp(2.0)]
     @test_throws ArgumentError CSVarUtils.csvar_income(Float64[])
 
     a_prev = [0.0, 1.0]
     y_vec = [2.0, 4.0]
     w = CSVarUtils.csvar_cash_on_hand(a_prev, y_vec, 0.05)
-    income_y = sum(y_vec) / length(y_vec)
+    # income is sum(exp(y_vec)) for CSVAR
+    income_y = CSVarUtils.csvar_income(y_vec)
     @test w ≈ (1.05 .* a_prev .+ income_y)
     c = [0.5, 0.75]
     assets = CSVarUtils.csvar_assets_from_cash(w, c)
     @test assets ≈ w .- c
     y_next = [1.0, 3.0]
     w_next = CSVarUtils.csvar_next_cash_on_hand(w, c, y_next, 0.05)
-    income_next = sum(y_next) / length(y_next)
+    income_next = CSVarUtils.csvar_income(y_next)
     @test w_next ≈ (1.05 .* (w .- c) .+ income_next)
 
     Σ = CSVarUtils.csvar_covariance(0.3, 3; variance = 2.0)
