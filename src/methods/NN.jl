@@ -67,7 +67,7 @@ function solve(
     S = get_shocks(model)
     U = get_utility(model)
 
-    master = rng !== nothing ? cfg.random.master_rng : make_master_rng(rng)
+    master = isnothing(rng) ? cfg.random.master_rng : make_master_rng(rng)
 
     # Call the NN kernel to solve the model and return the solution struct
     sol = solve_nn(model; opts = method.opts, rng = derive_rng(master, :nn_kernel))
