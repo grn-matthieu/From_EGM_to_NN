@@ -22,6 +22,10 @@ end
 function build_nn_method(cfg::NamedTuple)
     solver_cfg = cfg.solver
     nn_cfg = solver_cfg.nn
+    cfg_get(nt, sym, default) =
+        hasproperty(nt, sym) ? getfield(nt, sym) :
+        (nt isa AbstractDict ? get(nt, sym, default) : default)
+
     return NNMethod((
         name = solver_cfg.method,
         tol = solver_cfg.tol,
@@ -52,6 +56,9 @@ function build_nn_method(cfg::NamedTuple)
         # pass-through so NNKernel.solver_settings can honor it
         use_cuda = nn_cfg.use_cuda,
         n_mc = nn_cfg.n_mc,
+        bcmc_auto_N = cfg_get(nn_cfg, :bcmc_auto_N, false),
+        bcmc_budget_T = cfg_get(nn_cfg, :bcmc_budget_T, nothing),
+        bcmc_update_every = cfg_get(nn_cfg, :bcmc_update_every, 10),
     ))
 end
 

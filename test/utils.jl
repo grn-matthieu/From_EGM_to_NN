@@ -36,7 +36,7 @@ deep_merge(a::NamedTuple, b) = merge(a, b)
 
 deep_merge(a, b) = b
 
-function _base_solver_block(; method::String = "EGM")
+function _base_solver_block(; method = :EGM)
     return (
         method = method,
         tol = 1.0e-5,
@@ -76,7 +76,7 @@ function _base_solver_block(; method::String = "EGM")
 end
 
 function deterministic_config(;
-    method::String = "EGM",
+    method::Union{String,Symbol} = :EGM,
     Na::Int = 21,
     a_min::Real = 0.0,
     a_max::Real = 5.0,
