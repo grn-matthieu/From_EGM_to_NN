@@ -17,18 +17,22 @@ include("utils/Determinism.jl")
 include("core/api.jl")
 include("core/model_contract.jl")
 
-# 2) utilities
+# 2) grids
+include("grids/grid_types.jl")
+include("grids/factory.jl")
+
+# 3) utilities
 include("utils/Config.jl")
 # include("utils/Schema.jl")
 include("utils/Diagnostics.jl")
 
-# 3) shared + models + model builder
+# 4) shared + models + model builder
 include("models/shared/Shocks.jl")
 include("models/baseline/ConsumerSaving.jl")
 include("models/baseline/ConsumerSavingVAR.jl")
 include("core/model_factory.jl")
 
-# 4) solvers (pure kernels)
+# 5) solvers (pure kernels)
 # common solver utilities
 include("solvers/common/interp.jl")
 include("solvers/common/policy_utils.jl")
@@ -53,7 +57,7 @@ include("solvers/time_iteration/kernel.jl")
 include("solvers/nn/data_nn.jl")
 include("solvers/nn/kernel.jl")
 
-# 5) methods (adapters)
+# 6) methods (adapters)
 include("methods/common/utils.jl")
 include("methods/EGM.jl")
 include("methods/Projection.jl")
@@ -61,14 +65,14 @@ include("methods/Perturbation.jl")
 include("methods/NN.jl")
 include("methods/TimeIteration.jl")
 
-# 6) method factory
+# 7) method factory
 include("core/method_factory.jl")
 
-# 7) simulation
+# 8) simulation
 include("sim/panel.jl")
 using .SimPanel: simulate_panel
 
-# 8) analysis
+# 9) analysis
 include("analysis/SteadyState.jl")
 using .SteadyState: steady_state_analytic, steady_state_from_policy
 
