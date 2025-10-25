@@ -687,7 +687,24 @@ function build_loss_function(
                 Σ = Matrix{Float32}(base_P.Σ)
                 L = cholesky(Symmetric(Σ), check = false).L
                 y_dim = size(Σ, 1)
+                # Determine MC draws K. Default to configured n_mc, but if
+                # bcmc_auto_N is active the controller updates a runtime
+                # `bcmc_state.n_eff` on the model_cfg; prefer that value when
+                # present so Auto-N takes effect during iterations.
                 K = settings.n_mc
+                if model_cfg !== nothing && hasproperty(model_cfg, :bcmc_state)
+                    st_auto = getfield(model_cfg, :bcmc_state)
+                    if hasproperty(st_auto, :n_eff)
+                        try
+                            # n_eff may be a Ref or numeric container; round and
+                            # clamp to a safe integer ≥ 2 when possible.
+                            n_eff_val = Int(clamp(round(st_auto.n_eff[]), 2, typemax(Int)))
+                            K = max(n_eff_val, 1)
+                        catch
+                            # ignore errors and fall back to settings.n_mc
+                        end
+                    end
+                end
 
                 # Preallocate
                 resid_vec = Vector{Float32}(undef, length(a_next))

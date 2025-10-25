@@ -63,7 +63,7 @@ solver:
     sigma_shocks: null
     target_loss: 1.0e-4
     use_cuda: false
-    bcmc_auto_N: false
+    bcmc_auto_N: true
     bcmc_budget_T: null
     bcmc_update_every: 10
 
