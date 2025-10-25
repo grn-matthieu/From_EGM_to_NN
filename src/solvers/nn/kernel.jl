@@ -28,6 +28,7 @@ include("evaluation.jl")
 export solve_nn
 
 const H_ALPHA = 1.0f0
+const EPS_VAR = 1e-12
 
 """Construct the dual-head Lux model used by the solver."""
 function build_dual_head_network(input_dim::Int, hidden::NTuple{2,Int})
@@ -48,9 +49,10 @@ function build_model_config(P, U, scaler, P_resid, settings)
     # Internal adaptive state for bc-MC Auto-N (held in Refs to allow updates)
     bcmc_state = (
         n_eff = Ref(settings.n_mc),
-        v_mu2 = Ref(0.0),    # Var_s( mu(s)^2 ) estimate
-        e_sig4 = Ref(0.0),   # E_s[ Var(g|s)^2 ] estimate
-        call_count = Ref(0),
+        sigma2 = Ref(0.0),
+        rho = Ref(0.0),
+        A = Ref(0.0),
+        B = Ref(0.0),
     )
     return (
         P = P,
@@ -482,7 +484,7 @@ function loss_euler_fb_aio_csvar!(chain, ps, st, batch, model_cfg, rng)
     (st1, (; kt_mean = mean(kt), aio_mean = mean(aio_pen), max_abs_q = max_abs_q))
 end
 
-function loss_euler_fb_bcmc_ar1!(chain, ps, st, batch, model_cfg, rng)
+function loss_euler_fb_bcmc_ar1!(chain, ps, st, batch, model_cfg, rng; mode = :default)
     P = model_cfg.P
     U = model_cfg.U
     scaler = model_cfg.scaler
@@ -504,15 +506,15 @@ function loss_euler_fb_bcmc_ar1!(chain, ps, st, batch, model_cfg, rng)
     w0 = ((w_norm .+ one(T)) ./ T(2)) .* T(scaler.w_range) .+ T(scaler.w_min)
     z0 = log.(y0) .- μ
 
-    out, st1 = Lux.apply(chain, batch, ps, st)
+    batch_mat = batch
+    ndims(batch) == 1 && (batch_mat = reshape(batch, :, 1))
+    out, st1 = Lux.apply(chain, batch_mat, ps, st)
     c0 = vec(phi_to_consumption(out[:Φ], w0; min_c = C_MIN))
     eta = T.(vec(ensure_row(out[:h])))
     a_term = @. one(T) - c0 / w0
     a_curr = @. w0 - c0
 
-    # Determine effective N with optional Auto-N (variance-minimizing) and budget cap
     auto = hasproperty(settings, :bcmc_auto_N) && settings.bcmc_auto_N
-    # Budget-implied cap (interpreted in pairwise-units to preserve prior behavior)
     N_cap = typemax(Int)
     if hasproperty(settings, :bcmc_budget_T) && settings.bcmc_budget_T !== nothing
         Tbudget = Int(getfield(settings, :bcmc_budget_T))
@@ -521,23 +523,49 @@ function loss_euler_fb_bcmc_ar1!(chain, ps, st, batch, model_cfg, rng)
         approxN = Int(floor((1 + sqrt(1 + 8 * pairs_per_state)) / 2))
         N_cap = max(approxN, 2)
     end
-    baseN = min(settings.n_mc, N_cap == typemax(Int) ? settings.n_mc : N_cap)
-    N = baseN
+
+    if mode === :fb_scalar
+        β = T(P.β)
+        ρ = T(P.ρ_shock)
+        Rg = one(T) + T(P.r)
+        uprime = U.u_prime
+        z_next = ρ .* (log.(y0) .- μ)
+        y_next = exp.(μ .+ z_next)
+        w_next = Rg .* a_curr .+ y_next
+        Xn = ignore_derivatives() do
+            if feature_dim == 2
+                X = vcat(
+                    reshape(T.(y_next), 1, state_count),
+                    reshape(T.(w_next), 1, state_count),
+                )
+                normalize_feature_batch(scaler, X)
+            else
+                comps = Matrix{T}(undef, feature_dim - 2, state_count)
+                for j = 1:(feature_dim-2)
+                    comps[j, :] .= T(exp(μ))
+                end
+                X = vcat(
+                    reshape(T.(y_next), 1, state_count),
+                    comps,
+                    reshape(T.(w_next), 1, state_count),
+                )
+                normalize_feature_batch(scaler, X)
+            end
+        end
+        outn, _ = Lux.apply(chain, Xn, ps, st1)
+        cn = vec(phi_to_consumption(outn[:Φ], w_next; min_c = C_MIN))
+        qn = β .* Rg .* uprime(cn) ./ uprime(c0)
+        residual = @. one(T) - qn - eta
+        residual_sq = residual .* residual
+        return residual_sq
+    end
+
+    baseN = settings.n_mc
     if auto && hasproperty(model_cfg, :bcmc_state)
         st_auto = getfield(model_cfg, :bcmc_state)
-        st_auto.call_count[] += 1
-        # Use last-epoch moment estimates to propose N*
-        v_mu2 = max(Float64(st_auto.v_mu2[]), eps(Float64))
-        e_sig4 = max(Float64(st_auto.e_sig4[]), 0.0)
-        N_star = 1 + sqrt(2 * e_sig4 / v_mu2)
-        # Cap by budget if present
-        capN = (N_cap == typemax(Int)) ? Int(1e6) : N_cap
-        N_prop = Int(clamp(round(N_star), 2, capN))
-        if st_auto.call_count[] % max(getfield(settings, :bcmc_update_every), 1) == 0
-            st_auto.n_eff[] = N_prop
-        end
-        N = min(st_auto.n_eff[], capN)
+        baseN = Int(clamp(round(st_auto.n_eff[]), 2, typemax(Int)))
     end
+    N = min(baseN, N_cap == typemax(Int) ? baseN : N_cap)
     N >= 2 || throw(ArgumentError("objective :euler_fb_bcmc requires N >= 2 (got $(N))"))
     n_eff = N
 
@@ -608,22 +636,12 @@ function loss_euler_fb_bcmc_ar1!(chain, ps, st, batch, model_cfg, rng)
     var_vec = clamp.(r_sumsq .* invN .- (r_sum .* invN) .* (r_sum .* invN), zero(T), T(Inf))
     gvar_mean = mean(var_vec)
 
-    # Update Auto-N moment estimates for the next call
-    if auto && hasproperty(model_cfg, :bcmc_state)
-        st_auto = getfield(model_cfg, :bcmc_state)
-        invN = one(T) / T(N)
-        μ_hat = r_sum .* invN
-        σ2_hat = clamp.(r_sumsq .* invN .- μ_hat .* μ_hat, zero(T), T(Inf))
-        μ2 = μ_hat .* μ_hat
-        μ2_mean = mean(μ2)
-        μ2_sq_mean = mean(μ2 .* μ2)
-        v_mu2_hat = max(Float64(μ2_sq_mean - μ2_mean * μ2_mean), 0.0)
-        e_sig4_hat = Float64(mean(σ2_hat .* σ2_hat))
-        st_auto.v_mu2[] = v_mu2_hat
-        st_auto.e_sig4[] = e_sig4_hat
-    end
-
     loss_vec = kt .+ v_h .* bcmc
+    proxy_state =
+        hasproperty(model_cfg, :bcmc_state) ? getfield(model_cfg, :bcmc_state) : nothing
+    A_proxy = proxy_state === nothing ? NaN : Float64(proxy_state.A[])
+    B_proxy = proxy_state === nothing ? NaN : Float64(proxy_state.B[])
+    ratio_proxy = isnan(B_proxy) || abs(B_proxy) ≤ EPS_VAR ? Inf : A_proxy / B_proxy
     return mean(loss_vec),
     (
         st1,
@@ -633,11 +651,14 @@ function loss_euler_fb_bcmc_ar1!(chain, ps, st, batch, model_cfg, rng)
             gvar_mean = gvar_mean,
             n_eff = n_eff,
             max_abs_q = max_abs_q,
+            bcmc_A = A_proxy,
+            bcmc_B = B_proxy,
+            bcmc_ratio = ratio_proxy,
         ),
     )
 end
 
-function loss_euler_fb_bcmc_csvar!(chain, ps, st, batch, model_cfg, rng)
+function loss_euler_fb_bcmc_csvar!(chain, ps, st, batch, model_cfg, rng; mode = :default)
     P = model_cfg.P
     U = model_cfg.U
     scaler = model_cfg.scaler
@@ -653,13 +674,14 @@ function loss_euler_fb_bcmc_csvar!(chain, ps, st, batch, model_cfg, rng)
     y_dim = size(comps, 1) > 0 ? size(comps, 1) : 1
     y_matrix = size(comps, 1) == 0 ? reshape(mean_vals, 1, :) : comps
 
-    out, st1 = Lux.apply(chain, batch, ps, st)
+    batch_mat = batch
+    ndims(batch) == 1 && (batch_mat = reshape(batch, :, 1))
+    out, st1 = Lux.apply(chain, batch_mat, ps, st)
     c0 = vec(phi_to_consumption(out[:Φ], w0; min_c = C_MIN))
     eta = T.(vec(ensure_row(out[:h])))
     a_term = @. one(T) - c0 / w0
     a_curr = @. w0 - c0
 
-    # Determine effective N with optional Auto-N (variance-minimizing) and budget cap
     auto = hasproperty(settings, :bcmc_auto_N) && settings.bcmc_auto_N
     N_cap = typemax(Int)
     if hasproperty(settings, :bcmc_budget_T) && settings.bcmc_budget_T !== nothing
@@ -669,21 +691,39 @@ function loss_euler_fb_bcmc_csvar!(chain, ps, st, batch, model_cfg, rng)
         approxN = Int(floor((1 + sqrt(1 + 8 * pairs_per_state)) / 2))
         N_cap = max(approxN, 2)
     end
-    baseN = min(settings.n_mc, N_cap == typemax(Int) ? settings.n_mc : N_cap)
-    N = baseN
+
+    if mode === :fb_scalar
+        Rg = one(T) + T(P.r)
+        β = T(P.β)
+        uprime = U.u_prime
+        A = Matrix{T}(P.A)
+        Σ = Matrix{Float64}(P.Σ)
+        chol = cholesky(Symmetric(Σ), check = false)
+        L = Matrix{T}(chol.L)
+        ε = zeros(T, size(L, 2), n)
+        y_next, income_next = ignore_derivatives() do
+            y_ = A * y_matrix .+ L * ε
+            inc = collect(map(i -> T(csvar_income(view(y_, :, i))), 1:n))
+            (y_, inc)
+        end
+        w_next = Rg .* a_curr .+ income_next
+        Xn = ignore_derivatives() do
+            build_feature_batch_from_states(scaler, y_next, w_next)
+        end
+        outn, _ = Lux.apply(chain, Xn, ps, st1)
+        c_next = vec(phi_to_consumption(outn[:Φ], w_next; min_c = C_MIN))
+        q_next = β .* Rg .* uprime(c_next) ./ uprime(c0)
+        residual = @. one(T) - q_next - eta
+        residual_sq = residual .* residual
+        return residual_sq
+    end
+
+    baseN = settings.n_mc
     if auto && hasproperty(model_cfg, :bcmc_state)
         st_auto = getfield(model_cfg, :bcmc_state)
-        st_auto.call_count[] += 1
-        v_mu2 = max(Float64(st_auto.v_mu2[]), eps(Float64))
-        e_sig4 = max(Float64(st_auto.e_sig4[]), 0.0)
-        N_star = 1 + sqrt(2 * e_sig4 / v_mu2)
-        capN = (N_cap == typemax(Int)) ? Int(1e6) : N_cap
-        N_prop = Int(clamp(round(N_star), 2, capN))
-        if st_auto.call_count[] % max(getfield(settings, :bcmc_update_every), 1) == 0
-            st_auto.n_eff[] = N_prop
-        end
-        N = min(st_auto.n_eff[], capN)
+        baseN = Int(clamp(round(st_auto.n_eff[]), 2, typemax(Int)))
     end
+    N = min(baseN, N_cap == typemax(Int) ? baseN : N_cap)
     N >= 2 || throw(ArgumentError("objective :euler_fb_bcmc requires N >= 2 (got $(N))"))
     n_eff = N
 
@@ -738,22 +778,12 @@ function loss_euler_fb_bcmc_csvar!(chain, ps, st, batch, model_cfg, rng)
     var_vec = clamp.(r_sumsq .* invN .- (r_sum .* invN) .* (r_sum .* invN), zero(T), T(Inf))
     gvar_mean = mean(var_vec)
 
-    # Update Auto-N moment estimates for the next call
-    if auto && hasproperty(model_cfg, :bcmc_state)
-        st_auto = getfield(model_cfg, :bcmc_state)
-        invN = one(T) / T(N)
-        μ_hat = r_sum .* invN
-        σ2_hat = clamp.(r_sumsq .* invN .- μ_hat .* μ_hat, zero(T), T(Inf))
-        μ2 = μ_hat .* μ_hat
-        μ2_mean = mean(μ2)
-        μ2_sq_mean = mean(μ2 .* μ2)
-        v_mu2_hat = max(Float64(μ2_sq_mean - μ2_mean * μ2_mean), 0.0)
-        e_sig4_hat = Float64(mean(σ2_hat .* σ2_hat))
-        st_auto.v_mu2[] = v_mu2_hat
-        st_auto.e_sig4[] = e_sig4_hat
-    end
-
     loss_vec = kt .+ v_h .* bcmc
+    proxy_state =
+        hasproperty(model_cfg, :bcmc_state) ? getfield(model_cfg, :bcmc_state) : nothing
+    A_proxy = proxy_state === nothing ? NaN : Float64(proxy_state.A[])
+    B_proxy = proxy_state === nothing ? NaN : Float64(proxy_state.B[])
+    ratio_proxy = isnan(B_proxy) || abs(B_proxy) ≤ EPS_VAR ? Inf : A_proxy / B_proxy
     return mean(loss_vec),
     (
         st1,
@@ -763,6 +793,9 @@ function loss_euler_fb_bcmc_csvar!(chain, ps, st, batch, model_cfg, rng)
             gvar_mean = gvar_mean,
             n_eff = n_eff,
             max_abs_q = max_abs_q,
+            bcmc_A = A_proxy,
+            bcmc_B = B_proxy,
+            bcmc_ratio = ratio_proxy,
         ),
     )
 end

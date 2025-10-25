@@ -4,7 +4,7 @@ import Zygote
 import Adapt
 using Lux: fmap
 using ChainRulesCore: ignore_derivatives
-using LinearAlgebra: diag
+using LinearAlgebra: diag, dot, I
 using Optimisers
 
 include("preprocessing.jl")
@@ -781,6 +781,102 @@ function flatten_sum_squares(x)
     end
 end
 
+const EPS_VAR = 1e-12
+
+@inline function _var_bcmc_given_N(sigma2_f::Float64, rho_f::Float64, N::Int, T::Int)
+    N ≤ 1 && return Inf
+    denom = max(N - 1, 1)
+    const_term = ((N - 2)^2 + N - 1) * (rho_f^2)
+    mixed_term = (2 * (N - 2) * rho_f + sigma2_f) * sigma2_f
+    return (const_term + mixed_term) / (denom * max(T, 1))
+end
+
+"""
+    estimate_linearized_components(model, ps, st, X_probe, scaler, Σs, Σε)
+
+Compute A and B for the current θ from Jacobians at ε=0 for a small probe batch X_probe.
+Returns (sigma2_f, rho_f, A, B).
+"""
+function estimate_linearized_components(
+    model,
+    ps,
+    st,
+    X_probe,
+    scaler::FeatureScaler,
+    Σs::AbstractMatrix,
+    Σε::AbstractMatrix,
+)
+    nb = size(X_probe, 2)
+    A_acc = 0.0
+    B_acc = 0.0
+    for j = 1:nb
+        xj = @view X_probe[:, j]
+
+        g = ε -> begin
+            x_ε = copy(xj)
+            if scaler.has_shocks
+                if scaler.csvar_mode
+                    off = 1
+                    for k = 1:length(scaler.y_range)
+                        x_ε[off+k] += Float32(ε[k])
+                    end
+                end
+            end
+            return Float64(model(x_ε, ps, st; mode = :fb_scalar))
+        end
+
+        ∇ε = Zygote.gradient(g, zeros(size(Σε, 1)))[1]
+
+        h = svec -> begin
+            x_s = copy(xj)
+            if scaler.has_shocks
+                if scaler.csvar_mode
+                    for k = 1:length(scaler.y_range)
+                        x_s[1+k] += Float32(svec[k])
+                    end
+                    x_s[end] += Float32(svec[end])
+                else
+                    x_s[1] += Float32(svec[1])
+                    x_s[end] += Float32(svec[end])
+                end
+            else
+                x_s[1] += Float32(svec[1])
+                x_s[end] += Float32(svec[end])
+            end
+            return Float64(model(x_s, ps, st; mode = :fb_scalar))
+        end
+
+        ∇s = Zygote.gradient(h, zeros(size(Σs, 1)))[1]
+        A_acc += max(dot(∇ε, Σε * ∇ε), 0.0)
+        B_acc += max(dot(∇s, Σs * ∇s), 0.0)
+    end
+    A = A_acc / nb
+    B = B_acc / nb
+    sigma2_f = max(A + B, EPS_VAR)
+    rho_f = max(B, EPS_VAR)
+    return sigma2_f, rho_f, A, B
+end
+
+"""
+    suggest_bcmc_N(sigma2_f, rho_f, T; N_cap=1024)
+
+Grid search for integer N ≥ 2 minimizing _var_bcmc_given_N, with M = floor(2T/N) ≥ 1.
+"""
+function suggest_bcmc_N(sigma2_f::Float64, rho_f::Float64, T::Int; N_cap::Int = 1024)
+    bestN, bestV = 2, _var_bcmc_given_N(sigma2_f, rho_f, 2, T)
+    Nmax = max(2, min(2T, N_cap))
+    for N = 3:Nmax
+        if (2T ÷ N) < 1
+            continue
+        end
+        v = _var_bcmc_given_N(sigma2_f, rho_f, N, T)
+        if v < bestV
+            bestN, bestV = N, v
+        end
+    end
+    return bestN, bestV
+end
+
 using ..CSVarUtils: csvar_component_log_means
 
 function create_training_batch(
@@ -1067,6 +1163,120 @@ function train_consumption_network!(
                     gradient_norm = sqrt(flatten_sum_squares(ginfo))
                 catch
                     gradient_norm = NaN
+                end
+            end
+
+            if settings.objective === :euler_fb_bcmc &&
+               settings.bcmc_auto_N &&
+               model_cfg !== nothing &&
+               hasproperty(model_cfg, :bcmc_state)
+                step_id = (epoch - 1) * batches_per_epoch + cld(stop, batch_size)
+                if step_id % settings.bcmc_update_every == 0
+                    pairs0 = max(div(settings.n_mc * (settings.n_mc - 1), 2), 1)
+                    default_T = settings.samples_per_epoch * pairs0
+                    Tbudget = something(settings.bcmc_budget_T, default_T)
+                    Tbudget ≤ 0 && continue
+                    st_auto = getfield(model_cfg, :bcmc_state)
+                    curN = Int(clamp(round(st_auto.n_eff[]), 2, typemax(Int)))
+                    M_est = max(fld(2 * Tbudget, max(curN, 1)), 1)
+                    if M_est < 1
+                        continue
+                    end
+
+                    cur_batch = data[1]
+                    probe_cols =
+                        min(size(cur_batch, 2), max(64, Int(sqrt(size(cur_batch, 2)))))
+                    X_probe = @view cur_batch[:, 1:probe_cols]
+                    Xp = settings.use_cuda ? Adapt.adapt(Array, X_probe) : X_probe
+
+                    base_model = select_model(chain, train_state)
+                    ps_cur = state_parameters(train_state)
+                    st_cur = state_states(train_state)
+                    ps_cpu = maybe_to_host(ps_cur, settings)
+                    st_cpu = maybe_to_host(st_cur, settings)
+
+                    scalar_forward = function (x, ps_, st_; mode = :default)
+                        Xmat = ndims(x) == 1 ? reshape(x, :, 1) : x
+                        if mode === :fb_scalar
+                            if hasproperty(model_cfg.P, :Σ) && hasproperty(model_cfg.P, :A)
+                                vals = loss_euler_fb_bcmc_csvar!(
+                                    base_model,
+                                    ps_,
+                                    st_,
+                                    Xmat,
+                                    model_cfg,
+                                    rng;
+                                    mode = :fb_scalar,
+                                )
+                            else
+                                vals = loss_euler_fb_bcmc_ar1!(
+                                    base_model,
+                                    ps_,
+                                    st_,
+                                    Xmat,
+                                    model_cfg,
+                                    rng;
+                                    mode = :fb_scalar,
+                                )
+                            end
+                            return Float64(vals[1])
+                        else
+                            error("fb_scalar wrapper only supports mode=:fb_scalar")
+                        end
+                    end
+
+                    if scaler.csvar_mode
+                        dε = max(length(scaler.y_range), 1)
+                        Σε = Matrix{Float64}(I, dε, dε)
+                        ds = dε + 1
+                        Σs = Matrix{Float64}(I, ds, ds)
+                    else
+                        Σε = Matrix{Float64}(I, 1, 1)
+                        Σs = Matrix{Float64}(I, 2, 2)
+                    end
+
+                    sigma2_f, rho_f, A_lin, B_lin = estimate_linearized_components(
+                        scalar_forward,
+                        ps_cpu,
+                        st_cpu,
+                        Xp,
+                        scaler,
+                        Σs,
+                        Σε,
+                    )
+
+                    rho_eps = max(rho_f, EPS_VAR)
+                    A_eps = max(A_lin, EPS_VAR)
+                    if rho_eps ≤ 10 * EPS_VAR
+                        N_star = min(max(Int(round(2 * Tbudget)), 2), 1024)
+                        V_star = _var_bcmc_given_N(sigma2_f, rho_eps, N_star, Tbudget)
+                    elseif A_eps ≤ 10 * EPS_VAR
+                        N_star = 2
+                        V_star = _var_bcmc_given_N(sigma2_f, rho_eps, N_star, Tbudget)
+                    else
+                        N_star, V_star =
+                            suggest_bcmc_N(sigma2_f, rho_eps, Tbudget; N_cap = 1024)
+                    end
+                    curV = _var_bcmc_given_N(sigma2_f, rho_eps, curN, Tbudget)
+
+                    st_auto.sigma2[] = sigma2_f
+                    st_auto.rho[] = rho_f
+                    st_auto.A[] = A_lin
+                    st_auto.B[] = B_lin
+
+                    if V_star ≤ 0.98 * curV && N_star != curN
+                        st_auto.n_eff[] = N_star
+                        if settings.verbose
+                            ratio = B_lin ≈ 0 ? Inf : A_lin / max(B_lin, EPS_VAR)
+                            @info "bc-MC auto-N update" step = step_id N_old = curN N_new =
+                                N_star sigma2 = sigma2_f rho = rho_f A = A_lin B = B_lin ratio =
+                                ratio
+                        end
+                    elseif settings.verbose
+                        ratio = B_lin ≈ 0 ? Inf : A_lin / max(B_lin, EPS_VAR)
+                        @info "bc-MC auto-N probe" step = step_id N_cur = curN sigma2 =
+                            sigma2_f rho = rho_f A = A_lin B = B_lin ratio = ratio
+                    end
                 end
             end
         end
