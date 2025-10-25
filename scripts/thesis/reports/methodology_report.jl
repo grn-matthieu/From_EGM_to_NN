@@ -23,13 +23,13 @@ Environment overrides:
   - `ABLATION_INTERP="linear,pchip"`
 
 Usage:
-  julia --project=. scripts/experiments/methodology_report.jl [--config=path/to/config.yaml]
+  julia --project=. scripts/thesis/reports/methodology_report.jl [--config=path/to/config.yaml]
 """
 
 module MethodologyReport
 
 import Pkg
-Pkg.activate(normpath(joinpath(@__DIR__, "..", "..")); io = devnull)
+Pkg.activate(normpath(joinpath(@__DIR__, "..", "..", "..")); io = devnull)
 
 using Dates
 using InteractiveUtils: versioninfo
@@ -40,10 +40,10 @@ using Statistics
 using TOML
 using ThesisProject
 
-include(joinpath(@__DIR__, "..", "utils", "config_helpers.jl"))
+include(joinpath(@__DIR__, "..", "..", "utils", "config_helpers.jl"))
 using .ScriptConfigHelpers
 
-const ROOT = normpath(joinpath(@__DIR__, "..", ".."))
+const ROOT = normpath(joinpath(@__DIR__, "..", "..", ".."))
 const RESULT_DIR = joinpath(ROOT, "results", "methodology")
 const RUNS_CSV = joinpath(RESULT_DIR, "methodology_runs.csv")
 const SUMMARY_CSV = joinpath(RESULT_DIR, "methodology_summary.csv")

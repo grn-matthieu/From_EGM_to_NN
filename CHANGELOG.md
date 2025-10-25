@@ -1,3 +1,8 @@
+## [Unreleased]
+### Changed
+- Reorganized `scripts/` into `thesis/{figures,benchmarks,reports}`, keeping CI helpers under `scripts/ci/`.
+- Removed unused debugging scripts (`sweep_vh`, `compare_cpu_gpu_solver`, `evaluate_nn_kernel`, and the bcmc vs AiO probes) so only thesis-critical drivers remain.
+
 ## [0.8.0] - 2025-10-13
 ### Added
 - CSVAR model: new consumer-saving VAR variant with builders/helpers and configs.
@@ -100,4 +105,3 @@ Notes:
 - A quick smoke run of the stress harness with tiny grids completed and wrote `outputs/_smoke_stress.csv`.
 
 [0.3.0]: https://example.com/releases/v0.3.0
-

@@ -3,13 +3,13 @@
 Compute steady state analytically/numerically and verify against EGM policies.
 
 Usage examples:
-  julia --project=. scripts/experiments/steady_state.jl                      # default baseline
-  julia --project=. scripts/experiments/steady_state.jl --config=config/simple_stochastic.yaml
+  julia --project=. scripts/thesis/benchmarks/steady_state.jl                      # default baseline
+  julia --project=. scripts/thesis/benchmarks/steady_state.jl --config=config/simple_stochastic.yaml
 """
 module SteadyStateScript
 
 import Pkg
-Pkg.activate(normpath(joinpath(@__DIR__, "..", "..")); io = devnull)
+Pkg.activate(normpath(joinpath(@__DIR__, "..", "..", "..")); io = devnull)
 
 using LinearAlgebra
 using Printf
@@ -17,10 +17,10 @@ using SparseArrays
 using ThesisProject
 using ThesisProject.Determinism: make_master_rng
 
-include(joinpath(@__DIR__, "..", "utils", "config_helpers.jl"))
+include(joinpath(@__DIR__, "..", "..", "utils", "config_helpers.jl"))
 using .ScriptConfigHelpers
 
-const ROOT = normpath(joinpath(@__DIR__, "..", ".."))
+const ROOT = normpath(joinpath(@__DIR__, "..", "..", ".."))
 
 function parse_args(args)
     cfg = joinpath(ROOT, "config", "simple_baseline.yaml")

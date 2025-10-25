@@ -35,14 +35,16 @@ This inventory lists files under `src/`, `scripts/`, `config/`, `test/`, and `ex
 - `scripts/README.md`: Scripts layout and usage notes.
 - `scripts/ci/smoke.jl`: CI smoke test for configs and quick runs.
 - `scripts/ci/ci_local.sh`: Local helper to mimic CI runs.
-- `scripts/dev/run_simple_all.sh`: Developer helper to run simple EGM solves.
-- `scripts/experiments/compare_egm_projection.jl`: Compare EGM vs Projection methods.
-- `scripts/experiments/compare_methods_deviations.jl`: Compare method deviations across configurations.
-- `scripts/experiments/generate_baseline_csv.jl`: Generate baseline CSV outputs.
-- `scripts/experiments/make_figures_simple.jl`: Produce simple figures from experiment runs.
-- `scripts/experiments/robustness_sweep.jl`: Sweep parameters for robustness checks.
-- `scripts/experiments/steady_state.jl`: Steady‑state computations and reporting.
-- `scripts/experiments/stress_all_methods.jl`: Stress test all methods and configurations.
+- `scripts/thesis/figures/make_figures_simple.jl`: Produce thesis figures for the baseline model.
+- `scripts/thesis/benchmarks/compare_egm_projection.jl`: Compare EGM vs Projection methods.
+- `scripts/thesis/benchmarks/compare_methods_deviations.jl`: Compare deviations across methods.
+- `scripts/thesis/benchmarks/run_all_methods.jl`: Batch runner that records solver metrics.
+- `scripts/thesis/benchmarks/robustness_sweep.jl`: Sweep parameters for robustness checks.
+- `scripts/thesis/benchmarks/steady_state.jl`: Steady‑state computations and reporting.
+- `scripts/thesis/benchmarks/stress_all_methods.jl`: Stress test all methods and configurations.
+- `scripts/thesis/reports/generate_baseline_csv.jl`: Generate baseline CSV outputs.
+- `scripts/thesis/reports/methodology_report.jl`: Run the methodology diagnostics sweep.
+- `scripts/utils/config_helpers.jl`: Shared helpers for patching YAML configs inside scripts.
 
 ## config/
 

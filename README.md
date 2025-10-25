@@ -45,7 +45,7 @@ julia --project -e 'using Pkg; Pkg.test()'
 
 Configuration and experiments
 
-Configs live in `config/`. There are smoke tests and deterministic/stochastic variants to try quick runs. The `scripts/experiments` folder contains example experiment drivers used to produce figures in `docs/` and `results/`.
+Configs live in `config/`. There are smoke tests and deterministic/stochastic variants to try quick runs. Thesis drivers now live under `scripts/thesis/`, grouped into `figures/`, `benchmarks/`, and `reports/`, while CI utilities remain under `scripts/ci/`.
 
 License and contact
 
@@ -55,4 +55,3 @@ Simple notes for contributors
 
 - Use `julia --project` to run code or tests so dependencies are picked up from `Project.toml`.
 - Tests live in `test/`; smaller quick checks are under `test/unit` and `test/integration`.
-

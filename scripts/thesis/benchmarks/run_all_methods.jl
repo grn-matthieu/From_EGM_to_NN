@@ -3,7 +3,7 @@
 module RunAllMethodsSmoke
 
 import Pkg
-Pkg.activate(normpath(joinpath(@__DIR__, "..", "..")); io = devnull)
+Pkg.activate(normpath(joinpath(@__DIR__, "..", "..", "..")); io = devnull)
 
 using Dates
 using Printf
@@ -14,10 +14,10 @@ using Statistics: median
 import ThesisProject.NNKernel: eval_euler_residuals_gh
 
 
-include(joinpath(@__DIR__, "utils", "config_helpers.jl"))
+include(joinpath(@__DIR__, "..", "..", "utils", "config_helpers.jl"))
 using .ScriptConfigHelpers
 
-const ROOT = normpath(joinpath(@__DIR__, ".."))
+const ROOT = normpath(joinpath(@__DIR__, "..", "..", ".."))
 ensure_outputs_dir() = (out = joinpath(ROOT, "outputs"); isdir(out) || mkpath(out); out)
 
 # Determine interpolation mode and helpers to regrid policies to the model grid.

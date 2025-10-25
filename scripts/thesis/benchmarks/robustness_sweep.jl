@@ -10,23 +10,23 @@ Configure via env vars (optional):
   Σ_LIST e.g. "1.0,2.0,3.0"
 
 Run:
-  julia --project=. scripts/experiments/robustness_sweep.jl [--Na=..] [--Nz=..] [--tol=..] [--tol_pol=..]
+  julia --project=. scripts/thesis/benchmarks/robustness_sweep.jl [--Na=..] [--Nz=..] [--tol=..] [--tol_pol=..]
 """
 
 module RobustnessSweep
 
 import Pkg
-Pkg.activate(normpath(joinpath(@__DIR__, "..", "..")); io = devnull)
+Pkg.activate(normpath(joinpath(@__DIR__, "..", "..", "..")); io = devnull)
 using Dates
 using Printf
 using Random
 using ThesisProject
 using Statistics: mean
 
-include(joinpath(@__DIR__, "..", "utils", "config_helpers.jl"))
+include(joinpath(@__DIR__, "..", "..", "utils", "config_helpers.jl"))
 using .ScriptConfigHelpers
 
-const ROOT = normpath(joinpath(@__DIR__, "..", ".."))
+const ROOT = normpath(joinpath(@__DIR__, "..", "..", ".."))
 
 ensure_outputs_dir() = (out = joinpath(ROOT, "outputs"); isdir(out) || mkpath(out); out)
 

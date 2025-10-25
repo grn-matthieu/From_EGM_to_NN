@@ -19,13 +19,13 @@ CLI flags (optional):
   --out=...       custom output CSV path
 
 Usage:
-  julia --project=. scripts/experiments/stress_all_methods.jl [--Na=..] [--Nz=..] [--tol=..] [--tol_pol=..] [--out=...]
+  julia --project=. scripts/thesis/benchmarks/stress_all_methods.jl [--Na=..] [--Nz=..] [--tol=..] [--tol_pol=..] [--out=...]
 """
 
 module StressAllMethods
 
 import Pkg
-Pkg.activate(normpath(joinpath(@__DIR__, "..", "..")); io = devnull)
+Pkg.activate(normpath(joinpath(@__DIR__, "..", "..", "..")); io = devnull)
 
 using Dates
 using Printf
@@ -34,10 +34,10 @@ using LinearAlgebra
 using Statistics: mean
 using ThesisProject
 
-include(joinpath(@__DIR__, "..", "utils", "config_helpers.jl"))
+include(joinpath(@__DIR__, "..", "..", "utils", "config_helpers.jl"))
 using .ScriptConfigHelpers
 
-const ROOT = normpath(joinpath(@__DIR__, "..", ".."))
+const ROOT = normpath(joinpath(@__DIR__, "..", "..", ".."))
 
 ensure_outputs_dir() = (out = joinpath(ROOT, "outputs"); isdir(out) || mkpath(out); out)
 

@@ -3,18 +3,18 @@
 Compare EGM and Projection results on the baseline configuration, reporting
 summary statistics and saving policy/Euler-error comparison plots.
 Run:
-  julia --project=. scripts/experiments/compare_egm_projection.jl
+  julia --project=. scripts/thesis/benchmarks/compare_egm_projection.jl
 """
 module CompareEGMProjection
 import Pkg
-Pkg.activate(normpath(joinpath(@__DIR__, "..", "..")); io = devnull)
+Pkg.activate(normpath(joinpath(@__DIR__, "..", "..", "..")); io = devnull)
 using ThesisProject
 using ThesisProject.Determinism: make_master_rng
 using Statistics: mean, maximum, minimum
 using Plots
-const ROOT = normpath(joinpath(@__DIR__, "..", "..", "outputs"))
+const ROOT = normpath(joinpath(@__DIR__, "..", "..", "..", "outputs"))
 
-include(joinpath(@__DIR__, "..", "utils", "config_helpers.jl"))
+include(joinpath(@__DIR__, "..", "..", "utils", "config_helpers.jl"))
 using .ScriptConfigHelpers
 """Euler error summary statistics for a Solution."""
 function ee_stats(sol)
@@ -38,7 +38,7 @@ function policy_diff_stats(sol_a, sol_b)
 end
 function run()
     cfg = ThesisProject.load_config(
-        joinpath(@__DIR__, "..", "..", "config", "simple_baseline.yaml"),
+        joinpath(@__DIR__, "..", "..", "..", "config", "simple_baseline.yaml"),
     )
 
     cfg_egm = merge_section(cfg, :solver, (; method = :EGM))
