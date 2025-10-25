@@ -3,7 +3,7 @@ import Adapt
 import Zygote
 import Adapt
 using Lux: fmap
-using ChainRulesCore: ignore_derivatives
+using ChainRulesCore: ignore_derivatives, AbstractZero
 using LinearAlgebra: diag, dot, I
 using Optimisers
 
@@ -809,6 +809,47 @@ end
 Compute A and B for the current θ from Jacobians at ε=0 for a small probe batch X_probe.
 Returns (sigma2_f, rho_f, A, B).
 """
+@inline function _shift_features(xj, idxs::Vector{Int}, vals::Vector)
+    isempty(idxs) && return collect(xj)
+    T = eltype(xj)
+    n = length(xj)
+    return [xj[i] + sum(T(v) for (idx, v) in zip(idxs, vals) if idx == i) for i = 1:n]
+end
+
+function _shift_eps_state(xj, scaler::FeatureScaler, ε)
+    if !(scaler.has_shocks && scaler.csvar_mode)
+        return collect(xj)
+    end
+    off = 1
+    ny = length(scaler.y_range)
+    idxs = [off + k for k = 1:ny]
+    vals = [Float32(ε[k]) for k = 1:ny]
+    return _shift_features(xj, idxs, vals)
+end
+
+function _shift_s_state(xj, scaler::FeatureScaler, svec)
+    Tlen = length(xj)
+    if scaler.has_shocks && scaler.csvar_mode
+        ny = length(scaler.y_range)
+        idxs = vcat([1 + k for k = 1:ny], Tlen)
+        vals = vcat(Float32.(svec[1:ny]), Float32(svec[end]))
+        return _shift_features(xj, idxs, vals)
+    else
+        idxs = Tlen == 1 ? [1] : [1, Tlen]
+        vals = Tlen == 1 ? Float32.([svec[1]]) : Float32.([svec[1], svec[end]])
+        return _shift_features(xj, idxs, vals)
+    end
+end
+
+@inline function _grad_to_vector(grad_val, dim::Int)
+    if grad_val === nothing || grad_val isa AbstractZero
+        return zeros(Float64, dim)
+    end
+    grad_vec = grad_val
+    grad_vec isa Number && return fill(Float64(grad_vec), dim)
+    return Float64.(collect(grad_vec))
+end
+
 function estimate_linearized_components(
     model,
     ps,
@@ -825,40 +866,20 @@ function estimate_linearized_components(
         xj = @view X_probe[:, j]
 
         g = ε -> begin
-            x_ε = copy(xj)
-            if scaler.has_shocks
-                if scaler.csvar_mode
-                    off = 1
-                    for k = 1:length(scaler.y_range)
-                        x_ε[off+k] += Float32(ε[k])
-                    end
-                end
-            end
+            x_ε = _shift_eps_state(xj, scaler, ε)
             return Float64(model(x_ε, ps, st; mode = :fb_scalar))
         end
 
-        ∇ε = Zygote.gradient(g, zeros(size(Σε, 1)))[1]
+        raw_∇ε = Zygote.gradient(g, zeros(size(Σε, 1)))[1]
+        ∇ε = _grad_to_vector(raw_∇ε, size(Σε, 1))
 
         h = svec -> begin
-            x_s = copy(xj)
-            if scaler.has_shocks
-                if scaler.csvar_mode
-                    for k = 1:length(scaler.y_range)
-                        x_s[1+k] += Float32(svec[k])
-                    end
-                    x_s[end] += Float32(svec[end])
-                else
-                    x_s[1] += Float32(svec[1])
-                    x_s[end] += Float32(svec[end])
-                end
-            else
-                x_s[1] += Float32(svec[1])
-                x_s[end] += Float32(svec[end])
-            end
+            x_s = _shift_s_state(xj, scaler, svec)
             return Float64(model(x_s, ps, st; mode = :fb_scalar))
         end
 
-        ∇s = Zygote.gradient(h, zeros(size(Σs, 1)))[1]
+        raw_∇s = Zygote.gradient(h, zeros(size(Σs, 1)))[1]
+        ∇s = _grad_to_vector(raw_∇s, size(Σs, 1))
         A_acc += max(dot(∇ε, Σε * ∇ε), 0.0)
         B_acc += max(dot(∇s, Σs * ∇s), 0.0)
     end
@@ -1196,8 +1217,9 @@ function train_consumption_network!(
                     end
 
                     cur_batch = data[1]
+                    sqrt_cols = sqrt(Float64(size(cur_batch, 2)))
                     probe_cols =
-                        min(size(cur_batch, 2), max(64, Int(sqrt(size(cur_batch, 2)))))
+                        min(size(cur_batch, 2), max(64, max(Int(floor(sqrt_cols)), 1)))
                     X_probe = @view cur_batch[:, 1:probe_cols]
                     Xp = settings.use_cuda ? Adapt.adapt(Array, X_probe) : X_probe
 

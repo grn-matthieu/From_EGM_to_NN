@@ -1,0 +1,15 @@
+git_commit = "ee5ae3f0cffe6392d4c7541d3dfac79b0c6aaf09"
+config_path = "/home/grn_matthieu/From_EGM_to_NN/config/smoke_cfg_stoch.yaml"
+seeds = [11]
+timestamp = "2025-10-25T16:30:37Z"
+
+[cli]
+epochs = 200
+batch = 256
+n_mc = 8
+bcmc_update_every = "null"
+bcmc_budget = "null"
+use_cuda = "null"
+tag = "test_autoN"
+notes = ""
+samples_per_epoch = 512

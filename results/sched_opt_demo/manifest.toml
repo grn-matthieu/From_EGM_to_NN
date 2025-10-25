@@ -1,0 +1,16 @@
+git_commit = "ee5ae3f0cffe6392d4c7541d3dfac79b0c6aaf09"
+config_path = "/home/grn_matthieu/From_EGM_to_NN/config/smoke_cfg_stoch.yaml"
+seeds = [11, 19]
+timestamp = "2025-10-25T16:56:29Z"
+
+[cli]
+epochs = 200
+batch = 256
+n_mc = 8
+use_cuda = "null"
+optimizers = ["adam", "rmsprop"]
+tag = "sched_opt_demo"
+samples = 512
+schedulers = ["cosine", "exponential"]
+objective = "euler_fb_bcmc"
+notes = ""
