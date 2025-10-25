@@ -11,7 +11,6 @@ import ..API: solve
 using ..NNKernel: solve_nn
 using ..ValueFunction: compute_value_policy
 using ..Determinism: canonicalize_cfg, derive_rng, hash_hex, promote_master_rng
-using ..UtilsConfig: maybe
 using ..UtilsDiagnostics: mean_abs_error
 
 export NNMethod, build_nn_method
@@ -24,8 +23,8 @@ function build_nn_method(cfg::NamedTuple)
     solver_cfg = cfg.solver
     nn_cfg = solver_cfg.nn
     return NNMethod((
-        name = maybe(cfg, :method, solver_cfg.method),
-        tol = maybe(cfg, :tol, solver_cfg.tol),
+        name = solver_cfg.method,
+        tol = solver_cfg.tol,
         # Paper defaults: 50_000 epochs, ADAM lr = 1e-3, batch = 64
         epochs = nn_cfg.epochs,
         batch = nn_cfg.batch,

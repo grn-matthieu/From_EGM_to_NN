@@ -8,6 +8,7 @@ module ModelFactory
 import ..API: build_model
 
 using ..ModelContract
+using ..UtilsConfig: validate_config
 using ..ConsumerSaving: build_cs_model
 using ..ConsumerSavingVAR: build_cs_var_model
 
@@ -17,6 +18,7 @@ using ..ConsumerSavingVAR: build_cs_var_model
 Dispatches to the appropriate model-building function based on `cfg.model.name`.
 """
 function build_model(cfg::NamedTuple)
+    cfg = validate_config(cfg)
     model_name = Symbol(cfg.model.name)
     return _build_model(Val(model_name), cfg)
 end

@@ -35,7 +35,7 @@ function build_timeiteration_method(cfg::NamedTuple)
     ik_sym = Symbol(lowercase(string(ik_raw)))
     warm_start = Symbol(lowercase(string(solver_cfg.warm_start)))
     return TimeIterationMethod((
-        name = maybe(cfg, :method, solver_cfg.method),
+        name = solver_cfg.method,
         tol = solver_cfg.tol,
         tol_pol = solver_cfg.tol_pol,
         maxit = solver_cfg.maxit,

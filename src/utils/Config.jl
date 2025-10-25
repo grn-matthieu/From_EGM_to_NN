@@ -42,7 +42,6 @@ end
 
 function load_config(path::AbstractString)
     config = yaml_to_namedtuple(YAML.load_file(path))
-    config = ensure_master_rng(config; require = true)
     config = validate_config(config)
     return config
 end
@@ -331,6 +330,23 @@ function _canonical_method(m)
     end
 end
 
+function _expand_requested_method(entry)
+    canon = _canonical_method(entry)
+    return canon == :ALL ? collect(SUPPORTED_METHODS) : [canon]
+end
+
+function _canonicalize_requested_methods(requested)
+    methods = Symbol[]
+    if requested isa AbstractVector
+        for entry in requested
+            append!(methods, _expand_requested_method(entry))
+        end
+    else
+        append!(methods, _expand_requested_method(requested))
+    end
+    return unique(methods)
+end
+
 function validate_solver_section(solver::NamedTuple, inputs::SolverValidationInputs)
     required_common = (:method, :tol, :tol_pol, :maxit, :verbose, :relax, :warm_start)
     for key in required_common
@@ -352,24 +368,10 @@ function validate_solver_section(solver::NamedTuple, inputs::SolverValidationInp
     end
 
     requested_raw = getproperty(solver, :method)
-    requested_methods = Symbol[]
-    if requested_raw isa AbstractVector
-        for entry in requested_raw
-            canon = _canonical_method(entry)
-            if canon == :ALL
-                requested_methods = collect(SUPPORTED_METHODS)
-                break
-            else
-                push!(requested_methods, canon)
-            end
-        end
-    else
-        canon = _canonical_method(requested_raw)
-        requested_methods = canon == :ALL ? collect(SUPPORTED_METHODS) : [canon]
-    end
+    requested_methods = _canonicalize_requested_methods(requested_raw)
+    isempty(requested_methods) && error("solver.method must specify at least one method")
 
-    unique_methods = Set(requested_methods)
-    for canon in unique_methods
+    for canon in requested_methods
         block = METHOD_BLOCKS[canon]
         hasproperty(solver, block) || error("missing solver.$block")
         block_cfg = getproperty(solver, block)
@@ -461,6 +463,11 @@ function validate_solver_section(solver::NamedTuple, inputs::SolverValidationInp
             (uc === nothing || uc isa Bool) || error("use_cuda invalid")
         end
     end
+
+    solver_method_field =
+        length(requested_methods) == 1 ? requested_methods[1] : requested_methods
+    solver_canonical = merge(solver, (method = solver_method_field,))
+    return requested_methods, solver_canonical
 end
 
 function preview_shocks_active(cfg::NamedTuple)
@@ -563,7 +570,23 @@ function validate_config(cfg::AbstractDict)
     return validate_config(yaml_to_namedtuple(Dict(cfg)))
 end
 
+function _ensure_consistent_top_level_method(
+    cfg::NamedTuple,
+    requested_methods::Vector{Symbol},
+)
+    hasproperty(cfg, :method) || return cfg
+
+    method_raw = getproperty(cfg, :method)
+    top_methods = _canonicalize_requested_methods(method_raw)
+    top_methods == requested_methods ||
+        error("method mismatch between top-level and solver sections")
+
+    canonical_field = length(top_methods) == 1 ? top_methods[1] : top_methods
+    return merge(cfg, (method = canonical_field,))
+end
+
 function validate_config(cfg::NamedTuple)
+    cfg = ensure_master_rng(cfg; require = true)
     cfg = require_namedtuple_sections(cfg, (:model, :params, :grids, :solver))
 
     model_name = validate_model_section(cfg.model)
@@ -574,7 +597,9 @@ function validate_config(cfg::NamedTuple)
 
     shocks_active_preview = preview_shocks_active(cfg)
     solver_inputs = SolverValidationInputs(cfg.params, grids, shocks_active_preview)
-    validate_solver_section(cfg.solver, solver_inputs)
+    requested_methods, solver_canonical = validate_solver_section(cfg.solver, solver_inputs)
+    cfg = merge(cfg, (solver = solver_canonical,))
+    cfg = _ensure_consistent_top_level_method(cfg, requested_methods)
 
     cfg, shocks_state = validate_shocks_section(cfg)
     validate_init_section(cfg, grids, shocks_state)

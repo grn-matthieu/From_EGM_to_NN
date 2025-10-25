@@ -80,30 +80,11 @@ const SUPPORTED_METHODS = (:TimeIteration, :EGM, :Projection, :Perturbation, :NN
 using ..Determinism: derive_rng, promote_master_rng, MasterRNG
 
 # --- Internal helpers for solver orchestration ---
-function _solver_settings(cfg::NamedTuple)
-    if !haskey(cfg, :solver)
-        error("Configuration must contain a `solver` section with a `method` field.")
-    end
-    solver = cfg.solver
-    if !hasproperty(solver, :method)
-        error("Configuration must contain a `solver.method` entry.")
-    end
-    return solver
-end
-
-function _normalize_method_names(requested)
-    if requested === :all || requested == "all"
-        return collect(SUPPORTED_METHODS)
-    elseif requested isa AbstractVector
-        return [m isa Symbol ? m : Symbol(m) for m in requested]
-    else
-        return [requested isa Symbol ? requested : Symbol(requested)]
-    end
-end
+_solver_settings(cfg::NamedTuple) = cfg.solver
 
 function _normalize_methods(cfg::NamedTuple)
-    solver = _solver_settings(cfg)
-    return _normalize_method_names(solver.method)
+    methods = cfg.solver.method
+    return methods isa Symbol ? [methods] : collect(methods)
 end
 
 function _method_specific_cfg(cfg::NamedTuple, method_name::Symbol)
@@ -113,16 +94,14 @@ function _method_specific_cfg(cfg::NamedTuple, method_name::Symbol)
 end
 
 function _resolve_master_rng(cfg::NamedTuple, rng)
-    if haskey(cfg, :random) && hasproperty(cfg.random, :master_rng)
-        master_candidate = cfg.random.master_rng
-        if master_candidate !== nothing
-            return promote_master_rng(master_candidate)
-        end
+    if rng !== nothing
+        return promote_master_rng(rng)
     end
-    rng === nothing && error(
+    master_candidate = cfg.random.master_rng
+    master_candidate === nothing && error(
         "master RNG not available; ensure the configuration defines random.seed or pass `rng`.",
     )
-    return promote_master_rng(rng)
+    return promote_master_rng(master_candidate)
 end
 
 function _execute_solver(
@@ -216,6 +195,7 @@ entry is interpreted as a method name (String or Symbol). Returns a
 Vector{Solution} with one Solution per requested solver, in the same order.
 """
 function solve(model::AbstractModel, cfg::NamedTuple; rng = nothing)
+    cfg = validate_config(cfg)
     methods = _normalize_methods(cfg)
     master = _resolve_master_rng(cfg, rng)
     return _dispatch_solvers(model, cfg, methods, master)
@@ -264,7 +244,7 @@ function solve(
     if opts !== nothing
         if hasproperty(opts, :use_cuda)
             usecuda = getfield(opts, :use_cuda)
-            solver_nt = hasproperty(cfg, :solver) ? cfg.solver : NamedTuple()
+            solver_nt = cfg.solver
             nn_nt = hasproperty(solver_nt, :nn) ? solver_nt.nn : NamedTuple()
             nn_nt = merge(nn_nt, (use_cuda = usecuda,))
             solver_nt = merge(solver_nt, (nn = nn_nt,))

@@ -30,7 +30,7 @@ function build_projection_method(cfg::NamedTuple)
     gh_order = maybe(projection_cfg, :gh_order, 3)
     nsamples = maybe(projection_cfg, :nsamples, 128)
     return ProjectionMethod((
-        name = maybe(cfg, :method, solver_cfg.method),
+        name = solver_cfg.method,
         tol = solver_cfg.tol,
         tol_pol = solver_cfg.tol_pol,
         maxit = solver_cfg.maxit,

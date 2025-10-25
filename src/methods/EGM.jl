@@ -215,7 +215,7 @@ function build_egm_method(cfg::NamedTuple)
     integration_raw = maybe(egm_cfg, :integration, :gh)
     integration_sym = Symbol(lowercase(string(integration_raw)))
     return EGMMethod((
-        name = maybe(cfg, :method, solver_cfg.method),
+        name = solver_cfg.method,
         tol = solver_cfg.tol,
         tol_pol = solver_cfg.tol_pol,
         maxit = solver_cfg.maxit,

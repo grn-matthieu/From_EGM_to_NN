@@ -36,7 +36,7 @@ function build_perturbation_method(cfg::NamedTuple)
     integration_raw = maybe(perturbation_cfg, :integration, :gh)
     integration_sym = Symbol(lowercase(string(integration_raw)))
     return PerturbationMethod((
-        name = maybe(cfg, :method, solver_cfg.method),
+        name = solver_cfg.method,
         a_bar = perturbation_cfg.a_bar,
         verbose = solver_cfg.verbose,
         order = perturbation_cfg.order,
