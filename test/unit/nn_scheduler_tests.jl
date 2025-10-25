@@ -49,7 +49,7 @@ import ThesisProject.NNKernel:
     ps, st = Lux.setup(rng, model)
     opt = Optimisers.OptimiserChain(
         Optimisers.ClipGrad(0.1),
-        Optimisers.Adam(settings.lr_max),
+        Optimisers.AdamW(settings.lr_max),
     )
     train_state = Lux.Training.TrainState(model, ps, st, opt)
     data = (randn(rng, Float32, 1, 16),)
@@ -71,6 +71,7 @@ import ThesisProject.NNKernel:
         opt_chain = getfield(train_state, :optimizer)
         # OptimiserChain stores optimisers in the `opts` field
         adam_stage = opt_chain.opts[end]
+        @test adam_stage isa Optimisers.AdamW
         lr_field =
             hasproperty(adam_stage, :eta) ? :eta :
             (hasproperty(adam_stage, :lr) ? :lr : nothing)

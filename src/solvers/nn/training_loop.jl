@@ -370,7 +370,7 @@ end
 
 function base_optimizer(optimizer::Symbol, lr::Float64)
     if optimizer === :adam
-        return Optimisers.Adam(lr)
+        return Optimisers.AdamW(lr)
     elseif optimizer === :rmsprop
         return Optimisers.RMSProp(lr)
     elseif optimizer === :adagrad
@@ -378,8 +378,8 @@ function base_optimizer(optimizer::Symbol, lr::Float64)
     elseif optimizer === :sgd
         return Optimisers.Descent(lr)
     else
-        @warn "Unsupported optimizer=$(optimizer); falling back to Adam"
-        return Optimisers.Adam(lr)
+        @warn "Unsupported optimizer=$(optimizer); falling back to AdamW"
+        return Optimisers.AdamW(lr)
     end
 end
 
@@ -446,46 +446,25 @@ function learning_rate_for_epoch(settings::NNSolverSettings, epoch::Int)
     end
 end
 
-function adjust_learning_rate(opt, lr)
-    # Prefer explicit handling for common optimisers to avoid MethodErrors
-    # when constructors differ across Optimisers.jl versions.
-    if opt isa Optimisers.Adam
-        # Try keyword-style constructors that recent Optimisers expose.
-        beta = getproperty(opt, :beta)
-        # Try common epsilon field names
-        eps_val =
-            hasproperty(opt, :epsilon) ? getproperty(opt, :epsilon) :
-            (hasproperty(opt, :eps) ? getproperty(opt, :eps) : nothing)
-        try
-            if eps_val === nothing
-                return Optimisers.Adam(; eta = Float64(lr), beta = beta)
-            else
-                return Optimisers.Adam(; eta = Float64(lr), beta = beta, epsilon = eps_val)
-            end
-        catch err
-            # Last-resort: attempt to reconstruct by positional fields (best-effort)
-            try
-                fields = fieldnames(typeof(opt))
-                target = findfirst(
-                    name -> name === :eta || name === :lr || name === :learning_rate,
-                    fields,
-                )
-                if target === nothing
-                    return opt
-                end
-                target_field = fields[target]
-                values = map(fields) do name
-                    name === target_field ? Float64(lr) : getfield(opt, name)
-                end
-                return (typeof(opt))(values...)
-            catch
-                return opt
-            end
-        end
+function rebuild_adam_family(opt, lr)
+    pairs = Pair{Symbol,Any}[:eta=>Float64(lr)]
+    if hasproperty(opt, :beta)
+        push!(pairs, :beta => getproperty(opt, :beta))
     end
+    eps_val =
+        hasproperty(opt, :epsilon) ? getproperty(opt, :epsilon) :
+        (hasproperty(opt, :eps) ? getproperty(opt, :eps) : nothing)
+    if eps_val !== nothing
+        push!(pairs, :epsilon => eps_val)
+    end
+    if opt isa Optimisers.AdamW && hasproperty(opt, :weight_decay)
+        push!(pairs, :weight_decay => getproperty(opt, :weight_decay))
+    end
+    constructor = opt isa Optimisers.AdamW ? Optimisers.AdamW : Optimisers.Adam
+    return constructor(; pairs...)
+end
 
-    # Generic fallback: try to locate a common learning-rate-like field and
-    # reconstruct the optimiser. If that fails, return the original optimiser.
+function rebuild_with_lr(opt, lr)
     fields = fieldnames(typeof(opt))
     target =
         findfirst(name -> name === :eta || name === :lr || name === :learning_rate, fields)
@@ -494,13 +473,29 @@ function adjust_learning_rate(opt, lr)
     end
     target_field = fields[target]
     values = map(fields) do name
-        name === target_field ? lr : getfield(opt, name)
+        name === target_field ? Float64(lr) : getfield(opt, name)
     end
     try
         return (typeof(opt))(values...)
     catch
         return opt
     end
+end
+
+function adjust_learning_rate(opt, lr)
+    # Prefer explicit handling for common optimisers to avoid MethodErrors
+    # when constructors differ across Optimisers.jl versions.
+    if opt isa Union{Optimisers.Adam,Optimisers.AdamW}
+        try
+            return rebuild_adam_family(opt, lr)
+        catch
+            return rebuild_with_lr(opt, lr)
+        end
+    end
+
+    # Generic fallback: try to locate a common learning-rate-like field and
+    # reconstruct the optimiser. If that fails, return the original optimiser.
+    return rebuild_with_lr(opt, lr)
 end
 
 function adjust_learning_rate(opt::Optimisers.OptimiserChain, lr)
