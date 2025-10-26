@@ -61,7 +61,7 @@ function build_cs_var_model(cfg::NamedTuple)
     length(y_vec) == size(A, 1) || error("params.y length must match dimension of params.A")
 
     y_dim = size(A, 1)
-    grids = _build_asset_grid(cfg.grids; y_dim = y_dim)
+    grids = _build_asset_grid(cfg.grids, cfg; y_dim = y_dim)
     params = merge(params_cfg, (A = A, Σ = Σ, y_dim = y_dim))
 
     if y_dim == 1
