@@ -13,6 +13,8 @@ grids:
   Na: 50
   a_min: 0.0
   a_max: 20.0
+  type: dense
+  dense: null
 
 utility:
   u_type: CRRA
@@ -27,9 +29,6 @@ solver:
   verbose: false
   relax: 0.5
   warm_start: default
-  grid:
-    type: dense
-    dense: null
   egm:
     interp_kind: linear
   time_iteration:

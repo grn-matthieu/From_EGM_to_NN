@@ -27,20 +27,23 @@ function _normalize_dense_cfg(dense_cfg, dim::Int, cfg)
 end
 
 function build_grid_backend(box::Vector{Tuple{Float64,Float64}}, cfg)
-    grid_cfg = cfg.solver.grid
-    grid_type = grid_cfg.type isa Symbol ? grid_cfg.type : Symbol(grid_cfg.type)
+    # Read grid configuration from cfg.grids (flat fields)
+    hasproperty(cfg, :grids) || error("missing grids section")
+    g = cfg.grids
+    hasproperty(g, :type) || error("missing grids.type")
+    grid_type = g.type isa Symbol ? g.type : Symbol(g.type)
     empty_nt = NamedTuple()
     if grid_type == :dense
-        dense_cfg_raw = hasproperty(grid_cfg, :dense) ? grid_cfg.dense : nothing
+        dense_cfg_raw = hasproperty(g, :dense) ? g.dense : nothing
         dense_cfg = _normalize_dense_cfg(dense_cfg_raw, length(box), cfg)
         return DenseGrid(box, dense_cfg)
     elseif grid_type in (:sparse, :adaptive_sparse)
-        sparse_cfg = hasproperty(grid_cfg, :sparse) ? grid_cfg.sparse : empty_nt
+        sparse_cfg = hasproperty(g, :sparse) ? g.sparse : empty_nt
         depth = hasproperty(sparse_cfg, :depth) ? sparse_cfg.depth : 2
         basis = hasproperty(sparse_cfg, :basis) ? sparse_cfg.basis : :linear
         anisotropic = hasproperty(sparse_cfg, :anisotropic) ? sparse_cfg.anisotropic : false
         adaptive = grid_type == :adaptive_sparse
-        adaptive_cfg = hasproperty(grid_cfg, :adaptive) ? grid_cfg.adaptive : empty_nt
+        adaptive_cfg = hasproperty(g, :adaptive) ? g.adaptive : empty_nt
         surplus_tol =
             hasproperty(adaptive_cfg, :surplus_tol) ? adaptive_cfg.surplus_tol : 1e-3
         return SmolyakGrid(
@@ -52,6 +55,6 @@ function build_grid_backend(box::Vector{Tuple{Float64,Float64}}, cfg)
             surplus_tol = surplus_tol,
         )
     else
-        error("unknown grid type $(get(grid_cfg, :type, :dense))")
+        error("unknown grid type $(get(g, :type, :dense))")
     end
 end

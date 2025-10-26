@@ -167,14 +167,13 @@ end
     @test a_grid_scalar.backend isa AbstractGridBackend
 end
 
-@testset "Solver grid validation" begin
+@testset "Grid validation" begin
     cfg = deterministic_config()
-    solver_missing_grid = drop_field(cfg.solver, :grid)
-    cfg_missing_grid = merge(cfg, (solver = solver_missing_grid,))
-    @test_throws ErrorException UtilsConfig.validate_config(cfg_missing_grid)
+    missing_type = merge(cfg, (grids = drop_field(cfg.grids, :type),))
+    @test_throws ErrorException UtilsConfig.validate_config(missing_type)
 
-    bad_grid = merge(cfg.solver.grid, (type = :unknown,))
-    cfg_bad_grid = merge(cfg, (solver = merge(cfg.solver, (grid = bad_grid,)),))
+    bad_grid = merge(cfg.grids, (type = :unknown,))
+    cfg_bad_grid = merge(cfg, (grids = bad_grid,))
     @test_throws ErrorException UtilsConfig.validate_config(cfg_bad_grid)
 end
 

@@ -13,6 +13,8 @@ grids:
   Na: 50
   a_min: 0.0
   a_max: 4.0
+  type: dense
+  dense: null
 
 utility:
   u_type: CRRA

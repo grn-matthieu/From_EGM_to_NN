@@ -75,7 +75,6 @@ function _base_solver_block(; method = :EGM)
             use_cuda = false,
             n_mc = 16,
         ),
-        grid = (type = :dense, dense = nothing), # always backend-only
     )
 end
 
@@ -99,7 +98,7 @@ function deterministic_config(;
     cfg = (
         model = (name = "cs",),
         params = (β = β, γ = γ, r = r, y = y),
-        grids = (Na = Na, a_min = a_min, a_max = a_max),
+        grids = (Na = Na, a_min = a_min, a_max = a_max, type = :dense, dense = nothing),
         utility = (u_type = utility_type,),
         solver = solver_cfg,
         random = random_cfg,
