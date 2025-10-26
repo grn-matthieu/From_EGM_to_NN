@@ -20,15 +20,29 @@ struct ConsumerSavingModel <: AbstractModel
     utility::NamedTuple
 end
 
-@inline function _build_asset_grid(grids_cfg::NamedTuple; y_dim::Integer = 1)
+@inline function _build_asset_grid(
+    grids_cfg::NamedTuple,
+    cfg::NamedTuple = (;);
+    y_dim::Integer = 1,
+)
     y_dim ≥ 1 || error("y_dim must be ≥ 1")
 
     a_min = grids_cfg.a_min
     a_max = grids_cfg.a_max
     Na_base = grids_cfg.Na
-
-    Na_total = Na_base^y_dim
-    agrid = collect(range(a_min, a_max; length = Na_total))
+    # If the top-level config requests the new grid backend, use it.
+    if hasproperty(cfg, :solver) &&
+       hasproperty(cfg.solver, :grid) &&
+       hasproperty(cfg.solver.grid, :type)
+        box = [(a_min, a_max)]
+        grid_backend = ThesisProject.build_grid_backend(box, cfg)
+        # nodes(...) returns a Matrix{Float64} with columns = dims
+        agrid = nodes(grid_backend)[:, 1]
+        Na_total = length(agrid)
+    else
+        Na_total = Na_base^y_dim
+        agrid = collect(range(a_min, a_max; length = Na_total))
+    end
     tensor_shape = ntuple(_ -> Na_base, y_dim)
 
     return (
