@@ -303,6 +303,7 @@ function validate_utility_section(cfg::NamedTuple)
 end
 
 const SUPPORTED_METHODS = (:EGM, :Projection, :Perturbation, :NN, :TimeIteration)
+const SUPPORTED_GRID_TYPES = (:dense, :sparse, :adaptive_sparse)
 const METHOD_BLOCKS = Dict(
     :EGM => :egm,
     :Projection => :projection,
@@ -366,6 +367,58 @@ function validate_solver_section(solver::NamedTuple, inputs::SolverValidationInp
         hasproperty(inputs.params, :r) || error("need params.r for steady_state")
         hasproperty(inputs.grids, :a_min) || error("need grids.a_min for steady_state")
     end
+
+    hasproperty(solver, :grid) || error("missing solver.grid")
+    grid_raw = getproperty(solver, :grid)
+    grid_cfg = to_namedtuple_if_dict(grid_raw)
+    grid_cfg isa NamedTuple || error("solver.grid wrong type")
+    hasproperty(grid_cfg, :type) || error("missing solver.grid.type")
+    grid_type_val = getproperty(grid_cfg, :type)
+    (grid_type_val isa Symbol || grid_type_val isa AbstractString) ||
+        error("solver.grid.type invalid")
+    grid_type = grid_type_val isa Symbol ? grid_type_val : Symbol(grid_type_val)
+    grid_type in SUPPORTED_GRID_TYPES || error("solver.grid.type unsupported")
+    grid_updates = (type = grid_type,)
+    if grid_type == :dense && hasproperty(grid_cfg, :dense)
+        dense_raw = getproperty(grid_cfg, :dense)
+        dense_norm = dense_raw === nothing ? nothing : to_namedtuple_if_dict(dense_raw)
+        !(dense_norm isa AbstractDict) || error("solver.grid.dense wrong type")
+        dense_norm === nothing ||
+            dense_norm isa NamedTuple ||
+            error("solver.grid.dense wrong type")
+        if dense_norm !== nothing
+            grid_updates = merge(grid_updates, (dense = dense_norm,))
+        end
+    elseif grid_type in (:sparse, :adaptive_sparse)
+        if hasproperty(grid_cfg, :sparse)
+            sparse_raw = getproperty(grid_cfg, :sparse)
+            sparse_norm =
+                sparse_raw === nothing ? NamedTuple() : to_namedtuple_if_dict(sparse_raw)
+            sparse_norm isa NamedTuple || error("solver.grid.sparse wrong type")
+            any(
+                name ->
+                    hasproperty(sparse_norm, name) && !(
+                        getproperty(sparse_norm, name) isa Real ||
+                        getproperty(sparse_norm, name) isa Bool
+                    ),
+                (:depth, :basis, :anisotropic),
+            ) && error("solver.grid.sparse contains invalid entries")
+            grid_updates = merge(grid_updates, (sparse = sparse_norm,))
+        end
+        if hasproperty(grid_cfg, :adaptive)
+            adaptive_raw = getproperty(grid_cfg, :adaptive)
+            adaptive_norm =
+                adaptive_raw === nothing ? NamedTuple() :
+                to_namedtuple_if_dict(adaptive_raw)
+            adaptive_norm isa NamedTuple || error("solver.grid.adaptive wrong type")
+            if hasproperty(adaptive_norm, :surplus_tol)
+                tol_val = getproperty(adaptive_norm, :surplus_tol)
+                tol_val isa Real && tol_val > 0 || error("surplus_tol must be > 0")
+            end
+            grid_updates = merge(grid_updates, (adaptive = adaptive_norm,))
+        end
+    end
+    grid_cfg_norm = merge(grid_cfg, grid_updates)
 
     requested_raw = getproperty(solver, :method)
     requested_methods = _canonicalize_requested_methods(requested_raw)
@@ -466,7 +519,7 @@ function validate_solver_section(solver::NamedTuple, inputs::SolverValidationInp
 
     solver_method_field =
         length(requested_methods) == 1 ? requested_methods[1] : requested_methods
-    solver_canonical = merge(solver, (method = solver_method_field,))
+    solver_canonical = merge(solver, (method = solver_method_field, grid = grid_cfg_norm))
     return requested_methods, solver_canonical
 end
 

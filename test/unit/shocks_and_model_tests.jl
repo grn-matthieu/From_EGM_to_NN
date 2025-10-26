@@ -3,6 +3,10 @@ const ConsumerSaving = ThesisProject.ConsumerSaving
 const ModelFactory = ThesisProject.ModelFactory
 const ConsumerSavingVAR = ThesisProject.ConsumerSavingVAR
 const UtilsConfig = ThesisProject.UtilsConfig
+const AbstractGridBackend = ThesisProject.AbstractGridBackend
+
+drop_field(nt::NamedTuple, field::Symbol) =
+    (; (k => getproperty(nt, k) for k in keys(nt) if k != field)...)
 
 @testset "Shock discretization" begin
     shocks =
@@ -33,11 +37,15 @@ end
     @test model isa ConsumerSaving.ConsumerSavingModel
     @test model.shocks === nothing
     @test length(model.grids[:a].grid) == cfg.grids.Na
+    @test hasproperty(model.grids[:a], :backend)
+    @test model.grids[:a].backend isa AbstractGridBackend
     @test hasproperty(model.params, :γ)
 
     cfg_shock = stochastic_config()
     model_shock = ConsumerSaving.build_cs_model(cfg_shock)
     @test model_shock.shocks !== nothing
+    @test hasproperty(model_shock.grids[:a], :backend)
+    @test model_shock.grids[:a].backend isa AbstractGridBackend
     @test hasproperty(model_shock.params, :ρ_shock)
     @test hasproperty(model_shock.params, :σ_shock)
     @test hasproperty(model_shock.params, :γ)
@@ -68,6 +76,8 @@ end
     @test a_grid_vec.N == expected_total_nodes
     @test a_grid_vec.N_base == cfg_vec.grids.Na
     @test a_grid_vec.tensor_shape == ntuple(_ -> cfg_vec.grids.Na, model_vec.params.y_dim)
+    @test hasproperty(a_grid_vec, :backend)
+    @test a_grid_vec.backend isa AbstractGridBackend
 
     model_factory_vec = ModelFactory.build_model(cfg_vec)
     @test model_factory_vec isa ConsumerSavingVAR.ConsumerSavingVARModel
@@ -153,6 +163,19 @@ end
     @test a_grid_scalar.N == cfg_scalar_validated.grids.Na
     @test a_grid_scalar.N_base == cfg_scalar_validated.grids.Na
     @test a_grid_scalar.tensor_shape == (cfg_scalar_validated.grids.Na,)
+    @test hasproperty(a_grid_scalar, :backend)
+    @test a_grid_scalar.backend isa AbstractGridBackend
+end
+
+@testset "Solver grid validation" begin
+    cfg = deterministic_config()
+    solver_missing_grid = drop_field(cfg.solver, :grid)
+    cfg_missing_grid = merge(cfg, (solver = solver_missing_grid,))
+    @test_throws ErrorException UtilsConfig.validate_config(cfg_missing_grid)
+
+    bad_grid = merge(cfg.solver.grid, (type = :unknown,))
+    cfg_bad_grid = merge(cfg, (solver = merge(cfg.solver, (grid = bad_grid,)),))
+    @test_throws ErrorException UtilsConfig.validate_config(cfg_bad_grid)
 end
 
 @testset "Model factory" begin

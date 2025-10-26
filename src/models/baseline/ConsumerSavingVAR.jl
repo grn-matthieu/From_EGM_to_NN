@@ -1,4 +1,5 @@
 module ConsumerSavingVAR
+using ThesisProject
 
 using LinearAlgebra: Diagonal
 using ..ConsumerSaving:
@@ -7,6 +8,7 @@ using ..Shocks: ShockOutput
 using ..UtilsConfig: maybe
 
 import ..API: get_params, get_grids, get_shocks, get_utility
+import ThesisProject: nodes
 
 export ConsumerSavingVARModel, build_cs_var_model
 

@@ -2,9 +2,9 @@ module SolverPlaceholders
 
 using Statistics: mean
 using Base: @views
+using ..CommonInterp: interp_linear, interp_linear!
 
 export build_placeholder_solution
-
 @inline function _maybe_mean_income(params)
     if hasproperty(params, :y_dim) && hasproperty(params, :y)
         vals = Float64.(collect(params.y))
@@ -85,6 +85,7 @@ function build_placeholder_solution(
         placeholder = true,
         solver = solver,
     )
+
 end
 
 end # module

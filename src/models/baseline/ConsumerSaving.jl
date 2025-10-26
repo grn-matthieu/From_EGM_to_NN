@@ -5,6 +5,8 @@ Baseline consumption–savings model with CRRA utility and borrowing constraint.
 Defines parameters, grids, and shock processes used by solver kernels.
 """
 module ConsumerSaving
+using ThesisProject
+import ThesisProject: nodes
 
 using ..API: AbstractModel
 using ..Shocks: ShockOutput, discretize
@@ -22,7 +24,7 @@ end
 
 @inline function _build_asset_grid(
     grids_cfg::NamedTuple,
-    cfg::NamedTuple = (;);
+    cfg::NamedTuple;
     y_dim::Integer = 1,
 )
     y_dim ≥ 1 || error("y_dim must be ≥ 1")
@@ -30,31 +32,23 @@ end
     a_min = grids_cfg.a_min
     a_max = grids_cfg.a_max
     Na_base = grids_cfg.Na
-    # If the top-level config requests the new grid backend, use it.
-    if hasproperty(cfg, :solver) &&
-       hasproperty(cfg.solver, :grid) &&
-       hasproperty(cfg.solver.grid, :type)
-        box = [(a_min, a_max)]
-        grid_backend = ThesisProject.build_grid_backend(box, cfg)
-        # nodes(...) returns a Matrix{Float64} with columns = dims
-        agrid = nodes(grid_backend)[:, 1]
-        Na_total = length(agrid)
-    else
-        Na_total = Na_base^y_dim
-        agrid = collect(range(a_min, a_max; length = Na_total))
-    end
+    box = [(a_min, a_max)]
+    Na_target = y_dim == 1 ? Na_base : Na_base^y_dim
+    cfg_for_grid = merge(cfg, (grids = merge(cfg.grids, (Na_backend = Na_target,)),))
+    grid_backend = ThesisProject.build_grid_backend(box, cfg_for_grid)
+    agrid = nodes(grid_backend)[:, 1]
+    Na_total = length(agrid)
     tensor_shape = ntuple(_ -> Na_base, y_dim)
-
-    return (
-        a = (
-            grid = agrid,
-            min = a_min,
-            max = a_max,
-            N = Na_total,
-            N_base = Na_base,
-            tensor_shape = tensor_shape,
-        ),
+    a_nt = (
+        grid = agrid,
+        min = a_min,
+        max = a_max,
+        N = Na_total,
+        N_base = Na_base,
+        tensor_shape = tensor_shape,
+        backend = grid_backend,
     )
+    return (a = a_nt,)
 end
 
 function _build_crra_utility(params::NamedTuple)
@@ -93,7 +87,7 @@ end
 
 function build_cs_model(cfg::NamedTuple)
     params = cfg.params
-    grids = _build_asset_grid(cfg.grids)
+    grids = _build_asset_grid(cfg.grids, cfg)
 
     shocks, shocks_cfg = _maybe_discretize_shocks(cfg)
 

@@ -1,12 +1,38 @@
 include("dense.jl")
 include("smolyak/factory.jl")
 
+@inline function _dense_count_specified(cfg)
+    cfg === nothing && return false
+    for key in (:counts, :nodes_per_dim, :N, :n)
+        if hasproperty(cfg, key)
+            return true
+        end
+    end
+    return false
+end
+
+function _normalize_dense_cfg(dense_cfg, dim::Int, cfg)
+    dense_nt = dense_cfg === nothing ? NamedTuple() : dense_cfg
+    if !_dense_count_specified(dense_nt)
+        if hasproperty(cfg, :grids)
+            grids_meta = cfg.grids
+            target_key = hasproperty(grids_meta, :Na_backend) ? :Na_backend : :Na
+            if target_key !== nothing && hasproperty(grids_meta, target_key)
+                Na = Int(getproperty(grids_meta, target_key))
+                dense_nt = merge(dense_nt, (counts = fill(Na, dim),))
+            end
+        end
+    end
+    return fieldcount(typeof(dense_nt)) == 0 ? nothing : dense_nt
+end
+
 function build_grid_backend(box::Vector{Tuple{Float64,Float64}}, cfg)
     grid_cfg = cfg.solver.grid
     grid_type = grid_cfg.type isa Symbol ? grid_cfg.type : Symbol(grid_cfg.type)
-    empty_nt = NamedTuple{(),Tuple{}}()
+    empty_nt = NamedTuple()
     if grid_type == :dense
-        dense_cfg = hasproperty(grid_cfg, :dense) ? grid_cfg.dense : nothing
+        dense_cfg_raw = hasproperty(grid_cfg, :dense) ? grid_cfg.dense : nothing
+        dense_cfg = _normalize_dense_cfg(dense_cfg_raw, length(box), cfg)
         return DenseGrid(box, dense_cfg)
     elseif grid_type in (:sparse, :adaptive_sparse)
         sparse_cfg = hasproperty(grid_cfg, :sparse) ? grid_cfg.sparse : empty_nt
@@ -26,6 +52,6 @@ function build_grid_backend(box::Vector{Tuple{Float64,Float64}}, cfg)
             surplus_tol = surplus_tol,
         )
     else
-        error("unknown grid type $(grid_cfg.type)")
+        error("unknown grid type $(get(grid_cfg, :type, :dense))")
     end
 end

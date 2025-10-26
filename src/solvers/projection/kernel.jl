@@ -11,6 +11,7 @@ using ..ProjectionCoefficients: solve_coefficients
 using ..EulerResiduals:
     euler_resid_det, euler_resid_stoch, euler_resid_det_grid, euler_resid_stoch_grid
 using ..CommonInterp: interp_pchip!
+using ..GridHelpers: fit_values_on_backend!, eval_backend_at_points, grid_backend_available
 using ..PolicyUtils:
     clamp_policy!, compute_binding_tolerance, init_consumption_det, rmse_nonbinding
 using ..CommonValidators: is_nondec
@@ -149,7 +150,14 @@ function solve_projection_det(
     B_out = B_out_cache[:, 1:(best_order+1)]
     c_out = B_out * best_coeffs
     if !is_nondec(c_out)
-        interp_pchip!(c_out, a_grid, best_c, a_out)
+        if grid_backend_available(model_grids[:a])
+            # Fit best_c (defined on a_grid) onto backend nodes and evaluate at a_out
+            a_info = model_grids[:a]
+            backend = fit_values_on_backend!(a_info, a_grid, reshape(best_c, :, 1))
+            c_out = eval_backend_at_points(backend, a_out, 1)
+        else
+            interp_pchip!(c_out, a_grid, best_c, a_out)
+        end
     end
     a_next_out = clamp.(R .* a_out .+ income .- c_out, a_min, a_max)
     resid_out = euler_resid_det_grid(model_params, a_out, c_out)
@@ -343,8 +351,16 @@ function solve_projection_stoch(
     B_out = B_out_cache[:, 1:(best_order+1)]
     c_out = B_out * best_coeffs
     if !is_nondec(c_out)
-        for j = 1:Nz
-            interp_pchip!(view(c_out, :, j), a_grid, view(best_c, :, j), a_out)
+        if grid_backend_available(model_grids[:a])
+            a_info = model_grids[:a]
+            backend = fit_values_on_backend!(a_info, a_grid, best_c)
+            for j = 1:Nz
+                view(c_out, :, j) .= eval_backend_at_points(backend, a_out, j)
+            end
+        else
+            for j = 1:Nz
+                interp_pchip!(view(c_out, :, j), a_grid, view(best_c, :, j), a_out)
+            end
         end
     end
 
@@ -533,7 +549,13 @@ function solve_projection_csvar(
     B_out = B_out_cache[:, 1:(best_order+1)]
     c_out = B_out * best_coeffs
     if !is_nondec(c_out)
-        interp_pchip!(c_out, a_grid, best_c, a_out)
+        if grid_backend_available(model_grids[:a])
+            a_info = model_grids[:a]
+            backend = fit_values_on_backend!(a_info, a_grid, reshape(best_c, :, 1))
+            c_out = eval_backend_at_points(backend, a_out, 1)
+        else
+            interp_pchip!(c_out, a_grid, best_c, a_out)
+        end
     end
     a_next_out = clamp.(R .* a_out .+ income .- c_out, a_min, a_max)
     resid_out = Vector{Float64}(undef, length(a_out))

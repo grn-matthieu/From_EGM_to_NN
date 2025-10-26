@@ -25,6 +25,7 @@ using ..PolicyUtils:
     relaxation_step!,
     rmse_nonbinding
 using ..SolverPlaceholders: build_placeholder_solution
+using ..GridHelpers: fit_values_on_backend!, eval_backend_at_points, grid_backend_available
 using Printf
 
 export solve_ti_det, solve_ti_stoch, solve_ti_placeholder
@@ -165,6 +166,14 @@ function solve_ti_det_impl(
 
         copyto!(cold, c)
 
+        # prepare backend if available (fit once per outer iteration)
+        a_info = model_grids[:a]
+        use_backend = grid_backend_available(a_info)
+        backend_cold = nothing
+        if use_backend
+            backend_cold = fit_values_on_backend!(a_info, a_grid, reshape(cold, :, 1))
+        end
+
         @inbounds for (i, a) in enumerate(a_grid)
             resources = model_params.y + R * a
             c_hi = max(cmin, resources - a_min)
@@ -176,7 +185,11 @@ function solve_ti_det_impl(
 
             function euler_gap(c_guess)
                 a_prime = clamp(resources - c_guess, a_min, a_max)
-                c_future = interp_linear(a_grid, cold, a_prime)
+                if use_backend
+                    c_future = eval_backend_at_points(backend_cold, (a_prime,), 1)[1]
+                else
+                    c_future = interp_linear(a_grid, cold, a_prime)
+                end
                 c_future = c_future < cmin ? cmin : c_future
                 return model_utility.u_prime(c_guess) -
                        β * R * model_utility.u_prime(c_future)
@@ -191,7 +204,13 @@ function solve_ti_det_impl(
         Δpol = relaxation_step!(c, cold, cnew, relax)
 
         @. a_next = clamp(model_params.y + R * a_grid - c, a_min, a_max)
-        interp_linear!(cnext, a_grid, c, a_next)
+        if use_backend
+            # fit current policy c on backend and evaluate at a_next
+            backend_c = fit_values_on_backend!(a_info, a_grid, reshape(c, :, 1))
+            cnext .= eval_backend_at_points(backend_c, a_next, 1)
+        else
+            interp_linear!(cnext, a_grid, c, a_next)
+        end
         ensure_minimum!(cnext, cmin)
 
         euler_resid_det!(resid, model_params, c, cnext)
@@ -217,7 +236,13 @@ function solve_ti_det_impl(
 
     # final consistency
     @. a_next = clamp(R * a_grid + model_params.y - c, a_min, a_max)
-    interp_linear!(cnext, a_grid, c, a_next)
+    if grid_backend_available(model_grids[:a])
+        a_info = model_grids[:a]
+        backend_c = fit_values_on_backend!(a_info, a_grid, reshape(c, :, 1))
+        cnext .= eval_backend_at_points(backend_c, a_next, 1)
+    else
+        interp_linear!(cnext, a_grid, c, a_next)
+    end
     ensure_minimum!(cnext, cmin)
     euler_resid_det!(resid, model_params, c, cnext)
     max_resid = rmse_nonbinding(resid, a_next, a_min, bind_tol)
@@ -354,7 +379,17 @@ function solve_ti_det_impl(
 
     for it = 1:maxit
         iters = it
+
         copyto!(cold, c)
+
+        # prepare backend if available (fit once per outer iteration)
+        a_info = model_grids[:a]
+        use_backend = grid_backend_available(a_info)
+        backend_cold = nothing
+        if use_backend
+            # fit all shock-columns at once
+            backend_cold = fit_values_on_backend!(a_info, a_grid, cold)
+        end
 
         @inbounds for (i, a) in enumerate(a_grid)
             resources = model_params.y + R * a
@@ -366,9 +401,13 @@ function solve_ti_det_impl(
             end
 
             function future_consumption(a_prime)
-                query_buf[1] = a_prime
-                interp_pchip!(interp_buf, a_grid, cold, query_buf)
-                val = interp_buf[1]
+                if use_backend
+                    val = eval_backend_at_points(backend_cold, (a_prime,), 1)[1]
+                else
+                    query_buf[1] = a_prime
+                    interp_pchip!(interp_buf, a_grid, cold, query_buf)
+                    val = interp_buf[1]
+                end
                 return val < cmin ? cmin : val
             end
 
@@ -389,7 +428,12 @@ function solve_ti_det_impl(
         Δpol = relaxation_step!(c, cold, cnew, relax)
 
         @. a_next = clamp(model_params.y + R * a_grid - c, a_min, a_max)
-        interp_pchip!(cnext, a_grid, c, a_next)
+        if use_backend
+            backend_c = fit_values_on_backend!(a_info, a_grid, reshape(c, :, 1))
+            cnext .= eval_backend_at_points(backend_c, a_next, 1)
+        else
+            interp_pchip!(cnext, a_grid, c, a_next)
+        end
         ensure_minimum!(cnext, cmin)
 
         euler_resid_det!(resid, model_params, c, cnext)

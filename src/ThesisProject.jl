@@ -18,8 +18,19 @@ include("core/api.jl")
 include("core/model_contract.jl")
 
 # 2) grids
+include("solvers/common/interp.jl")
 include("grids/grid_types.jl")
 include("grids/factory.jl")
+include("grids/helpers.jl")
+module Grids
+include("solvers/common/interp.jl")
+include("grids/grid_types.jl")
+include("grids/factory.jl")
+include("grids/helpers.jl")
+export nodes,
+    build_grid_backend, fit_interpolant!, evaluate_scalar!, refine_once!, CommonInterp
+end
+using .CommonInterp
 
 # 3) utilities
 include("utils/Config.jl")
@@ -34,7 +45,12 @@ include("core/model_factory.jl")
 
 # 5) solvers (pure kernels)
 # common solver utilities
-include("solvers/common/interp.jl")
+if !isdefined(@__MODULE__, :CommonInterp)
+    include("solvers/common/interp.jl")
+end
+if !isdefined(@__MODULE__, :GridHelpers)
+    include("grids/helpers.jl")
+end
 include("solvers/common/policy_utils.jl")
 include("solvers/common/value_fun.jl")
 include("solvers/common/chebyshev.jl")

@@ -27,6 +27,9 @@ solver:
   verbose: false
   relax: 0.5
   warm_start: default
+  grid:
+    type: dense
+    dense: null
   egm:
     interp_kind: linear
   time_iteration:

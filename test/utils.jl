@@ -7,6 +7,9 @@ const UtilsConfig = ThesisProject.UtilsConfig
 export deterministic_config,
     stochastic_config, deep_merge, master_rng, build_model_and_method, derive_solver_rng
 
+deep_merge(a::NamedTuple, b) = merge(a, b)
+deep_merge(a, b) = b
+
 const DEFAULT_SEED = 2024
 
 """Return a reusable `MasterRNG` used across tests."""
@@ -33,9 +36,9 @@ function deep_merge(a::NamedTuple, b::NamedTuple)
 end
 
 deep_merge(a::NamedTuple, b) = merge(a, b)
-
 deep_merge(a, b) = b
 
+# Always use backend-only grid config for tests
 function _base_solver_block(; method = :EGM)
     return (
         method = method,
@@ -72,6 +75,7 @@ function _base_solver_block(; method = :EGM)
             use_cuda = false,
             n_mc = 16,
         ),
+        grid = (type = :dense, dense = nothing), # always backend-only
     )
 end
 
@@ -89,12 +93,9 @@ function deterministic_config(;
     utility_type = :CRRA,
     shocks::Union{Nothing,NamedTuple} = nothing,
 )
-
     solver_cfg = _base_solver_block(method = method)
     solver_cfg = deep_merge(solver_cfg, solver_overrides)
-
     random_cfg = (seed = UInt64(random_seed), master_rng = master_rng(random_seed))
-
     cfg = (
         model = (name = "cs",),
         params = (β = β, γ = γ, r = r, y = y),
@@ -103,11 +104,9 @@ function deterministic_config(;
         solver = solver_cfg,
         random = random_cfg,
     )
-
     if shocks !== nothing
         cfg = merge(cfg, (shocks = shocks,))
     end
-
     return UtilsConfig.ensure_master_rng(cfg)
 end
 

@@ -1,6 +1,6 @@
 # Dense tensor-product grid backend with multilinear interpolation.
 
-struct DenseGrid <: AbstractGridBackend
+mutable struct DenseGrid <: AbstractGridBackend
     box::Vector{Tuple{Float64,Float64}}
     axes::Vector{Vector{Float64}}
     nodes::Matrix{Float64}

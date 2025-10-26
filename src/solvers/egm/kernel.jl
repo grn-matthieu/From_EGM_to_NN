@@ -24,6 +24,7 @@ using ..CSVarUtils: csvar_state_incomes, csvar_state_matrix
 using ..SolverIntegration: integrate_expectation, discrete_expectation
 using Random: default_rng
 using ..SolverPlaceholders: build_placeholder_solution
+using ..GridHelpers: fit_values_on_backend!, eval_backend_at_points
 using Printf
 
 export solve_egm_det, solve_egm_stoch, solve_egm_placeholder
@@ -194,7 +195,9 @@ function solve_egm_det_impl(
                 sort_policy_pairs!(a_sorted, c_sorted, a_endo_vec, c_endo_vec)
 
                 column_new = view(cnew, :, j)
-                interp_linear!(column_new, a_sorted, c_sorted, a_grid)
+                a_info = model_grids[:a]
+                backend = fit_values_on_backend!(a_info, a_sorted, reshape(c_sorted, :, 1))
+                column_new .= eval_backend_at_points(backend, a_grid, 1)
                 @. cmax_vec = income + R * a_grid - a_min
                 clamp_policy!(column_new, cmin, cmax_vec)
             end
@@ -205,7 +208,9 @@ function solve_egm_det_impl(
                 col_next = view(a_next, :, j)
                 col_c = view(c, :, j)
                 @. col_next = clamp(income + R * a_grid - col_c, a_min, a_max)
-                interp_linear!(view(cnext, :, j), a_grid, col_c, col_next)
+                a_info = model_grids[:a]
+                backend = fit_values_on_backend!(a_info, a_grid, reshape(col_c, :, 1))
+                view(cnext, :, j) .= eval_backend_at_points(backend, col_next, 1)
             end
             ensure_minimum!(cnext, cmin)
 
@@ -240,7 +245,9 @@ function solve_egm_det_impl(
             col_next = view(a_next, :, j)
             col_c = view(c, :, j)
             @. col_next = clamp(R * a_grid + income - col_c, a_min, a_max)
-            interp_linear!(view(cnext, :, j), a_grid, col_c, col_next)
+            a_info = model_grids[:a]
+            backend = fit_values_on_backend!(a_info, a_grid, reshape(col_c, :, 1))
+            view(cnext, :, j) .= eval_backend_at_points(backend, col_next, 1)
         end
         ensure_minimum!(cnext, cmin)
         for j = 1:length(incomes)
@@ -315,14 +322,18 @@ function solve_egm_det_impl(
         enforce_borrowing_constraint!(a_endo, c_endo, a_min, income, R, a_grid; cmin = cmin)
         sort_policy_pairs!(a_sorted, c_sorted, a_endo, c_endo)
 
-        interp_linear!(cnew, a_sorted, c_sorted, a_grid)
+        a_info = model_grids[:a]
+        backend = fit_values_on_backend!(a_info, a_sorted, reshape(c_sorted, :, 1))
+        cnew .= eval_backend_at_points(backend, a_grid, 1)
         cmax = @. income + R * a_grid - a_min
         clamp_policy!(cnew, cmin, cmax)
 
         Δpol = relaxation_step!(c, cold, cnew, relax)
 
         @. a_next = clamp(income + R * a_grid - c, a_min, a_max)
-        interp_linear!(cnext, a_grid, c, a_next)
+        a_info = model_grids[:a]
+        backend = fit_values_on_backend!(a_info, a_grid, reshape(c, :, 1))
+        cnext .= eval_backend_at_points(backend, a_next, 1)
         ensure_minimum!(cnext, cmin)
         euler_resid_det!(resid, model_params, c, cnext)
 
@@ -502,7 +513,9 @@ function solve_egm_det_impl(
                 enforce_monotone!(c_sorted)
 
                 column_new = view(cnew, :, j)
-                interp_pchip!(column_new, a_sorted, c_sorted, a_grid)
+                a_info = model_grids[:a]
+                backend = fit_values_on_backend!(a_info, a_sorted, reshape(c_sorted, :, 1))
+                column_new .= eval_backend_at_points(backend, a_grid, 1)
 
                 @. cmax_vec = income + R * a_grid - a_min
                 clamp_policy!(column_new, cmin, cmax_vec)
@@ -515,7 +528,9 @@ function solve_egm_det_impl(
                 col_next = view(a_next, :, j)
                 col_c = view(c, :, j)
                 @. col_next = clamp(income + R * a_grid - col_c, a_min, a_max)
-                interp_pchip!(view(cnext, :, j), a_grid, col_c, col_next)
+                a_info = model_grids[:a]
+                backend = fit_values_on_backend!(a_info, a_grid, reshape(col_c, :, 1))
+                view(cnext, :, j) .= eval_backend_at_points(backend, col_next, 1)
             end
             ensure_minimum!(cnext, cmin)
 
@@ -545,7 +560,9 @@ function solve_egm_det_impl(
             col_next = view(a_next, :, j)
             col_c = view(c, :, j)
             @. col_next = clamp(R * a_grid + income - col_c, a_min, a_max)
-            interp_pchip!(view(cnext, :, j), a_grid, col_c, col_next)
+            a_info = model_grids[:a]
+            backend = fit_values_on_backend!(a_info, a_grid, reshape(col_c, :, 1))
+            view(cnext, :, j) .= eval_backend_at_points(backend, col_next, 1)
         end
         ensure_minimum!(cnext, cmin)
         for j = 1:length(incomes)
@@ -620,7 +637,9 @@ function solve_egm_det_impl(
         sort_policy_pairs!(a_sorted, c_sorted, a_endo, c_endo)
         enforce_strict_increase!(a_sorted)
 
-        interp_pchip!(cnew, a_sorted, c_sorted, a_grid)
+        a_info = model_grids[:a]
+        backend = fit_values_on_backend!(a_info, a_sorted, reshape(c_sorted, :, 1))
+        cnew .= eval_backend_at_points(backend, a_grid, 1)
         cmax = @. income + R * a_grid - a_min
         clamp_policy!(cnew, cmin, cmax)
         enforce_monotone!(cnew)
@@ -628,7 +647,9 @@ function solve_egm_det_impl(
         Δpol = relaxation_step!(c, cold, cnew, relax)
 
         @. a_next = clamp(income + R * a_grid - c, a_min, a_max)
-        interp_pchip!(cnext, a_grid, c, a_next)
+        a_info = model_grids[:a]
+        backend = fit_values_on_backend!(a_info, a_grid, c)
+        cnext .= eval_backend_at_points(backend, a_next, 1)
         ensure_minimum!(cnext, cmin)
         euler_resid_det!(resid, model_params, c, cnext)
 
@@ -646,7 +667,9 @@ function solve_egm_det_impl(
     end
 
     @. a_next = clamp(R * a_grid + income - c, a_min, a_max)
-    interp_pchip!(cnext, a_grid, c, a_next)
+    a_info = model_grids[:a]
+    backend = fit_values_on_backend!(a_info, a_grid, c)
+    cnext .= eval_backend_at_points(backend, a_next, 1)
     ensure_minimum!(cnext, cmin)
     euler_resid_det!(resid, model_params, c, cnext)
     max_resid = rmse_nonbinding(resid, a_next, a_min, bind_tol)
@@ -806,7 +829,9 @@ function solve_egm_stoch_impl(
             enforce_borrowing_constraint!(a_endo, c_endo, a_min, y, R, a_grid; cmin = cmin)
             sort_policy_pairs!(a_sorted, c_sorted, a_endo, c_endo)
 
-            interp_linear!(view(cnew, :, j), a_sorted, c_sorted, a_grid)
+            a_info = model_grids[:a]
+            backend = fit_values_on_backend!(a_info, a_sorted, reshape(c_sorted, :, 1))
+            view(cnew, :, j) .= eval_backend_at_points(backend, a_grid, 1)
             @. cmax = y + R * a_grid - a_min
             clamp_policy!(view(cnew, :, j), cmin, cmax)
         end
@@ -946,7 +971,9 @@ function solve_egm_stoch_impl(
             enforce_monotone!(c_sorted)
 
             column = view(cnew, :, j)
-            interp_pchip!(column, a_sorted, c_sorted, a_grid)
+            a_info = model_grids[:a]
+            backend = fit_values_on_backend!(a_info, a_sorted, reshape(c_sorted, :, 1))
+            column .= eval_backend_at_points(backend, a_grid, 1)
 
             @. cmax = y + R * a_grid - a_min
             clamp_policy!(column, cmin, cmax)
