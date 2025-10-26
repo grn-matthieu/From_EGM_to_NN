@@ -6,7 +6,7 @@ The heavy lifting (pre-processing, training loop and evaluation utilities) lives
 in dedicated helpers so that this file focuses on the solver flow.
 """
 module NNKernel
-using ..GridHelpers: fit_values_on_backend!, eval_backend_at_points
+using ..GridHelpers: fit_values_on_backend!, eval_backend_at_points, grid_backend_available
 
 using ..API: get_grids, get_params, get_shocks, get_utility
 using ..CommonInterp: InterpKind, LinearInterp

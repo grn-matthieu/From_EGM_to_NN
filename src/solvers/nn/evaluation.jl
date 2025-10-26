@@ -11,6 +11,7 @@ using Random: randn!
 using Lux: fmap
 using LinearAlgebra: cholesky, mul!, Symmetric
 using ..CSVarUtils: csvar_income, csvar_component_log_means
+using ..GridHelpers: fit_values_on_backend!, grid_backend_available
 
 # Local sigmoid function to avoid NNlib dependency
 @inline sigmoid(x) = 1 / (1 + exp(-x))
@@ -26,6 +27,11 @@ const CONSUMPTION_FLOOR = 1.0f-8
 
 const DEFAULT_EVAL_SAMPLES = 8192
 const EVAL_MIN_CONSUMPTION = 1.0f-3
+@inline function maybe_fit_backend!(a_info, x_points, values)
+    grid_backend_available(a_info) || return nothing
+    fit_values_on_backend!(a_info, x_points, values)
+    return nothing
+end
 @inline is_csvar_problem(P, S) =
     S !== nothing &&
     hasproperty(S, :process) &&
@@ -124,6 +130,7 @@ function evaluate_deterministic(model, params, states, P_resid, P, G, scaler)
     a_next = next_assets_from_cash(w_grid, c_on_grid)
     a_next = clamp_to_asset_bounds(a_next, G[:a])
     max_resid = maximum(abs.(residuals))
+    maybe_fit_backend!(G[:a], G[:a].grid, reshape(c_on_grid, :, 1))
 
     return EvaluationResult(c_on_grid, a_next, residuals, max_resid)
 end
@@ -173,6 +180,7 @@ function evaluate_stochastic(
     a_next = next_assets_from_cash(w_matrix, c_on_grid)
     a_next = clamp_to_asset_bounds(a_next, G[:a])
     max_resid = maximum(abs.(residuals))
+    maybe_fit_backend!(G[:a], G[:a].grid, c_on_grid)
 
     return EvaluationResult(c_on_grid, a_next, residuals, max_resid)
 end
@@ -221,6 +229,7 @@ function evaluate_csvar(
     c_on_grid = convert_to_grid_eltype(G[:a].grid, c_vec)
     a_next = next_assets_from_cash(w_grid, Float32.(c_on_grid))
     a_next = clamp_to_asset_bounds(a_next, G[:a])
+    maybe_fit_backend!(G[:a], G[:a].grid, reshape(c_on_grid, :, 1))
 
     uprime = get_uprime(U, P_resid)
     β = Float32(P_resid.β)
