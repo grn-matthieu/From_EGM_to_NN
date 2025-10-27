@@ -1,3 +1,34 @@
+export is_csvar_model, csvar_state_data, prepare_csvar_initial_consumption
+
+@inline function is_csvar_model(params)
+    hasproperty(params, :y_dim) && getproperty(params, :y_dim) > 1
+end
+
+function csvar_state_data(params)
+    is_csvar_model(params) ||
+        error("CSVAR state data requested for model without vector income")
+    y_dim = params.y_dim
+    Y = csvar_state_matrix(params.y, y_dim)
+    incomes = csvar_state_incomes(Y)
+    return Y, incomes
+end
+
+function prepare_csvar_initial_consumption(a_grid, a_min, R, incomes; c_init, cmin)
+    Na = length(a_grid)
+    Ny = length(incomes)
+    if c_init === nothing
+        c = Array{Float64}(undef, Na, Ny)
+        for (j, income) in enumerate(incomes)
+            column = init_consumption_det(a_grid, a_min, R, income; cmin = cmin)
+            @views c[:, j] .= column
+        end
+        return c
+    elseif c_init isa AbstractArray
+        return copy(c_init)
+    else
+        error("CSVAR warm start must be an array when provided")
+    end
+end
 module CSVarUtils
 
 using LinearAlgebra: Cholesky, Symmetric, cholesky, mul!, diag

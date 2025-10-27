@@ -31,35 +31,12 @@ export solve_egm, solve_egm_placeholder
 
 const DEFAULT_BINDING_TOL = 1e-12
 
-@inline function _is_csvar_model(params)
-    hasproperty(params, :y_dim) && getproperty(params, :y_dim) > 1
-end
-
-function _csvar_state_data(params)
-    _is_csvar_model(params) ||
-        error("CSVAR state data requested for model without vector income")
-    y_dim = params.y_dim
-    Y = csvar_state_matrix(params.y, y_dim)
-    incomes = csvar_state_incomes(Y)
-    return Y, incomes
-end
-
-function _prepare_csvar_initial_consumption(a_grid, a_min, R, incomes; c_init, cmin)
-    Na = length(a_grid)
-    Ny = length(incomes)
-    if c_init === nothing
-        c = Array{Float64}(undef, Na, Ny)
-        for (j, income) in enumerate(incomes)
-            column = init_consumption_det(a_grid, a_min, R, income; cmin = cmin)
-            @views c[:, j] .= column
-        end
-        return c
-    elseif c_init isa AbstractArray
-        return copy(c_init)
-    else
-        error("CSVAR warm start must be an array when provided")
-    end
-end
+using ..CSVarUtils:
+    csvar_state_incomes,
+    csvar_state_matrix,
+    is_csvar_model,
+    csvar_state_data,
+    prepare_csvar_initial_consumption
 
 
 
@@ -272,14 +249,5 @@ function solve_egm_placeholder(
         note = "placeholder EGM solution",
     )
 end
-
-
-"""
-    solve_egm_stoch(model_params, model_grids, model_shocks, model_utility; ...)
-
-Vectorized EGM solver for the CS model with an AR(1) income process.
-Stops when expected Euler equation errors and policy changes (evaluated at discretized nodes) meet tolerance.
-Returns a `NamedTuple` with fields `(a_grid, z_grid, c, a_next, resid, iters, converged, euler_rmse, model_params, opts)` that is later converted into a `Solution`.
-"""
 
 end #module
