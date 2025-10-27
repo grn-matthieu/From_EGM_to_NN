@@ -106,6 +106,7 @@ function solve_projection_det(
     best_converged = false
     best_order = candidate_orders[1]
     best_delta = nothing
+    best_rmse_history = Float64[]
 
     cmin = 1e-12
 
@@ -127,6 +128,7 @@ function solve_projection_det(
         c_next = similar(c)
         converged = false
         iters = 0
+        rmse_history = Float64[]
 
         last_delta = Inf
         for it = 1:maxit
@@ -165,6 +167,8 @@ function solve_projection_det(
             euler_rmse_val =
                 rmse_nonbinding(resid_val_temp, a_next_val_temp, a_min, bind_tol)
 
+            push!(rmse_history, euler_rmse_val)
+
             if delta < tol_pol && euler_rmse_val < tol
                 converged = true
                 break
@@ -189,6 +193,7 @@ function solve_projection_det(
             best_converged = converged
             best_order = order
             best_delta = last_delta
+            best_rmse_history = copy(rmse_history)
         end
     end
 
@@ -227,12 +232,14 @@ function solve_projection_det(
         resid = resid_out,
         iters = best_iters,
         converged = best_converged,
+        euler_rmse = euler_rmse_out,
         max_resid = euler_rmse_out,
         rmse = euler_rmse_out,
         model_params = model_params,
         coeffs = best_coeffs,
         opts = opts,
         delta_pol = best_delta,
+        rmse_history = best_rmse_history,
     )
 end
 
@@ -316,6 +323,7 @@ function solve_projection_stoch(
     best_converged = false
     best_order = candidate_orders[1]
     best_delta = nothing
+    best_rmse_history = Float64[]
 
     cmin = 1e-12
 
@@ -339,6 +347,7 @@ function solve_projection_stoch(
         tmp = similar(a_grid)
         converged = false
         iters = 0
+        rmse_history = Float64[]
 
         last_delta = Inf
         for it = 1:maxit
@@ -382,6 +391,9 @@ function solve_projection_stoch(
             c .= c_new
             resid_mat = euler_resid_stoch_grid(model_params, a_grid, z_grid, transition, c)
             max_resid = rmse_nonbinding(resid_mat, a_next, a_min, bind_tol)
+
+            push!(rmse_history, max_resid)
+
             # use tol_pol for policy iteration delta and tol for residual
             if delta < tol_pol && max_resid < tol
                 converged = true
@@ -416,6 +428,7 @@ function solve_projection_stoch(
             best_converged = converged
             best_order = order
             best_delta = last_delta
+            best_rmse_history = copy(rmse_history)
         end
     end
 
@@ -463,12 +476,14 @@ function solve_projection_stoch(
         resid = resid_out,
         iters = best_iters,
         converged = best_converged,
+        euler_rmse = euler_rmse_out,
         max_resid = euler_rmse_out,
         rmse = euler_rmse_out,
         model_params = model_params,
         coeffs = best_coeffs,
         opts = opts,
         delta_pol = best_delta,
+        rmse_history = best_rmse_history,
     )
 end
 
@@ -525,6 +540,7 @@ function solve_projection_csvar(
     best_converged = false
     best_order = candidate_orders[1]
     best_delta = nothing
+    best_rmse_history = Float64[]
 
     cmin = 1e-12
     available_grid = income .+ R .* a_grid .- a_min
@@ -547,6 +563,7 @@ function solve_projection_csvar(
         c_new = similar(c)
         converged = false
         iters = 0
+        rmse_history = Float64[]
         last_delta = Inf
 
         for it = 1:maxit
@@ -626,6 +643,8 @@ function solve_projection_csvar(
             euler_rmse_val =
                 rmse_nonbinding(resid_val_temp, a_next_val_temp, a_min, bind_tol)
 
+            push!(rmse_history, euler_rmse_val)
+
             if delta < tol_pol && euler_rmse_val < tol
                 converged = true
                 break
@@ -671,6 +690,7 @@ function solve_projection_csvar(
             best_converged = converged
             best_order = order
             best_delta = last_delta
+            best_rmse_history = copy(rmse_history)
         end
     end
 
@@ -730,12 +750,14 @@ function solve_projection_csvar(
         resid = resid_out,
         iters = best_iters,
         converged = best_converged,
+        euler_rmse = euler_rmse_out,
         max_resid = euler_rmse_out,
         rmse = euler_rmse_out,
         model_params = model_params,
         coeffs = best_coeffs,
         opts = opts,
         delta_pol = best_delta,
+        rmse_history = best_rmse_history,
     )
 end
 

@@ -48,6 +48,7 @@ struct TrainingResult
     epochs_run::Int
     batch_size::Int
     batches_per_epoch::Int
+    rmse_history::Vector{Float64}
 end
 
 maybe_to_device(x::Nothing, ::NNSolverSettings) = nothing
@@ -1145,6 +1146,7 @@ function train_consumption_network!(
     # Track previous policy for convergence check
     prev_policy = nothing
     convergence_check_batch = nothing
+    rmse_history = Float64[]
 
     for epoch = 1:settings.epochs
         new_lr = learning_rate_for_epoch(settings, epoch)
@@ -1420,6 +1422,9 @@ function train_consumption_network!(
                     end
                 end
 
+                # Track RMSE history
+                push!(rmse_history, euler_rmse)
+
                 # Check dual convergence criteria
                 converged = (euler_rmse < 1e-4) && (Δ_pol < 1e-6)
 
@@ -1440,6 +1445,7 @@ function train_consumption_network!(
                         epoch,
                         batch_size,
                         batches_per_epoch,
+                        rmse_history,
                     )
                 end
             catch err
@@ -1553,6 +1559,7 @@ function train_consumption_network!(
                 epoch,
                 batch_size,
                 batches_per_epoch,
+                rmse_history,
             )
         end
     end
@@ -1563,5 +1570,6 @@ function train_consumption_network!(
         settings.epochs,
         batch_size,
         batches_per_epoch,
+        rmse_history,
     )
 end

@@ -133,6 +133,8 @@ function solve(
         :delta_pol => delta_pol,
         :mean_ee => ee_mean,
         :julia_version => string(VERSION),
+        :rmse_history => hasproperty(sol, :rmse_history) ? sol.rmse_history : Float64[],
+        :opts => sol.opts,
     )
 
     return Solution(

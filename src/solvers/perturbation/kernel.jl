@@ -14,7 +14,8 @@ module PerturbationKernel
 using ..EulerResiduals:
     euler_resid_det, euler_resid_stoch, euler_resid_det_grid, euler_resid_stoch_grid
 using ..CommonInterp: InterpKind, LinearInterp
-using ..PolicyUtils: clamp_policy!, compute_binding_tolerance, rmse_nonbinding
+using ..PolicyUtils:
+    clamp_policy!, compute_binding_tolerance, rmse_nonbinding, enforce_monotone!
 using ..SolverPlaceholders: build_placeholder_solution
 using ..SolverIntegration: integrate_expectation, discrete_expectation
 using Random: default_rng
@@ -239,11 +240,13 @@ function solve_perturbation_det(
     end
 
     # Deterministic: z = 0
-    c = @. c̄ + Fa * (a_grid - ā) + 0.5 * C2 * (a_grid - ā)^2
+    c = @. c̄ + Fa * (a_grid - ā) + 0.5 * C2 * (a_grid - ā)^2
     cmin = 1e-12
-    cmax = @. ȳ + R * a_grid - a_min
+    cmax = @. ȳ + R * a_grid - a_min
     clamp_policy!(c, cmin, cmax)
-    a_next = @. R * a_grid + ȳ - c
+    # Enforce monotonicity since perturbation can produce non-monotonic policies
+    enforce_monotone!(c)
+    a_next = @. R * a_grid + ȳ - c
     @. a_next = clamp(a_next, a_min, a_max)
 
     resid = euler_resid_det_grid(p, a_grid, c)
@@ -394,6 +397,8 @@ function solve_perturbation_stoch(
             available[i] = exp(z) + R * ai - a_min
         end
         clamp_policy!(col, cmin, available)
+        # Enforce monotonicity in assets since perturbation can produce non-monotonic policies
+        enforce_monotone!(col)
         a_col = view(a_next, :, j)
         @. a_col = clamp(R * a_grid + exp(z) - col, a_min, a_max)
     end

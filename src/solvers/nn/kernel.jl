@@ -280,11 +280,13 @@ function solve_nn(model; opts = nothing, rng = nothing)
         resid = evaluation.resid,
         iters = training_result.epochs_run,
         converged = converged,
+        euler_rmse = evaluation.max_resid,
         max_resid = evaluation.max_resid,
         model_params = P,
         opts = opts_summary,
         eval_mc = eval_mc,
         eval_gh = eval_gh,
+        rmse_history = training_result.rmse_history,
     )
 end
 
