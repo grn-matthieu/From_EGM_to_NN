@@ -1,8 +1,13 @@
 """
 PerturbationKernel
 
-Simple perturbation-based policy update kernel used for smoke tests and
-baselines. Not intended as a production-quality solver.
+Perturbation-based solver that approximates the model around a deterministic steady state.
+Implements 1st- and 2nd-order perturbation methods using automatic differentiation (ForwardDiff)
+for Jacobians/Hessians and analytical steady state computation. For Gaussian shocks,
+analytic expectations are computed using Taylor expansions.
+
+First-order perturbation produces a local linear solution capturing immediate policy responses
+to shocks. Second-order perturbation incorporates non-linear effects via quadratic terms.
 """
 module PerturbationKernel
 
