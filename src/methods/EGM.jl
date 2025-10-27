@@ -8,7 +8,7 @@ module EGM
 using ..API
 import ..API: solve
 
-using ..EGMKernel: solve_egm_det, solve_egm_stoch
+using ..EGMKernel: solve_egm
 using ..ValueFunction: compute_value_policy
 using ..Determinism: canonicalize_cfg, hash_hex
 using ..CommonInterp: LinearInterp, MonotoneCubicInterp
@@ -98,25 +98,7 @@ end
 
 function run_kernel(ctx::EGMRunContext, c_init)
     interp = select_interpolant(ctx.method)
-
-    if ctx.shocks === nothing
-        return solve_egm_det(
-            ctx.params,
-            ctx.grids,
-            ctx.utility;
-            tol = ctx.method.opts.tol,
-            tol_pol = ctx.method.opts.tol_pol,
-            maxit = ctx.method.opts.maxit,
-            interp_kind = interp,
-            relax = ctx.method.opts.relax,
-            verbose = ctx.method.opts.verbose,
-            c_init = c_init,
-            integration_method = ctx.method.opts.integration,
-            rng = ctx.rng,
-        )
-    end
-
-    return solve_egm_stoch(
+    return solve_egm(
         ctx.params,
         ctx.grids,
         ctx.shocks,

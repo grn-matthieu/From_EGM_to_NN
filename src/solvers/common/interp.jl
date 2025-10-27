@@ -6,6 +6,31 @@ monotone piecewise-cubic (PCHIP) routines together with type tags consumed by
 call sites.
 """
 module CommonInterp
+"""
+    interp_dispatch!(out, x, y, xq, kind)
+
+Dispatches to the correct interpolation routine based on the InterpKind type.
+"""
+"""
+    interpolate(out, x, y, xq, kind)
+
+Dispatches to the correct interpolation routine based on the InterpKind type.
+"""
+function interpolate(
+    out::AbstractVector,
+    x::AbstractVector,
+    y::AbstractVector,
+    xq::AbstractVector,
+    kind::InterpKind,
+)
+    if kind isa LinearInterp
+        return interp_linear!(out, x, y, xq)
+    elseif kind isa MonotoneCubicInterp
+        return interp_pchip!(out, x, y, xq)
+    else
+        error("Unknown interpolation kind: $(typeof(kind))")
+    end
+end
 
 export InterpKind, LinearInterp, MonotoneCubicInterp
 export interp_linear!, interp_linear, interp_pchip!
