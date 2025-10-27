@@ -1,3 +1,4 @@
+
 """
 CommonInterp
 
@@ -6,11 +7,14 @@ monotone piecewise-cubic (PCHIP) routines together with type tags consumed by
 call sites.
 """
 module CommonInterp
-"""
-    interp_dispatch!(out, x, y, xq, kind)
 
-Dispatches to the correct interpolation routine based on the InterpKind type.
-"""
+abstract type InterpKind end
+struct LinearInterp <: InterpKind end
+struct MonotoneCubicInterp <: InterpKind end
+
+export InterpKind, LinearInterp, MonotoneCubicInterp
+export interp_linear!, interp_linear, interp_pchip!
+
 """
     interpolate(out, x, y, xq, kind)
 
@@ -31,13 +35,6 @@ function interpolate(
         error("Unknown interpolation kind: $(typeof(kind))")
     end
 end
-
-export InterpKind, LinearInterp, MonotoneCubicInterp
-export interp_linear!, interp_linear, interp_pchip!
-
-abstract type InterpKind end
-struct LinearInterp <: InterpKind end
-struct MonotoneCubicInterp <: InterpKind end
 
 Base.@propagate_inbounds function _interp_linear_scalar(
     u::Real,
@@ -108,8 +105,6 @@ function interp_linear(x::AbstractVector, y::AbstractVector, xq::Number)
     @assert length(x) == length(y)
     return _interp_linear_scalar(xq, x, y, length(x))
 end
-
-
 
 """
     interp_pchip!(out, x, y, xq)

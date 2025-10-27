@@ -1,13 +1,13 @@
 #!/usr/bin/env julia
 
 """
-Method Benchmark Script
+Methods Benchmark Script
 
 Runs any solution method on the stochastic consumption-savings model with
 comprehensive diagnostics, statistics, and policy plots.
 
 Usage:
-  julia --project scripts/thesis/benchmarks/time_iteration_benchmark.jl [options]
+  julia --project scripts/thesis/benchmarks/methods_benchmark.jl [options]
 
 Options:
   --method=NAME       Solution method: TimeIteration, EGM, Projection, NN, Perturbation (default: TimeIteration)
@@ -28,7 +28,7 @@ Outputs:
   - Summary statistics printed to console
 """
 
-module MethodBenchmark
+module MethodsBenchmark
 
 import Pkg
 Pkg.activate(normpath(joinpath(@__DIR__, "..", "..", "..")); io = devnull)
@@ -136,13 +136,13 @@ end
 function print_help()
     println(
         """
-Method Benchmark Script
+Methods Benchmark Script
 
 Runs any solution method on the stochastic consumption-savings model with
 comprehensive diagnostics, statistics, and policy plots.
 
 Usage:
-  julia --project scripts/thesis/benchmarks/time_iteration_benchmark.jl [options]
+  julia --project scripts/thesis/benchmarks/methods_benchmark.jl [options]
 
 Options:
   --method=NAME       Solution method: TimeIteration, EGM, Projection, NN, Perturbation (default: TimeIteration)
@@ -161,7 +161,7 @@ Outputs:
   - CSV report with convergence statistics and Euler errors
   - Policy plots (consumption and savings) as PNG files
   - Summary statistics printed to console
-    """,
+        """,
     )
 end
 
@@ -647,5 +647,5 @@ end # module
 
 # Run if executed as script
 if abspath(PROGRAM_FILE) == @__FILE__
-    MethodBenchmark.main()
+    MethodsBenchmark.main()
 end

@@ -20,7 +20,12 @@ using ..PolicyUtils:
     relaxation_step!,
     rmse_nonbinding,
     sort_policy_pairs!
-using ..CSVarUtils: csvar_state_incomes, csvar_state_matrix
+using ..CSVarUtils:
+    csvar_state_incomes,
+    csvar_state_matrix,
+    is_csvar_model,
+    csvar_state_data,
+    prepare_csvar_initial_consumption
 using ..SolverIntegration: integrate_expectation, discrete_expectation
 using Random: default_rng
 using ..SolverPlaceholders: build_placeholder_solution
