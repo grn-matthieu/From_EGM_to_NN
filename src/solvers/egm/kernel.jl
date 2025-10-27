@@ -6,6 +6,7 @@ Exports helpers and the main projection-based policy iteration.
 """
 module EGMKernel
 
+using Base.Threads: @threads
 using ..CommonInterp:
     interp_linear!, interp_pchip!, InterpKind, LinearInterp, MonotoneCubicInterp
 using ..EulerResiduals: euler_resid_det!, euler_resid_stoch!, euler_resid_stoch_interp!
@@ -806,12 +807,6 @@ function solve_egm_stoch_impl(
     a_next = similar(c)
     resid_mat = similar(c)
     pow = similar(c)
-    EUprime = similar(view(c, :, 1))
-    c_endo = similar(EUprime)
-    a_endo = similar(EUprime)
-    a_sorted = similar(EUprime)
-    c_sorted = similar(EUprime)
-    cmax = similar(EUprime)
 
     converged = false
     iters = 0
@@ -823,22 +818,44 @@ function solve_egm_stoch_impl(
         copyto!(cold, c)
         @. pow = max(cold, cmin)^(-γ)
 
-        for (j, z) in enumerate(z_grid)
+        @threads for j = 1:Nz
+            z = z_grid[j]
             y = exp(z)
             weights = view(Π, j, :)
-            EUprime .= discrete_expectation(weights, pow)
 
-            @. c_endo = model_utility.u_prime_inv(β * R * EUprime)
-            @. a_endo = (a_grid - y + c_endo) / R
+            # Thread-local buffers
+            EUprime_local = similar(view(c, :, 1))
+            c_endo_local = similar(EUprime_local)
+            a_endo_local = similar(EUprime_local)
+            a_sorted_local = similar(EUprime_local)
+            c_sorted_local = similar(EUprime_local)
+            cmax_local = similar(EUprime_local)
 
-            enforce_borrowing_constraint!(a_endo, c_endo, a_min, y, R, a_grid; cmin = cmin)
-            sort_policy_pairs!(a_sorted, c_sorted, a_endo, c_endo)
+            EUprime_local .= discrete_expectation(weights, pow)
+
+            @. c_endo_local = model_utility.u_prime_inv(β * R * EUprime_local)
+            @. a_endo_local = (a_grid - y + c_endo_local) / R
+
+            enforce_borrowing_constraint!(
+                a_endo_local,
+                c_endo_local,
+                a_min,
+                y,
+                R,
+                a_grid;
+                cmin = cmin,
+            )
+            sort_policy_pairs!(a_sorted_local, c_sorted_local, a_endo_local, c_endo_local)
 
             a_info = model_grids[:a]
-            backend = fit_values_on_backend!(a_info, a_sorted, reshape(c_sorted, :, 1))
+            backend = fit_values_on_backend!(
+                a_info,
+                a_sorted_local,
+                reshape(c_sorted_local, :, 1),
+            )
             view(cnew, :, j) .= eval_backend_at_points(backend, a_grid, 1)
-            @. cmax = y + R * a_grid - a_min
-            clamp_policy!(view(cnew, :, j), cmin, cmax)
+            @. cmax_local = y + R * a_grid - a_min
+            clamp_policy!(view(cnew, :, j), cmin, cmax_local)
         end
 
         Δpol = relaxation_step!(c, cold, cnew, relax)
@@ -945,12 +962,6 @@ function solve_egm_stoch_impl(
     a_next = similar(c)
     resid_mat = similar(c)
     pow = similar(c)
-    EUprime = similar(view(c, :, 1))
-    c_endo = similar(EUprime)
-    a_endo = similar(EUprime)
-    a_sorted = similar(EUprime)
-    c_sorted = similar(EUprime)
-    cmax = similar(EUprime)
 
     converged = false
     iters = 0
@@ -962,26 +973,48 @@ function solve_egm_stoch_impl(
         copyto!(cold, c)
         @. pow = max(cold, cmin)^(-γ)
 
-        for (j, z) in enumerate(z_grid)
+        @threads for j = 1:Nz
+            z = z_grid[j]
             y = exp(z)
             weights = view(Π, j, :)
-            EUprime .= discrete_expectation(weights, pow)
 
-            @. c_endo = model_utility.u_prime_inv(β * R * EUprime)
-            @. a_endo = (a_grid - y + c_endo) / R
+            # Thread-local buffers
+            EUprime_local = similar(view(c, :, 1))
+            c_endo_local = similar(EUprime_local)
+            a_endo_local = similar(EUprime_local)
+            a_sorted_local = similar(EUprime_local)
+            c_sorted_local = similar(EUprime_local)
+            cmax_local = similar(EUprime_local)
 
-            enforce_borrowing_constraint!(a_endo, c_endo, a_min, y, R, a_grid; cmin = cmin)
-            sort_policy_pairs!(a_sorted, c_sorted, a_endo, c_endo)
-            enforce_strict_increase!(a_sorted)
-            enforce_monotone!(c_sorted)
+            EUprime_local .= discrete_expectation(weights, pow)
+
+            @. c_endo_local = model_utility.u_prime_inv(β * R * EUprime_local)
+            @. a_endo_local = (a_grid - y + c_endo_local) / R
+
+            enforce_borrowing_constraint!(
+                a_endo_local,
+                c_endo_local,
+                a_min,
+                y,
+                R,
+                a_grid;
+                cmin = cmin,
+            )
+            sort_policy_pairs!(a_sorted_local, c_sorted_local, a_endo_local, c_endo_local)
+            enforce_strict_increase!(a_sorted_local)
+            enforce_monotone!(c_sorted_local)
 
             column = view(cnew, :, j)
             a_info = model_grids[:a]
-            backend = fit_values_on_backend!(a_info, a_sorted, reshape(c_sorted, :, 1))
+            backend = fit_values_on_backend!(
+                a_info,
+                a_sorted_local,
+                reshape(c_sorted_local, :, 1),
+            )
             column .= eval_backend_at_points(backend, a_grid, 1)
 
-            @. cmax = y + R * a_grid - a_min
-            clamp_policy!(column, cmin, cmax)
+            @. cmax_local = y + R * a_grid - a_min
+            clamp_policy!(column, cmin, cmax_local)
             enforce_monotone!(column)
         end
 
