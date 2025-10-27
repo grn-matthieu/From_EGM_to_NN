@@ -74,7 +74,7 @@ function solve_ti_det(
     model_params,
     model_grids,
     model_utility;
-    tol::Real = 1e-8,
+    tol::Real = 1e-4,
     tol_pol::Real = 1e-6,
     maxit::Int = 500,
     interp_kind::InterpKind = LinearInterp(),
@@ -106,7 +106,7 @@ function solve_ti_det_impl(
     model_params,
     model_grids,
     model_utility;
-    tol::Real = 1e-8,
+    tol::Real = 1e-4,
     tol_pol::Real = 1e-6,
     maxit::Int = 500,
     relax::Real = 0.5,
@@ -319,7 +319,7 @@ function solve_ti_det_impl(
     model_params,
     model_grids,
     model_utility;
-    tol::Real = 1e-8,
+    tol::Real = 1e-4,
     tol_pol::Real = 1e-6,
     maxit::Int = 500,
     relax::Real = 0.5,
@@ -503,7 +503,7 @@ function solve_ti_stoch(
     model_grids,
     model_shocks,
     model_utility;
-    tol::Real = 1e-8,
+    tol::Real = 1e-4,
     tol_pol::Real = 1e-6,
     maxit::Int = 1000,
     interp_kind::InterpKind = LinearInterp(),
@@ -537,7 +537,7 @@ function solve_ti_stoch_impl(
     model_grids,
     model_shocks,
     model_utility;
-    tol::Real = 1e-8,
+    tol::Real = 1e-4,
     tol_pol::Real = 1e-6,
     maxit::Int = 1000,
     relax::Real = 0.5,

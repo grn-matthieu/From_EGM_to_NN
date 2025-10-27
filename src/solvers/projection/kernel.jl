@@ -52,7 +52,7 @@ function solve_projection_det(
     model_params,
     model_grids,
     model_utility;
-    tol::Real = 1e-6,
+    tol::Real = 1e-4,
     maxit::Int = 1000,
     orders::AbstractVector{Int} = Int[],
     Nval::Int = model_grids[:a].N,
@@ -200,7 +200,7 @@ function solve_projection_stoch(
     model_grids,
     model_shocks,
     model_utility;
-    tol::Real = 1e-6,
+    tol::Real = 1e-4,
     maxit::Int = 1000,
     orders::AbstractVector{Int} = Int[],
     Nval::Int = model_grids[:a].N,
@@ -406,7 +406,7 @@ function solve_projection_csvar(
     model_grids,
     model_shocks,
     model_utility;
-    tol::Real = 1e-6,
+    tol::Real = 1e-4,
     maxit::Int = 1000,
     orders::AbstractVector{Int} = Int[],
     Nval::Int = model_grids[:a].N,

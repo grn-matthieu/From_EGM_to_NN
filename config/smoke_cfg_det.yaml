@@ -23,7 +23,7 @@ solver:
   # run a single method name (string or symbol), a list of names, or use "all"
   # For the deterministic smoke config we keep EGM here to match test expectations.
   method: EGM
-  tol: 1.0e-3
+  tol: 1.0e-4
   tol_pol: 1.0e-6
   maxit: 10000
   verbose: false
@@ -61,7 +61,7 @@ solver:
     w_min: 0.1
     w_max: 4.0
     sigma_shocks: null
-    target_loss: 1e-10
+    target_loss: 1.0e-4
     use_cuda: false
 
 shocks:

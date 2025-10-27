@@ -24,7 +24,7 @@ utility:
 
 solver:
   method: NN
-  tol: 1.0e-3
+  tol: 1.0e-4
   tol_pol: 1.0e-6
   maxit: 5000
   verbose: true

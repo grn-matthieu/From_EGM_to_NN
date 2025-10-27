@@ -212,7 +212,7 @@ function solver_settings(
     verbose = Bool(get_option(opts, :verbose, false))
     # resample every epoch by default for stability
     resample_interval = max(Int(get_option(opts, :resample_every, 1)), 0)
-    target_loss = Float32(get_option(opts, :target_loss, 2e-4))
+    target_loss = Float32(get_option(opts, :target_loss, 1e-4))
     # Default: disable early stopping unless explicitly requested
     patience = max(Int(get_option(opts, :patience, 0)), 0)
     hid1 = max(Int(get_option(opts, :hid1, 128)), 1)
