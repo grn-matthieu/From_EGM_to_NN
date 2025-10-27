@@ -8,6 +8,7 @@ existing `methods` adapter.
 """
 module TimeIterationKernel
 
+using Base.Threads: @threads
 using ..CommonInterp:
     interp_linear,
     interp_linear!,
@@ -174,7 +175,8 @@ function solve_ti_det_impl(
             backend_cold = fit_values_on_backend!(a_info, a_grid, reshape(cold, :, 1))
         end
 
-        @inbounds for (i, a) in enumerate(a_grid)
+        @threads for i in eachindex(a_grid)
+            a = a_grid[i]
             resources = model_params.y + R * a
             c_hi = max(cmin, resources - a_min)
 
@@ -374,8 +376,6 @@ function solve_ti_det_impl(
 
     root_tol = min(1e-10, tol)
     max_root_iter = 100
-    interp_buf = similar(c, (1,))
-    query_buf = similar(a_grid, (1,))
 
     for it = 1:maxit
         iters = it
@@ -391,7 +391,8 @@ function solve_ti_det_impl(
             backend_cold = fit_values_on_backend!(a_info, a_grid, cold)
         end
 
-        @inbounds for (i, a) in enumerate(a_grid)
+        @threads for i in eachindex(a_grid)
+            a = a_grid[i]
             resources = model_params.y + R * a
             c_hi = max(cmin, resources - a_min)
 
@@ -404,9 +405,12 @@ function solve_ti_det_impl(
                 if use_backend
                     val = eval_backend_at_points(backend_cold, (a_prime,), 1)[1]
                 else
-                    query_buf[1] = a_prime
-                    interp_pchip!(interp_buf, a_grid, cold, query_buf)
-                    val = interp_buf[1]
+                    # Thread-local buffers to avoid race conditions
+                    query_buf_local = similar(a_grid, (1,))
+                    interp_buf_local = similar(c, (1,))
+                    query_buf_local[1] = a_prime
+                    interp_pchip!(interp_buf_local, a_grid, cold, query_buf_local)
+                    val = interp_buf_local[1]
                 end
                 return val < cmin ? cmin : val
             end
@@ -586,7 +590,8 @@ function solve_ti_stoch_impl(
             column_new = view(cnew, :, j)
             @. cmax = y + R * a_grid - a_min
 
-            @inbounds for (i, a) in enumerate(a_grid)
+            @threads for i in eachindex(a_grid)
+                a = a_grid[i]
                 resources = R * a + y
                 c_hi = max(cmin, resources - a_min)
 
@@ -598,7 +603,7 @@ function solve_ti_stoch_impl(
                 function euler_gap(c_guess)
                     a_prime = clamp(resources - c_guess, a_min, a_max)
                     Emu = zero(c_guess)
-                    @inbounds for (jp, _) in enumerate(z_grid)
+                    for (jp, _) in enumerate(z_grid)
                         c_future = interp_linear(a_grid, view(cold, :, jp), a_prime)
                         c_future = c_future < cmin ? cmin : c_future
                         Emu += Π[j, jp] * model_utility.u_prime(c_future)
