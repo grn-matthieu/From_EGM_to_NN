@@ -23,7 +23,7 @@ solver:
   # run a single method name (string or symbol), a list of names, or use "all"
   method: NN
   tol: 1.0e-4
-  tol_pol: 1.0e-3
+  tol_pol: 1.0e-6
   maxit: 1000
   verbose: true
   relax: 0.5

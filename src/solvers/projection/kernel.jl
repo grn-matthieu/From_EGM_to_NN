@@ -57,7 +57,7 @@ function solve_projection_det(
     orders::AbstractVector{Int} = Int[],
     Nval::Int = model_grids[:a].N,
     λ::Real = 0.0,
-    tol_pol::Real = tol,
+    tol_pol::Real = 1e-6,
     rng = nothing,
 )::NamedTuple
     start_time = time_ns()
@@ -205,7 +205,7 @@ function solve_projection_stoch(
     orders::AbstractVector{Int} = Int[],
     Nval::Int = model_grids[:a].N,
     λ::Real = 0.0,
-    tol_pol::Real = tol,
+    tol_pol::Real = 1e-6,
     integration_method::Symbol = :gh,
     gh_order::Int = 3,
     nsamples::Int = 128,
@@ -411,7 +411,7 @@ function solve_projection_csvar(
     orders::AbstractVector{Int} = Int[],
     Nval::Int = model_grids[:a].N,
     λ::Real = 0.0,
-    tol_pol::Real = tol,
+    tol_pol::Real = 1e-6,
     integration_method::Symbol = :gh,
     gh_order::Int = 3,
     nsamples::Int = 128,
