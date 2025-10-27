@@ -136,7 +136,7 @@ function _solver_failure_placeholder(
         policy = Dict{Symbol,Any}(),
         value = nothing,
         diagnostics = (method = string(method_name), runtime = 0.0),
-        metadata = Dict(:error => any(err)),
+        metadata = Dict(:error => err),
         model = model,
         method = method_obj,
     )

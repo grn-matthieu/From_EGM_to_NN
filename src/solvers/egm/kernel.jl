@@ -102,7 +102,7 @@ function solve_egm(
         @threads for j = 1:Nz
             z = z_grid[j]
             y = exp(z)
-            weights = Π[j:j]
+            weights = Π[j, :]
 
             # Thread-local buffers (Na+1 to accommodate constraint point)
             EUprime_local = Vector{Float64}(undef, Na)
@@ -136,8 +136,9 @@ function solve_egm(
             )
             sort_policy_pairs!(a_sorted_local, c_sorted_local, a_endo_local, c_endo_local)
 
-            # Clamp endogenous grid to stay within exogenous bounds
-            @. a_sorted_local = clamp(a_sorted_local, a_min, a_max)
+            # NOTE: Removed clamping of endogenous grid to avoid introducing duplicate points
+            # The interpolation should handle extrapolation or we should filter points instead
+            # @. a_sorted_local = clamp(a_sorted_local, a_min, a_max)
 
             # Interpolate using the general dispatcher
             interpolate(
