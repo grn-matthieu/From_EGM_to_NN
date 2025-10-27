@@ -66,7 +66,7 @@ end
 
 Vectorized EGM solver for deterministic income (equivalent to log-normal income with zero variance).
 Stops when Euler equation errors and policy changes fall below their respective tolerances.
-Returns a `NamedTuple` with fields `(a_grid, c, a_next, resid, iters, converged, max_resid, model_params, opts)`
+Returns a `NamedTuple` with fields `(a_grid, c, a_next, resid, iters, converged, euler_rmse, model_params, opts)`
 which is later converted into a `Solution`.
 """
 function solve_egm_det(
@@ -155,7 +155,7 @@ function solve_egm_det_impl(
 
         converged = false
         iters = 0
-        max_resid = Inf
+        euler_rmse = Inf
         Δpol = Inf
         integ_kind = integration_method === :none ? :gh : integration_method
 
@@ -223,19 +223,19 @@ function solve_egm_det_impl(
                 )
             end
 
-            max_resid = rmse_nonbinding(resid, a_next, a_min, bind_tol)
+            euler_rmse = rmse_nonbinding(resid, a_next, a_min, bind_tol)
 
             if verbose && it % 10 == 0
                 @printf(
                     "[EGM det linear] it=%d rmse=%.6e Δpol=%.6e\n",
                     it,
-                    max_resid,
+                    euler_rmse,
                     Δpol,
                 )
                 flush(stdout)
             end
 
-            if max_resid < tol && Δpol < tol_pol
+            if euler_rmse < tol && Δpol < tol_pol
                 converged = true
                 break
             end
@@ -258,7 +258,7 @@ function solve_egm_det_impl(
                 view(cnext, :, j),
             )
         end
-        max_resid = rmse_nonbinding(resid, a_next, a_min, bind_tol)
+        euler_rmse = rmse_nonbinding(resid, a_next, a_min, bind_tol)
 
         runtime = (time_ns() - start_time) / 1e9
         opts = (;
@@ -281,8 +281,8 @@ function solve_egm_det_impl(
             resid,
             iters,
             converged,
-            max_resid,
-            rmse = max_resid,
+            euler_rmse,
+            rmse = euler_rmse,
             model_params,
             opts,
             delta_pol = Δpol,
@@ -306,7 +306,7 @@ function solve_egm_det_impl(
 
     converged = false
     iters = 0
-    max_resid = Inf
+    euler_rmse = Inf
     Δpol = Inf
 
     for it = 1:maxit
@@ -337,14 +337,14 @@ function solve_egm_det_impl(
         ensure_minimum!(cnext, cmin)
         euler_resid_det!(resid, model_params, c, cnext)
 
-        max_resid = rmse_nonbinding(resid, a_next, a_min, bind_tol)
+        euler_rmse = rmse_nonbinding(resid, a_next, a_min, bind_tol)
 
         if verbose && it % 10 == 0
-            @printf("[EGM det linear] it=%d rmse=%.6e Δpol=%.6e\n", it, max_resid, Δpol)
+            @printf("[EGM det linear] it=%d rmse=%.6e Δpol=%.6e\n", it, euler_rmse, Δpol)
             flush(stdout)
         end
 
-        if max_resid < tol && Δpol < tol_pol
+        if euler_rmse < tol && Δpol < tol_pol
             converged = true
             break
         end
@@ -354,7 +354,7 @@ function solve_egm_det_impl(
     interp_linear!(cnext, a_grid, c, a_next)
     ensure_minimum!(cnext, cmin)
     euler_resid_det!(resid, model_params, c, cnext)
-    max_resid = rmse_nonbinding(resid, a_next, a_min, bind_tol)
+    euler_rmse = rmse_nonbinding(resid, a_next, a_min, bind_tol)
 
     runtime = (time_ns() - start_time) / 1e9
     opts = (;
@@ -377,8 +377,8 @@ function solve_egm_det_impl(
         resid,
         iters,
         converged,
-        max_resid,
-        rmse = max_resid,
+        euler_rmse,
+        rmse = euler_rmse,
         model_params,
         opts,
         delta_pol = Δpol,
@@ -471,7 +471,7 @@ function solve_egm_det_impl(
 
         converged = false
         iters = 0
-        max_resid = Inf
+        euler_rmse = Inf
         Δpol = Inf
         integ_kind = integration_method === :none ? :gh : integration_method
 
@@ -543,14 +543,19 @@ function solve_egm_det_impl(
                 )
             end
 
-            max_resid = rmse_nonbinding(resid, a_next, a_min, bind_tol)
+            euler_rmse = rmse_nonbinding(resid, a_next, a_min, bind_tol)
 
             if verbose && it % 10 == 0
-                @printf("[EGM det pchip] it=%d rmse=%.6e Δpol=%.6e\n", it, max_resid, Δpol,)
+                @printf(
+                    "[EGM det pchip] it=%d rmse=%.6e Δpol=%.6e\n",
+                    it,
+                    euler_rmse,
+                    Δpol,
+                )
                 flush(stdout)
             end
 
-            if max_resid < tol && Δpol < tol_pol
+            if euler_rmse < tol && Δpol < tol_pol
                 converged = true
                 break
             end
@@ -573,7 +578,7 @@ function solve_egm_det_impl(
                 view(cnext, :, j),
             )
         end
-        max_resid = rmse_nonbinding(resid, a_next, a_min, bind_tol)
+        euler_rmse = rmse_nonbinding(resid, a_next, a_min, bind_tol)
 
         runtime = (time_ns() - start_time) / 1e9
         opts = (;
@@ -596,8 +601,8 @@ function solve_egm_det_impl(
             resid,
             iters,
             converged,
-            max_resid,
-            rmse = max_resid,
+            euler_rmse,
+            rmse = euler_rmse,
             model_params,
             opts,
             delta_pol = Δpol,
@@ -620,7 +625,7 @@ function solve_egm_det_impl(
     c_sorted = similar(c_endo)
     converged = false
     iters = 0
-    max_resid = Inf
+    euler_rmse = Inf
     Δpol = Inf
 
     for it = 1:maxit
@@ -653,14 +658,14 @@ function solve_egm_det_impl(
         ensure_minimum!(cnext, cmin)
         euler_resid_det!(resid, model_params, c, cnext)
 
-        max_resid = rmse_nonbinding(resid, a_next, a_min, bind_tol)
+        euler_rmse = rmse_nonbinding(resid, a_next, a_min, bind_tol)
 
         if verbose && it % 10 == 0
-            @printf("[EGM det pchip] it=%d rmse=%.6e Δpol=%.6e\n", it, max_resid, Δpol)
+            @printf("[EGM det pchip] it=%d rmse=%.6e Δpol=%.6e\n", it, euler_rmse, Δpol)
             flush(stdout)
         end
 
-        if max_resid < tol && Δpol < tol_pol
+        if euler_rmse < tol && Δpol < tol_pol
             converged = true
             break
         end
@@ -672,7 +677,7 @@ function solve_egm_det_impl(
     cnext .= eval_backend_at_points(backend, a_next, 1)
     ensure_minimum!(cnext, cmin)
     euler_resid_det!(resid, model_params, c, cnext)
-    max_resid = rmse_nonbinding(resid, a_next, a_min, bind_tol)
+    euler_rmse = rmse_nonbinding(resid, a_next, a_min, bind_tol)
 
     runtime = (time_ns() - start_time) / 1e9
     opts = (;
@@ -695,8 +700,8 @@ function solve_egm_det_impl(
         resid,
         iters,
         converged,
-        max_resid,
-        rmse = max_resid,
+        euler_rmse,
+        rmse = euler_rmse,
         model_params,
         opts,
         delta_pol = Δpol,
@@ -708,7 +713,7 @@ end
 
 Vectorized EGM solver for the CS model with an AR(1) income process.
 Stops when expected Euler equation errors and policy changes (evaluated at discretized nodes) meet tolerance.
-Returns a `NamedTuple` with fields `(a_grid, z_grid, c, a_next, resid, iters, converged, max_resid, model_params, opts)` that is later converted into a `Solution`.
+Returns a `NamedTuple` with fields `(a_grid, z_grid, c, a_next, resid, iters, converged, euler_rmse, model_params, opts)` that is later converted into a `Solution`.
 """
 function solve_egm_stoch(
     model_params,
@@ -810,7 +815,7 @@ function solve_egm_stoch_impl(
 
     converged = false
     iters = 0
-    max_resid = Inf
+    euler_rmse = Inf
     Δpol = Inf
 
     for it = 1:maxit
@@ -853,14 +858,14 @@ function solve_egm_stoch_impl(
             LinearInterp(),
         )
 
-        max_resid = rmse_nonbinding(resid_mat, a_next, a_min, bind_tol)
+        euler_rmse = rmse_nonbinding(resid_mat, a_next, a_min, bind_tol)
 
         if verbose && it % 10 == 0
-            @printf("[EGM stoch linear] it=%d rmse=%.6e Δpol=%.6e\n", it, max_resid, Δpol)
+            @printf("[EGM stoch linear] it=%d rmse=%.6e Δpol=%.6e\n", it, euler_rmse, Δpol)
             flush(stdout)
         end
 
-        if max_resid < tol && Δpol < tol_pol
+        if euler_rmse < tol && Δpol < tol_pol
             converged = true
             break
         end
@@ -872,7 +877,7 @@ function solve_egm_stoch_impl(
     end
 
     euler_resid_stoch_interp!(resid_mat, model_params, a_grid, z_grid, Π, c, LinearInterp())
-    max_resid = rmse_nonbinding(resid_mat, a_next, a_min, bind_tol)
+    euler_rmse = rmse_nonbinding(resid_mat, a_next, a_min, bind_tol)
 
     runtime = (time_ns() - start_time) / 1e9
     opts = (;
@@ -895,7 +900,7 @@ function solve_egm_stoch_impl(
         resid = resid_mat,
         iters,
         converged,
-        max_resid,
+        euler_rmse,
         model_params,
         opts,
         delta_pol = Δpol,
@@ -949,7 +954,7 @@ function solve_egm_stoch_impl(
 
     converged = false
     iters = 0
-    max_resid = Inf
+    euler_rmse = Inf
     Δpol = Inf
 
     for it = 1:maxit
@@ -997,14 +1002,14 @@ function solve_egm_stoch_impl(
             MonotoneCubicInterp(),
         )
 
-        max_resid = rmse_nonbinding(resid_mat, a_next, a_min, bind_tol)
+        euler_rmse = rmse_nonbinding(resid_mat, a_next, a_min, bind_tol)
 
         if verbose && it % 10 == 0
-            @printf("[EGM stoch pchip] it=%d rmse=%.6e Δpol=%.6e\n", it, max_resid, Δpol)
+            @printf("[EGM stoch pchip] it=%d rmse=%.6e Δpol=%.6e\n", it, euler_rmse, Δpol)
             flush(stdout)
         end
 
-        if max_resid < tol && Δpol < tol_pol
+        if euler_rmse < tol && Δpol < tol_pol
             converged = true
             break
         end
@@ -1024,7 +1029,7 @@ function solve_egm_stoch_impl(
         c,
         MonotoneCubicInterp(),
     )
-    max_resid = rmse_nonbinding(resid_mat, a_next, a_min, bind_tol)
+    euler_rmse = rmse_nonbinding(resid_mat, a_next, a_min, bind_tol)
 
     runtime = (time_ns() - start_time) / 1e9
     opts = (;
@@ -1048,8 +1053,8 @@ function solve_egm_stoch_impl(
         resid = resid_mat,
         iters,
         converged,
-        max_resid,
-        rmse = max_resid,
+        euler_rmse,
+        rmse = euler_rmse,
         model_params,
         opts,
         delta_pol = Δpol,

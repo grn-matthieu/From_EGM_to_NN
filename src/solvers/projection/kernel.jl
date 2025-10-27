@@ -87,7 +87,7 @@ function solve_projection_det(
     best_c = nothing
     best_a_next = nothing
     best_resid = nothing
-    best_max_resid = Inf
+    best_euler_rmse = Inf
     best_val_resid = Inf
     best_iters = 0
     best_converged = false
@@ -127,10 +127,10 @@ function solve_projection_det(
             c_val_temp = B_val_temp * coeffs
             resid_val_temp = euler_resid_det_grid(model_params, a_val, c_val_temp)
             a_next_val_temp = clamp.(R .* a_val .+ income .- c_val_temp, a_min, a_max)
-            max_resid_val =
+            euler_rmse_val =
                 rmse_nonbinding(resid_val_temp, a_next_val_temp, a_min, bind_tol)
 
-            if delta < tol_pol && max_resid_val < tol
+            if delta < tol_pol && euler_rmse_val < tol
                 converged = true
                 break
             end
@@ -141,15 +141,15 @@ function solve_projection_det(
         c_val = B_val * coeffs
         resid_val = euler_resid_det_grid(model_params, a_val, c_val)
         a_next_val = clamp.(R .* a_val .+ income .- c_val, a_min, a_max)
-        max_resid_val = rmse_nonbinding(resid_val, a_next_val, a_min, bind_tol)
+        euler_rmse_val = rmse_nonbinding(resid_val, a_next_val, a_min, bind_tol)
 
-        if max_resid_val < best_val_resid
-            best_val_resid = max_resid_val
+        if euler_rmse_val < best_val_resid
+            best_val_resid = euler_rmse_val
             best_coeffs = coeffs
             best_c = copy(c)
             best_a_next = copy(a_next)
             best_resid = euler_resid_det_grid(model_params, a_grid, c)
-            best_max_resid = rmse_nonbinding(best_resid, best_a_next, a_min, bind_tol)
+            best_euler_rmse = rmse_nonbinding(best_resid, best_a_next, a_min, bind_tol)
             best_iters = iters
             best_converged = converged
             best_order = order
@@ -171,7 +171,7 @@ function solve_projection_det(
     end
     a_next_out = clamp.(R .* a_out .+ income .- c_out, a_min, a_max)
     resid_out = euler_resid_det_grid(model_params, a_out, c_out)
-    max_resid_out = rmse_nonbinding(resid_out, a_next_out, a_min, bind_tol)
+    euler_rmse_out = rmse_nonbinding(resid_out, a_next_out, a_min, bind_tol)
 
     runtime = (time_ns() - start_time) / 1e9
     # include policy tolerance in opts
@@ -192,8 +192,8 @@ function solve_projection_det(
         resid = resid_out,
         iters = best_iters,
         converged = best_converged,
-        max_resid = max_resid_out,
-        rmse = max_resid_out,
+        max_resid = euler_rmse_out,
+        rmse = euler_rmse_out,
         model_params = model_params,
         coeffs = best_coeffs,
         opts = opts,
@@ -267,7 +267,7 @@ function solve_projection_stoch(
     best_c = nothing
     best_a_next = nothing
     best_resid = nothing
-    best_max_resid = Inf
+    best_euler_rmse = Inf
     best_val_resid = Inf
     best_iters = 0
     best_converged = false
@@ -342,15 +342,15 @@ function solve_projection_stoch(
             @views @. a_next_val[:, j] =
                 clamp(R * a_val + income - c_val[:, j], a_min, a_max)
         end
-        max_resid_val = rmse_nonbinding(resid_val, a_next_val, a_min, bind_tol)
+        euler_rmse_val = rmse_nonbinding(resid_val, a_next_val, a_min, bind_tol)
 
-        if max_resid_val < best_val_resid
-            best_val_resid = max_resid_val
+        if euler_rmse_val < best_val_resid
+            best_val_resid = euler_rmse_val
             best_coeffs = coeffs
             best_c = copy(c)
             best_a_next = copy(a_next)
             best_resid = euler_resid_stoch_grid(model_params, a_grid, z_grid, transition, c)
-            best_max_resid = rmse_nonbinding(best_resid, best_a_next, a_min, bind_tol)
+            best_euler_rmse = rmse_nonbinding(best_resid, best_a_next, a_min, bind_tol)
             best_iters = iters
             best_converged = converged
             best_order = order
@@ -381,7 +381,7 @@ function solve_projection_stoch(
     end
 
     resid_out = euler_resid_stoch_grid(model_params, a_out, z_grid, transition, c_out)
-    max_resid_out = rmse_nonbinding(resid_out, a_next_out, a_min, bind_tol)
+    euler_rmse_out = rmse_nonbinding(resid_out, a_next_out, a_min, bind_tol)
 
     runtime = (time_ns() - start_time) / 1e9
     opts = (;
@@ -402,8 +402,8 @@ function solve_projection_stoch(
         resid = resid_out,
         iters = best_iters,
         converged = best_converged,
-        max_resid = max_resid_out,
-        rmse = max_resid_out,
+        max_resid = euler_rmse_out,
+        rmse = euler_rmse_out,
         model_params = model_params,
         coeffs = best_coeffs,
         opts = opts,
@@ -454,7 +454,7 @@ function solve_projection_csvar(
     best_c = nothing
     best_a_next = nothing
     best_resid = nothing
-    best_max_resid = Inf
+    best_euler_rmse = Inf
     best_resid_val = Inf
     best_iters = 0
     best_converged = false
@@ -536,10 +536,10 @@ function solve_projection_csvar(
                 resid_val_temp[i] = abs(1 - β * R * EU / model_utility.u_prime(c0))
             end
             a_next_val_temp = clamp.(R .* a_val .+ income .- c_val_temp, a_min, a_max)
-            max_resid_val =
+            euler_rmse_val =
                 rmse_nonbinding(resid_val_temp, a_next_val_temp, a_min, bind_tol)
 
-            if delta < tol_pol && max_resid_val < tol
+            if delta < tol_pol && euler_rmse_val < tol
                 converged = true
                 break
             end
@@ -571,15 +571,15 @@ function solve_projection_csvar(
             )
             resid_val[i] = abs(1 - (β * R * EU) / model_utility.u_prime(c0))
         end
-        max_resid_val = sqrt(mean(resid_val .^ 2))
+        euler_rmse_val = sqrt(mean(resid_val .^ 2))
 
-        if max_resid_val < best_resid_val
-            best_resid_val = max_resid_val
+        if euler_rmse_val < best_resid_val
+            best_resid_val = euler_rmse_val
             best_coeffs = coeffs
             best_c = copy(c)
             best_a_next = copy(a_next)
             best_resid = resid_val
-            best_max_resid = max_resid_val
+            best_euler_rmse = euler_rmse_val
             best_iters = iters
             best_converged = converged
             best_order = order
@@ -622,7 +622,7 @@ function solve_projection_csvar(
         )
         resid_out[i] = abs(1 - (β * R * EU) / model_utility.u_prime(c0))
     end
-    max_resid_out = sqrt(mean(resid_out .^ 2))
+    euler_rmse_out = sqrt(mean(resid_out .^ 2))
 
     runtime = (time_ns() - start_time) / 1e9
     opts = (;
@@ -643,8 +643,8 @@ function solve_projection_csvar(
         resid = resid_out,
         iters = best_iters,
         converged = best_converged,
-        max_resid = max_resid_out,
-        rmse = max_resid_out,
+        max_resid = euler_rmse_out,
+        rmse = euler_rmse_out,
         model_params = model_params,
         coeffs = best_coeffs,
         opts = opts,

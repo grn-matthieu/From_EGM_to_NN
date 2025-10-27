@@ -115,7 +115,7 @@ function solve(
         :iters => sol.iters,
         :max_it => get(sol.opts, :maxit, missing),
         :converged => sol.converged,
-        :max_resid => sol.max_resid,
+        :max_resid => sol.euler_rmse,
         :tol => get(sol.opts, :tol, missing),
         :order => get(sol.opts, :order, missing),
         :tol_pol => hasproperty(sol.opts, :tol_pol) ? sol.opts.tol_pol : missing,

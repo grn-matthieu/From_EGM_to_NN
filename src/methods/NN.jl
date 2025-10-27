@@ -128,7 +128,7 @@ function solve(
         :max_it => sol.opts.epochs,
         # Override kernel's convergence with Euler-error based criterion
         :converged => conv_flag,
-        :max_resid => sol.max_resid,
+        :max_resid => sol.euler_rmse,
         :tol => tol,
         :delta_pol => delta_pol,
         :mean_ee => ee_mean,

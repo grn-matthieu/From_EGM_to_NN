@@ -176,7 +176,7 @@ end
 
 Deterministic linear policy around a reference asset level `ā`.
 If `a_bar` is not provided, uses the grid midpoint.
-Returns NamedTuple with fields: a_grid, c, a_next, resid, iters, converged, max_resid, model_params, opts
+Returns NamedTuple with fields: a_grid, c, a_next, resid, iters, converged, euler_rmse, model_params, opts
 """
 function solve_perturbation_det(
     p,
@@ -245,7 +245,7 @@ function solve_perturbation_det(
     iters = 1
     converged = true
     # RMSE on non-binding points (where a' > a_min + tol)
-    max_resid = rmse_nonbinding(resid, a_next, a_min, bind_tol)
+    euler_rmse = rmse_nonbinding(resid, a_next, a_min, bind_tol)
     opts = (;
         maxit = iters,
         runtime = (time_ns() - t0) / 1e9,
@@ -268,8 +268,8 @@ function solve_perturbation_det(
         resid = resid,
         iters = iters,
         converged = converged,
-        max_resid = max_resid,
-        rmse = max_resid,
+        euler_rmse = euler_rmse,
+        rmse = euler_rmse,
         model_params = p,
         opts = opts,
     )
@@ -397,7 +397,7 @@ function solve_perturbation_stoch(
     iters = 1
     converged = true
     # RMSE on non-binding entries
-    max_resid = rmse_nonbinding(resid, a_next, a_min, bind_tol)
+    euler_rmse = rmse_nonbinding(resid, a_next, a_min, bind_tol)
     opts = (;
         maxit = iters,
         runtime = (time_ns() - t0) / 1e9,
@@ -421,8 +421,8 @@ function solve_perturbation_stoch(
         resid = resid,
         iters = iters,
         converged = converged,
-        max_resid = max_resid,
-        rmse = max_resid,
+        euler_rmse = euler_rmse,
+        rmse = euler_rmse,
         model_params = p,
         opts = opts,
     )
@@ -577,7 +577,7 @@ function solve_perturbation_csvar(
         resid[i] = abs(1 - β * R * EU)
     end
 
-    max_resid = maximum(resid)
+    euler_rmse = maximum(resid)
     rmse = sqrt(mean(resid .^ 2))
 
     runtime = (time_ns() - t0) / 1e9
@@ -604,7 +604,7 @@ function solve_perturbation_csvar(
         resid = resid,
         iters = 1,
         converged = ok,
-        max_resid = max_resid,
+        euler_rmse = euler_rmse,
         rmse = rmse,
         model_params = p,
         opts = opts,

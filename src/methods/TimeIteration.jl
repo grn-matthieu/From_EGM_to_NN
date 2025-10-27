@@ -139,8 +139,8 @@ function solve(
         :iters => sol.iters,
         :max_it => sol.opts.maxit,
         :converged => sol.converged,
-        :max_resid => sol.max_resid, # kept for compatibility
-        :rmse => hasproperty(sol, :rmse) ? getfield(sol, :rmse) : sol.max_resid,
+        :max_resid => sol.euler_rmse, # kept for compatibility
+        :rmse => hasproperty(sol, :rmse) ? getfield(sol, :rmse) : sol.euler_rmse,
         :tol => sol.opts.tol,
         :tol_pol => sol.opts.tol_pol,
         :relax => sol.opts.relax,

@@ -146,7 +146,7 @@ function solve(
         :iters => sol.iters,
         :max_it => sol.opts.maxit,
         :converged => sol.converged,
-        :max_resid => sol.max_resid,
+        :max_resid => sol.euler_rmse,
         :mean_ee => ee_mean,
         :delta_pol => delta_pol,
         :julia_version => string(VERSION),

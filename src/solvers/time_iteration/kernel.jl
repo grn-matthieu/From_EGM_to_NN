@@ -154,7 +154,7 @@ function solve_ti_det_impl(
 
     converged = false
     iters = 0
-    max_resid = Inf
+    euler_rmse = Inf
     best_resid = Inf
     Δpol = Inf
 
@@ -214,23 +214,23 @@ function solve_ti_det_impl(
         ensure_minimum!(cnext, cmin)
 
         euler_resid_det!(resid, model_params, c, cnext)
-        max_resid = rmse_nonbinding(resid, a_next, a_min, bind_tol)
+        euler_rmse = rmse_nonbinding(resid, a_next, a_min, bind_tol)
 
         if verbose && (it % 10 == 0)
-            @printf("[TimeIteration] it=%d rmse=%.6e Δpol=%.6e\n", it, max_resid, Δpol)
+            @printf("[TimeIteration] it=%d rmse=%.6e Δpol=%.6e\n", it, euler_rmse, Δpol)
             flush(stdout)
         end
 
-        if max_resid < tol && Δpol < tol_pol
+        if euler_rmse < tol && Δpol < tol_pol
             converged = true
             break
         end
 
-        if best_resid - max_resid < ϵ && Δpol < ϵ
+        if best_resid - euler_rmse < ϵ && Δpol < ϵ
             # small improvements only; continue iterating without a patience cutoff
             # keep best_resid for diagnostics
         else
-            best_resid = max_resid
+            best_resid = euler_rmse
         end
     end
 
@@ -245,7 +245,7 @@ function solve_ti_det_impl(
     end
     ensure_minimum!(cnext, cmin)
     euler_resid_det!(resid, model_params, c, cnext)
-    max_resid = rmse_nonbinding(resid, a_next, a_min, bind_tol)
+    euler_rmse = rmse_nonbinding(resid, a_next, a_min, bind_tol)
 
     runtime = (time_ns() - start_time) / 1e9
     opts = (;
@@ -267,8 +267,8 @@ function solve_ti_det_impl(
         resid,
         iters,
         converged,
-        max_resid,
-        rmse = max_resid,
+        euler_rmse,
+        rmse = euler_rmse,
         model_params,
         opts,
         delta_pol = Δpol,
@@ -368,7 +368,7 @@ function solve_ti_det_impl(
 
     converged = false
     iters = 0
-    max_resid = Inf
+    euler_rmse = Inf
     best_resid = Inf
     Δpol = Inf
 
@@ -437,28 +437,28 @@ function solve_ti_det_impl(
         ensure_minimum!(cnext, cmin)
 
         euler_resid_det!(resid, model_params, c, cnext)
-        max_resid = rmse_nonbinding(resid, a_next, a_min, bind_tol)
+        euler_rmse = rmse_nonbinding(resid, a_next, a_min, bind_tol)
 
         if verbose && (it % 10 == 0)
             @printf(
                 "[TimeIteration:PCHIP] it=%d rmse=%.6e Δpol=%.6e\n",
                 it,
-                max_resid,
+                euler_rmse,
                 Δpol
             )
             flush(stdout)
         end
 
-        if max_resid < tol && Δpol < tol_pol
+        if euler_rmse < tol && Δpol < tol_pol
             converged = true
             break
         end
 
-        if best_resid - max_resid < ϵ && Δpol < ϵ
+        if best_resid - euler_rmse < ϵ && Δpol < ϵ
             # small improvements only; continue iterating without a patience cutoff
             # keep best_resid for diagnostics
         else
-            best_resid = max_resid
+            best_resid = euler_rmse
         end
     end
 
@@ -466,7 +466,7 @@ function solve_ti_det_impl(
     interp_pchip!(cnext, a_grid, c, a_next)
     ensure_minimum!(cnext, cmin)
     euler_resid_det!(resid, model_params, c, cnext)
-    max_resid = rmse_nonbinding(resid, a_next, a_min, bind_tol)
+    euler_rmse = rmse_nonbinding(resid, a_next, a_min, bind_tol)
 
     runtime = (time_ns() - start_time) / 1e9
     opts = (;
@@ -488,8 +488,8 @@ function solve_ti_det_impl(
         resid,
         iters,
         converged,
-        max_resid,
-        rmse = max_resid,
+        euler_rmse,
+        rmse = euler_rmse,
         model_params,
         opts,
         delta_pol = Δpol,
@@ -570,7 +570,7 @@ function solve_ti_stoch_impl(
 
     converged = false
     iters = 0
-    max_resid = Inf
+    euler_rmse = Inf
     best_resid = Inf
     Δpol = Inf
 
@@ -624,7 +624,7 @@ function solve_ti_stoch_impl(
             @printf(
                 "[TimeIteration:STOCH] it=%d rmse=%.6e Δpol=%.6e\n",
                 it,
-                max_resid,
+                euler_rmse,
                 Δpol
             )
             flush(stdout)
@@ -640,22 +640,22 @@ function solve_ti_stoch_impl(
             interp_kind,
         )
         # resid_mat is Na x Nz. Build mask of non-binding entries where a_next > a_min
-        max_resid = rmse_nonbinding(resid_mat, a_next, a_min, bind_tol)
+        euler_rmse = rmse_nonbinding(resid_mat, a_next, a_min, bind_tol)
 
-        if max_resid < tol && Δpol < tol_pol
+        if euler_rmse < tol && Δpol < tol_pol
             converged = true
             break
         end
 
-        if best_resid - max_resid < ϵ
+        if best_resid - euler_rmse < ϵ
             # small change; continue without a patience cutoff
         else
-            best_resid = max_resid
+            best_resid = euler_rmse
         end
     end
 
     euler_resid_stoch_interp!(resid_mat, model_params, a_grid, z_grid, Π, c, interp_kind)
-    max_resid = rmse_nonbinding(resid_mat, a_next, a_min, bind_tol)
+    euler_rmse = rmse_nonbinding(resid_mat, a_next, a_min, bind_tol)
 
     runtime = (time_ns() - start_time) / 1e9
     opts = (;
@@ -678,8 +678,8 @@ function solve_ti_stoch_impl(
         resid = resid_mat,
         iters,
         converged,
-        max_resid,
-        rmse = max_resid,
+        euler_rmse,
+        rmse = euler_rmse,
         model_params,
         opts,
         delta_pol = Δpol,
