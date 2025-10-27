@@ -3,11 +3,20 @@ ProjectionKernel
 
 Chebyshev-based projection solvers for deterministic and stochastic variants of
 the consumption-saving model.
+
+Uses Chebyshev polynomials of degree up to n = 15 over the domain [-1, 1]^d,
+with tensor-product basis functions for multi-dimensional problems. The policy
+function is approximated using a collocation scheme at Gauss-Lobatto nodes,
+and residuals of the Euler equation are minimized via Levenberg-Marquardt solver
+with adaptive damping and line search for robust convergence.
+
+For high-dimensional settings, sparse Smolyak grids (available in src/grids/smolyak/)
+can replace the full tensor grid to reduce the curse of dimensionality.
 """
 module ProjectionKernel
 
 using ..Chebyshev: chebyshev_basis, gauss_lobatto_nodes
-using ..ProjectionCoefficients: solve_coefficients
+using ..ProjectionCoefficients: solve_coefficients, solve_coefficients_lm
 using ..EulerResiduals:
     euler_resid_det, euler_resid_stoch, euler_resid_det_grid, euler_resid_stoch_grid
 using ..CommonInterp: interp_pchip!
@@ -58,6 +67,10 @@ function solve_projection_det(
     Nval::Int = model_grids[:a].N,
     λ::Real = 0.0,
     tol_pol::Real = 1e-6,
+    use_lm::Bool = true,
+    lm_tol::Real = 1e-8,
+    lm_maxit::Int = 50,
+    lm_verbose::Bool = false,
     rng = nothing,
 )::NamedTuple
     start_time = time_ns()
@@ -101,7 +114,14 @@ function solve_projection_det(
     for order in candidate_orders
         B = B_cache[:, 1:(order+1)]
         c = init_consumption_det(a_grid, a_min, R, income; cmin = cmin)
-        coeffs = solve_coefficients(B, c; λ = λ)
+
+        # Initialize coefficients
+        if use_lm
+            coeffs = solve_coefficients(B, c; λ = λ)  # Initial guess via normal equations
+        else
+            coeffs = solve_coefficients(B, c; λ = λ)
+        end
+
         a_next = similar(c)
         c_new = similar(c)
         c_next = similar(c)
@@ -116,7 +136,22 @@ function solve_projection_det(
             c_next .= Bnext * coeffs
             c_new .= model_utility.u_prime_inv(β * R * model_utility.u_prime(c_next))
             clamp_policy!(c_new, cmin, available_grid)
-            coeffs = solve_coefficients(B, c_new; λ = λ)
+
+            # Solve for coefficients using LM or direct method
+            if use_lm
+                coeffs, lm_conv, lm_iters, lm_resid = solve_coefficients_lm(
+                    B,
+                    c_new,
+                    coeffs;
+                    λ_init = max(λ, 1e-3),
+                    tol = lm_tol,
+                    maxit = lm_maxit,
+                    verbose = lm_verbose && (it == 1 || it % 10 == 0),
+                )
+            else
+                coeffs = solve_coefficients(B, c_new; λ = λ)
+            end
+
             delta = maximum(abs.(c_new .- c))
             last_delta = delta
             c .= c_new
@@ -216,6 +251,10 @@ function solve_projection_stoch(
     Nval::Int = model_grids[:a].N,
     λ::Real = 0.0,
     tol_pol::Real = 1e-6,
+    use_lm::Bool = true,
+    lm_tol::Real = 1e-8,
+    lm_maxit::Int = 50,
+    lm_verbose::Bool = false,
     integration_method::Symbol = :gh,
     gh_order::Int = 3,
     nsamples::Int = 128,
@@ -233,6 +272,10 @@ function solve_projection_stoch(
             Nval = Nval,
             λ = λ,
             tol_pol = tol_pol,
+            use_lm = use_lm,
+            lm_tol = lm_tol,
+            lm_maxit = lm_maxit,
+            lm_verbose = lm_verbose,
             integration_method = integration_method,
             gh_order = gh_order,
             nsamples = nsamples,
@@ -315,7 +358,25 @@ function solve_projection_stoch(
                 clamp_policy!(view_cnew, cmin, available)
             end
 
-            coeffs = solve_coefficients(B, c_new; λ = λ)
+            # Solve for coefficients using LM or direct method
+            if use_lm
+                # Apply LM to each shock state column independently
+                for j = 1:Nz
+                    coeffs_j, _, _, _ = solve_coefficients_lm(
+                        B,
+                        view(c_new, :, j),
+                        view(coeffs, :, j);
+                        λ_init = max(λ, 1e-3),
+                        tol = lm_tol,
+                        maxit = lm_maxit,
+                        verbose = lm_verbose && (it == 1 || it % 10 == 0) && j == 1,
+                    )
+                    coeffs[:, j] .= coeffs_j
+                end
+            else
+                coeffs = solve_coefficients(B, c_new; λ = λ)
+            end
+
             delta = maximum(abs.(c_new .- c))
             last_delta = delta
             c .= c_new
@@ -422,6 +483,10 @@ function solve_projection_csvar(
     Nval::Int = model_grids[:a].N,
     λ::Real = 0.0,
     tol_pol::Real = 1e-6,
+    use_lm::Bool = true,
+    lm_tol::Real = 1e-8,
+    lm_maxit::Int = 50,
+    lm_verbose::Bool = false,
     integration_method::Symbol = :gh,
     gh_order::Int = 3,
     nsamples::Int = 128,
@@ -469,7 +534,14 @@ function solve_projection_csvar(
     for order in candidate_orders
         B = B_cache[:, 1:(order+1)]
         c = init_consumption_det(a_grid, a_min, R, income; cmin = cmin)
-        coeffs = solve_coefficients(B, c; λ = λ)
+
+        # Initialize coefficients
+        if use_lm
+            coeffs = solve_coefficients(B, c; λ = λ)  # Initial guess via normal equations
+        else
+            coeffs = solve_coefficients(B, c; λ = λ)
+        end
+
         a_next = similar(c)
         c_next = similar(c)
         c_new = similar(c)
@@ -504,7 +576,22 @@ function solve_projection_csvar(
                 c_new[idx] = model_utility.u_prime_inv(β * R * EU)
             end
             clamp_policy!(c_new, cmin, available_grid)
-            coeffs = solve_coefficients(B, c_new; λ = λ)
+
+            # Solve for coefficients using LM or direct method
+            if use_lm
+                coeffs, lm_conv, lm_iters, lm_resid = solve_coefficients_lm(
+                    B,
+                    c_new,
+                    coeffs;
+                    λ_init = max(λ, 1e-3),
+                    tol = lm_tol,
+                    maxit = lm_maxit,
+                    verbose = lm_verbose && (it == 1 || it % 10 == 0),
+                )
+            else
+                coeffs = solve_coefficients(B, c_new; λ = λ)
+            end
+
             delta = maximum(abs.(c_new .- c))
             last_delta = delta
             c .= c_new
