@@ -120,7 +120,17 @@ function solve_projection_det(
             delta = maximum(abs.(c_new .- c))
             last_delta = delta
             c .= c_new
-            if delta < tol_pol
+
+            # Check Euler residuals
+            @. a_next = clamp(R * a_grid + income - c, a_min, a_max)
+            B_val_temp = chebyshev_basis(a_val, order, a_min, a_max)
+            c_val_temp = B_val_temp * coeffs
+            resid_val_temp = euler_resid_det_grid(model_params, a_val, c_val_temp)
+            a_next_val_temp = clamp.(R .* a_val .+ income .- c_val_temp, a_min, a_max)
+            max_resid_val =
+                rmse_nonbinding(resid_val_temp, a_next_val_temp, a_min, bind_tol)
+
+            if delta < tol_pol && max_resid_val < tol
                 converged = true
                 break
             end
@@ -498,7 +508,38 @@ function solve_projection_csvar(
             delta = maximum(abs.(c_new .- c))
             last_delta = delta
             c .= c_new
-            if delta < tol_pol
+
+            # Check Euler residuals
+            @. a_next = clamp(R * a_grid + income - c, a_min, a_max)
+            B_val_temp = chebyshev_basis(a_val, order, a_min, a_max)
+            c_val_temp = B_val_temp * coeffs
+            resid_val_temp = Vector{Float64}(undef, length(a_val))
+            for (i, a_val_i) in enumerate(a_val)
+                c0 = c_val_temp[i] <= cmin ? cmin : c_val_temp[i]
+                integrand = function (y_next)
+                    income_next = csvar_income(y_next)
+                    a_next_i = clamp(R * a_val_i + income_next - c0, a_min, a_max)
+                    Bnext_i = chebyshev_basis([a_next_i], order, a_min, a_max)
+                    cp = dot(Bnext_i[1, :], coeffs)
+                    return model_utility.u_prime(max(cp, cmin))
+                end
+                EU = integrate_expectation(
+                    integration_method,
+                    integrand,
+                    model_params,
+                    model_shocks,
+                    y_state,
+                    rng = local_rng,
+                    gh_order = gh_order,
+                    nsamples = nsamples,
+                )
+                resid_val_temp[i] = abs(1 - β * R * EU / model_utility.u_prime(c0))
+            end
+            a_next_val_temp = clamp.(R .* a_val .+ income .- c_val_temp, a_min, a_max)
+            max_resid_val =
+                rmse_nonbinding(resid_val_temp, a_next_val_temp, a_min, bind_tol)
+
+            if delta < tol_pol && max_resid_val < tol
                 converged = true
                 break
             end

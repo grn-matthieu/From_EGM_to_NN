@@ -6,6 +6,7 @@ using Lux: fmap
 using ChainRulesCore: ignore_derivatives, AbstractZero
 using LinearAlgebra: diag, dot, I
 using Optimisers
+using Statistics: mean
 
 include("preprocessing.jl")
 
@@ -1140,6 +1141,11 @@ function train_consumption_network!(
     best_loss = Inf
     stall_epochs = 0
     current_lr = NaN
+
+    # Track previous policy for convergence check
+    prev_policy = nothing
+    convergence_check_batch = nothing
+
     for epoch = 1:settings.epochs
         new_lr = learning_rate_for_epoch(settings, epoch)
         if !(
@@ -1325,6 +1331,126 @@ function train_consumption_network!(
         if settings.verbose && (epoch % 100 == 0 || epoch == settings.epochs)
             @printf "Epoch: %3d \t Loss: %.5g \t GradNorm: %.5g\n" epoch average_loss gradient_norm
         end
+
+        # Check convergence every 100 epochs: evaluate Euler errors and policy updates
+        if epoch % 100 == 0
+            try
+                # Create/reuse held-out batch for convergence check
+                if convergence_check_batch === nothing
+                    convergence_check_batch, _ = create_training_batch(
+                        G,
+                        S,
+                        scaler;
+                        mode = :rand,
+                        nsamples = min(2048, samples_per_epoch),
+                        rng = rng,
+                        P_resid = P_resid,
+                        settings = settings,
+                        P = model_cfg === nothing ? nothing : model_cfg.P,
+                    )
+                    if settings.use_cuda
+                        convergence_check_batch =
+                            maybe_to_device(convergence_check_batch, settings)
+                    end
+                end
+
+                # Evaluate current policy on held-out grid
+                current_model = select_model(chain, train_state)
+                current_ps = state_parameters(train_state)
+                current_st = state_states(train_state)
+
+                # Extract policy predictions
+                out, _ = Lux.apply(
+                    current_model,
+                    convergence_check_batch,
+                    current_ps,
+                    current_st,
+                )
+                w_batch = convergence_check_batch[end, :]
+                if settings.use_cuda
+                    w_batch = cu(w_batch)
+                end
+                w_denorm = ((w_batch .+ 1.0f0) ./ 2.0f0) .* scaler.w_range .+ scaler.w_min
+                current_c = vec(phi_to_consumption(out[:Φ], w_denorm; min_c = 1.0f-3))
+
+                # Compute policy update sup-norm if we have previous policy
+                Δ_pol = Inf
+                if prev_policy !== nothing
+                    Δ_pol = maximum(abs.(current_c .- prev_policy))
+                end
+                prev_policy = copy(current_c)
+
+                # Evaluate Euler residuals using GH quadrature (for stochastic) or grid (for deterministic)
+                euler_rmse = Inf
+                if settings.has_shocks &&
+                   G !== nothing &&
+                   S !== nothing &&
+                   model_cfg !== nothing &&
+                   model_cfg.P !== nothing
+                    # Use GH quadrature for stochastic case
+                    gh_result = eval_euler_residuals_gh(
+                        current_model,
+                        current_ps,
+                        current_st,
+                        P_resid,
+                        model_cfg.U,
+                        scaler,
+                        settings;
+                        N = min(2048, samples_per_epoch),
+                        rng = rng,
+                        G = G,
+                        S = S,
+                        P = model_cfg.P,
+                    )
+                    # Compute RMSE of Euler residuals
+                    if hasproperty(gh_result, :abs_resid)
+                        euler_rmse = sqrt(mean(Float64.(gh_result.abs_resid) .^ 2))
+                    elseif hasproperty(gh_result, :stats) &&
+                           hasproperty(gh_result.stats, :rmse)
+                        euler_rmse = Float64(gh_result.stats.rmse)
+                    end
+                else
+                    # Deterministic case: use grid-based residuals
+                    if hasproperty(P_resid, :a) && hasproperty(model_cfg.G, :a)
+                        a_grid_f32 = Float32.(model_cfg.G.a.grid)
+                        c_pred_vec_f32 = current_c[1:length(a_grid_f32)]
+                        residuals =
+                            euler_resid_det_grid(P_resid, a_grid_f32, c_pred_vec_f32)
+                        euler_rmse = sqrt(mean(Float64.(residuals) .^ 2))
+                    end
+                end
+
+                # Check dual convergence criteria
+                converged = (euler_rmse < 1e-4) && (Δ_pol < 1e-6)
+
+                if settings.verbose
+                    @printf "[CONV_CHECK] Epoch %4d: RMSE(R)=%.6g (tol=1e-4) Δ∞=%.6g (tol=1e-6) %s\n" epoch euler_rmse Δ_pol (
+                        converged ? "✓ CONVERGED" : ""
+                    )
+                end
+
+                if converged && epoch >= 100  # Require at least 100 epochs before converging
+                    if settings.verbose
+                        @printf "[CONVERGED] Both criteria met at epoch %d\n" epoch
+                    end
+                    stored_state = maybe_to_host(train_state, settings)
+                    return TrainingResult(
+                        stored_state,
+                        euler_rmse,
+                        epoch,
+                        batch_size,
+                        batches_per_epoch,
+                    )
+                end
+            catch err
+                # If convergence check fails, continue training
+                if settings.verbose
+                    @warn "Convergence check failed at epoch $epoch" exception =
+                        (err, catch_backtrace())
+                end
+            end
+        end
+
         # periodic validation logging every 100 epochs
         if settings.verbose && epoch % 100 == 0
             try
