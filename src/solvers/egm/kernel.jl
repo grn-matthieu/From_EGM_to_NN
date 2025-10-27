@@ -812,6 +812,7 @@ function solve_egm_stoch_impl(
     iters = 0
     euler_rmse = Inf
     Δpol = Inf
+    rmse_history = Float64[]
 
     for it = 1:maxit
         iters = it
@@ -823,22 +824,30 @@ function solve_egm_stoch_impl(
             y = exp(z)
             weights = view(Π, j, :)
 
-            # Thread-local buffers
-            EUprime_local = similar(view(c, :, 1))
-            c_endo_local = similar(EUprime_local)
-            a_endo_local = similar(EUprime_local)
-            a_sorted_local = similar(EUprime_local)
-            c_sorted_local = similar(EUprime_local)
-            cmax_local = similar(EUprime_local)
+            # Thread-local buffers (Na+1 to accommodate constraint point)
+            EUprime_local = Vector{Float64}(undef, Na)
+            c_endo_local = Vector{Float64}(undef, Na + 1)
+            a_endo_local = Vector{Float64}(undef, Na + 1)
+            a_sorted_local = Vector{Float64}(undef, Na + 1)
+            c_sorted_local = Vector{Float64}(undef, Na + 1)
+            cmax_local = similar(view(c, :, 1))
 
             EUprime_local .= discrete_expectation(weights, pow)
 
-            @. c_endo_local = model_utility.u_prime_inv(β * R * EUprime_local)
-            @. a_endo_local = (a_grid - y + c_endo_local) / R
+            # Compute endogenous grid from Euler equation (indices 2:Na+1)
+            @inbounds for i = 1:Na
+                c_endo_local[i+1] = model_utility.u_prime_inv(β * R * EUprime_local[i])
+                a_endo_local[i+1] = (a_grid[i] - y + c_endo_local[i+1]) / R
+            end
 
+            # Add borrowing constraint point at index 1
+            a_endo_local[1] = a_min
+            c_endo_local[1] = max(y + (R - 1) * a_min, cmin)
+
+            # Enforce constraint on remaining points (clamp any violations)
             enforce_borrowing_constraint!(
-                a_endo_local,
-                c_endo_local,
+                view(a_endo_local, 2:Na+1),
+                view(c_endo_local, 2:Na+1),
                 a_min,
                 y,
                 R,
@@ -846,6 +855,35 @@ function solve_egm_stoch_impl(
                 cmin = cmin,
             )
             sort_policy_pairs!(a_sorted_local, c_sorted_local, a_endo_local, c_endo_local)
+
+            # DEBUG: check grid coverage
+            if it == 1 && j == 1
+                a_endo_min, a_endo_max = extrema(a_sorted_local)
+                a_exo_min, a_exo_max = extrema(a_grid)
+                println("[EGM DEBUG] Endogenous grid: [$a_endo_min, $a_endo_max]")
+                println("[EGM DEBUG] Exogenous grid:  [$a_exo_min, $a_exo_max]")
+                println(
+                    "[EGM DEBUG] c at constraint (a=0): ",
+                    a_sorted_local[1],
+                    " -> ",
+                    c_sorted_local[1],
+                )
+                println(
+                    "[EGM DEBUG] c for next point: ",
+                    a_sorted_local[2],
+                    " -> ",
+                    c_sorted_local[2],
+                )
+                if a_exo_min < a_endo_min || a_exo_max > a_endo_max
+                    println(
+                        "[EGM DEBUG] WARNING: Exogenous grid extends beyond endogenous grid!",
+                    )
+                end
+            end
+
+            # Clamp endogenous grid to stay within exogenous bounds
+            # This prevents extrapolation errors at the boundaries
+            @. a_sorted_local = clamp(a_sorted_local, a_min, a_max)
 
             a_info = model_grids[:a]
             backend = fit_values_on_backend!(
@@ -876,6 +914,7 @@ function solve_egm_stoch_impl(
         )
 
         euler_rmse = rmse_nonbinding(resid_mat, a_next, a_min, bind_tol)
+        push!(rmse_history, euler_rmse)
 
         if verbose && it % 10 == 0
             @printf("[EGM stoch linear] it=%d rmse=%.6e Δpol=%.6e\n", it, euler_rmse, Δpol)
@@ -921,6 +960,7 @@ function solve_egm_stoch_impl(
         model_params,
         opts,
         delta_pol = Δpol,
+        rmse_history,
     )
 end
 
@@ -967,6 +1007,7 @@ function solve_egm_stoch_impl(
     iters = 0
     euler_rmse = Inf
     Δpol = Inf
+    rmse_history = Float64[]
 
     for it = 1:maxit
         iters = it
@@ -978,22 +1019,30 @@ function solve_egm_stoch_impl(
             y = exp(z)
             weights = view(Π, j, :)
 
-            # Thread-local buffers
-            EUprime_local = similar(view(c, :, 1))
-            c_endo_local = similar(EUprime_local)
-            a_endo_local = similar(EUprime_local)
-            a_sorted_local = similar(EUprime_local)
-            c_sorted_local = similar(EUprime_local)
-            cmax_local = similar(EUprime_local)
+            # Thread-local buffers (Na+1 to accommodate constraint point)
+            EUprime_local = Vector{Float64}(undef, Na)
+            c_endo_local = Vector{Float64}(undef, Na + 1)
+            a_endo_local = Vector{Float64}(undef, Na + 1)
+            a_sorted_local = Vector{Float64}(undef, Na + 1)
+            c_sorted_local = Vector{Float64}(undef, Na + 1)
+            cmax_local = similar(view(c, :, 1))
 
             EUprime_local .= discrete_expectation(weights, pow)
 
-            @. c_endo_local = model_utility.u_prime_inv(β * R * EUprime_local)
-            @. a_endo_local = (a_grid - y + c_endo_local) / R
+            # Compute endogenous grid from Euler equation (indices 2:Na+1)
+            @inbounds for i = 1:Na
+                c_endo_local[i+1] = model_utility.u_prime_inv(β * R * EUprime_local[i])
+                a_endo_local[i+1] = (a_grid[i] - y + c_endo_local[i+1]) / R
+            end
 
+            # Add borrowing constraint point at index 1
+            a_endo_local[1] = a_min
+            c_endo_local[1] = max(y + (R - 1) * a_min, cmin)
+
+            # Enforce constraint on remaining points (clamp any violations)
             enforce_borrowing_constraint!(
-                a_endo_local,
-                c_endo_local,
+                view(a_endo_local, 2:Na+1),
+                view(c_endo_local, 2:Na+1),
                 a_min,
                 y,
                 R,
@@ -1036,6 +1085,7 @@ function solve_egm_stoch_impl(
         )
 
         euler_rmse = rmse_nonbinding(resid_mat, a_next, a_min, bind_tol)
+        push!(rmse_history, euler_rmse)
 
         if verbose && it % 10 == 0
             @printf("[EGM stoch pchip] it=%d rmse=%.6e Δpol=%.6e\n", it, euler_rmse, Δpol)
@@ -1091,6 +1141,7 @@ function solve_egm_stoch_impl(
         model_params,
         opts,
         delta_pol = Δpol,
+        rmse_history,
     )
 end
 

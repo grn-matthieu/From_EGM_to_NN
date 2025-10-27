@@ -152,6 +152,11 @@ function solve(
         :mean_ee => ee_mean,
     )
 
+    # Add convergence history if available
+    if hasproperty(sol, :rmse_history)
+        metadata[:rmse_history] = sol.rmse_history
+    end
+
     # Validation
     amin = g[:a].min
 

@@ -112,11 +112,13 @@ function euler_resid_stoch(
     z = T.(z_grid)
     ΠT = T.(Π)
     C = T.(c)
+    a_min, a_max = extrema(a)
 
     res = [
         begin
             c_ij = max(C[i, j], ϵ)
             ap = R * a[i] + exp(z[j]) - c_ij
+            ap = clamp(ap, a_min, a_max)  # Prevent extrapolation by clamping within grid bounds
             Emu = mapreduce(
                 jp -> begin
                     cp = interp_linear(a, C[:, jp], ap)
@@ -142,11 +144,13 @@ function euler_resid_stoch!(resid::AbstractMatrix, params, a_grid, z_grid, Π, c
     β = params.β
     γ = params.γ
     R = 1 + params.r
+    a_min, a_max = extrema(a_grid)
     @inbounds for j = 1:Nz
         y = exp(z_grid[j])
         for i = 1:Na
             c_ij = max(c[i, j], 1e-12)
             ap = R * a_grid[i] + y - c_ij
+            ap = clamp(ap, a_min, a_max)  # Prevent extrapolation by clamping within grid bounds
             Emu = 0.0
             for jp = 1:Nz
                 cp = interp_linear(a_grid, c[:, jp], ap)
@@ -183,11 +187,13 @@ function euler_resid_stoch_interp!(
     R = 1 + params.r
     tmp = Vector{eltype(a_grid)}(undef, 1)
     out = Vector{eltype(c)}(undef, 1)
+    a_min, a_max = extrema(a_grid)
     @inbounds for j = 1:Nz
         y = exp(z_grid[j])
         for i = 1:Na
             c_ij = c[i, j] <= 1e-12 ? 1e-12 : c[i, j]
             ap = R * a_grid[i] + y - c_ij
+            ap = clamp(ap, a_min, a_max)  # Prevent extrapolation by clamping within grid bounds
             Emu = 0.0
             for jp = 1:Nz
                 if interp_kind isa LinearInterp

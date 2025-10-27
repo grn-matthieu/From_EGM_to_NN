@@ -112,6 +112,9 @@ end
 
 Enforce the borrowing constraint `a_endo ≥ a_min` by clamping offending points
 and adjusting the corresponding consumption level.
+
+DEPRECATED: This function only clamps points but doesn't add the constraint point.
+Use `add_constraint_point!` instead for proper EGM grid coverage.
 """
 function enforce_borrowing_constraint!(
     a_endo::AbstractVector,
@@ -126,10 +129,39 @@ function enforce_borrowing_constraint!(
     @inbounds for i in eachindex(a_endo)
         if a_endo[i] < a_min
             a_endo[i] = a_min
-            implied_c = y + R * a_min - a_grid[i]
+            # When a' = a_min at current assets a_grid[i], by budget constraint:
+            # c = y + R * a_grid[i] - a'
+            implied_c = y + R * a_grid[i] - a_min
             c_endo[i] = implied_c <= cmin ? cmin : implied_c
         end
     end
+    return a_endo, c_endo
+end
+
+"""
+    add_constraint_point!(a_endo, c_endo, a_min, y, R; cmin=DEFAULT_CMIN)
+
+Add the borrowing constraint point (a_min, c_at_constraint) to the beginning of
+the endogenous grid to ensure proper coverage. This is the standard EGM approach
+to handle the borrowing constraint.
+
+At the constraint, consumption is: c = y + R * a_min - a_min = y + (R-1) * a_min
+"""
+function add_constraint_point!(
+    a_endo::AbstractVector,
+    c_endo::AbstractVector,
+    a_min::Real,
+    y::Real,
+    R::Real;
+    cmin::Real = DEFAULT_CMIN,
+)
+    # Consumption at the borrowing constraint
+    c_at_constraint = max(y + (R - 1) * a_min, cmin)
+
+    # Prepend constraint point
+    prepend!(a_endo, [a_min])
+    prepend!(c_endo, [c_at_constraint])
+
     return a_endo, c_endo
 end
 

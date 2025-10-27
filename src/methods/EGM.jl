@@ -171,6 +171,10 @@ function build_outputs(ctx::EGMRunContext, sol)
         :mean_ee => ee_mean,
     )
 
+    if hasproperty(sol, :rmse_history)
+        metadata[:rmse_history] = sol.rmse_history
+    end
+
     amin = ctx.grids[:a].min
     validate_policy!(
         metadata,

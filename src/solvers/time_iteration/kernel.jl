@@ -159,6 +159,10 @@ function solve_ti_det_impl(
     best_resid = Inf
     Δpol = Inf
 
+    # Track convergence history
+    rmse_history = Float64[]
+    sizehint!(rmse_history, min(maxit, 100))
+
     root_tol = min(1e-10, tol)
     max_root_iter = 100
 
@@ -217,6 +221,7 @@ function solve_ti_det_impl(
 
         euler_resid_det!(resid, model_params, c, cnext)
         euler_rmse = rmse_nonbinding(resid, a_next, a_min, bind_tol)
+        push!(rmse_history, euler_rmse)
 
         if verbose && (it % 10 == 0)
             @printf("[TimeIteration] it=%d rmse=%.6e Δpol=%.6e\n", it, euler_rmse, Δpol)
@@ -271,6 +276,7 @@ function solve_ti_det_impl(
         converged,
         euler_rmse,
         rmse = euler_rmse,
+        rmse_history = rmse_history,
         model_params,
         opts,
         delta_pol = Δpol,
@@ -374,6 +380,10 @@ function solve_ti_det_impl(
     best_resid = Inf
     Δpol = Inf
 
+    # Track convergence history
+    rmse_history = Float64[]
+    sizehint!(rmse_history, min(maxit, 100))
+
     root_tol = min(1e-10, tol)
     max_root_iter = 100
 
@@ -442,6 +452,7 @@ function solve_ti_det_impl(
 
         euler_resid_det!(resid, model_params, c, cnext)
         euler_rmse = rmse_nonbinding(resid, a_next, a_min, bind_tol)
+        push!(rmse_history, euler_rmse)
 
         if verbose && (it % 10 == 0)
             @printf(
@@ -494,6 +505,7 @@ function solve_ti_det_impl(
         converged,
         euler_rmse,
         rmse = euler_rmse,
+        rmse_history = rmse_history,
         model_params,
         opts,
         delta_pol = Δpol,
@@ -578,6 +590,10 @@ function solve_ti_stoch_impl(
     best_resid = Inf
     Δpol = Inf
 
+    # Track convergence history
+    rmse_history = Float64[]
+    sizehint!(rmse_history, min(maxit, 100))
+
     root_tol = min(1e-10, tol)
     max_root_iter = 100
 
@@ -646,6 +662,7 @@ function solve_ti_stoch_impl(
         )
         # resid_mat is Na x Nz. Build mask of non-binding entries where a_next > a_min
         euler_rmse = rmse_nonbinding(resid_mat, a_next, a_min, bind_tol)
+        push!(rmse_history, euler_rmse)
 
         if euler_rmse < tol && Δpol < tol_pol
             converged = true
@@ -685,6 +702,7 @@ function solve_ti_stoch_impl(
         converged,
         euler_rmse,
         rmse = euler_rmse,
+        rmse_history = rmse_history,
         model_params,
         opts,
         delta_pol = Δpol,
