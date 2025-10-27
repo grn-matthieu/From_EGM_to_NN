@@ -1,5 +1,16 @@
 # Scripts Index
 
+## Additional Dependencies
+
+Scripts in this directory may require additional packages beyond the core `ThesisProject` dependencies. To run scripts that generate CSV/DataFrame outputs or perform benchmarking, install:
+
+```julia
+using Pkg
+Pkg.add(["BenchmarkTools", "CSV", "DataFrames"])
+```
+
+These packages were removed from the core project to keep the solver API minimal and focused on numerical solving only.
+
 ## Layout
 
 - `ci/`: smoke/coverage helpers that run in CI and locally.
