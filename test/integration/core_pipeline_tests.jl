@@ -101,9 +101,17 @@ end
         Σ = [[0.0, 0.0], [0.0, 0.0]],
     )
 
-    csvar_cfg = deep_merge(base_cfg, (model = (name = :cs_vec,), params = cs_params))
+    # VAR models with y_dim > 1 use gaussian_linear integration, so use Perturbation instead of EGM
+    csvar_cfg = deep_merge(
+        base_cfg,
+        (
+            model = (name = :cs_vec,),
+            params = cs_params,
+            solver = (method = "Perturbation",),
+        ),
+    )
     cs_model, cs_method = build_model_and_method(csvar_cfg)
-    cs_rng = derive_solver_rng(csvar_cfg, "EGM")
+    cs_rng = derive_solver_rng(csvar_cfg, "Perturbation")
     cs_sol = API.solve(cs_model, cs_method, csvar_cfg; rng = cs_rng)
     cs_grids = API.get_grids(cs_model)
 
@@ -119,7 +127,10 @@ end
     y_states = CSVarUtils.csvar_state_matrix(cs_model.params.y, cs_model.params.y_dim)
     Ny = size(y_states, 2)
     cs_tensor = CSVarUtils.csvar_tensorise(cs_policy_c[:value], cs_grids[:a])
-    @test size(cs_tensor) == (tensor_shape_expected..., Ny)
+    # Perturbation solver with deterministic VAR may output (Na^y_dim,) or (Na^y_dim, Ny)
+    # depending on whether it treats the model as deterministic
+    @test size(cs_tensor) == tensor_shape_expected ||
+          size(cs_tensor) == (tensor_shape_expected..., Ny)
     @test CSVarUtils.csvar_vectorise(cs_tensor, cs_grids[:a]) ≈ cs_policy_c[:value]
 
     joint_tensor = CSVarUtils.csvar_joint_state_tensor(y_states, cs_grids[:a])

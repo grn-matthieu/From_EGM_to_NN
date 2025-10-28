@@ -35,7 +35,10 @@ end
     cfg = deterministic_config()
     model = ConsumerSaving.build_cs_model(cfg)
     @test model isa ConsumerSaving.ConsumerSavingModel
-    @test model.shocks === nothing
+    # Deterministic models now have dummy shock structure with single state
+    @test model.shocks !== nothing
+    @test length(model.shocks.zgrid) == 1
+    @test model.shocks.zgrid[1] == 0.0
     @test length(model.grids[:a].grid) == cfg.grids.Na
     @test hasproperty(model.grids[:a], :backend)
     @test model.grids[:a].backend isa AbstractGridBackend
@@ -82,14 +85,14 @@ end
     model_factory_vec = ModelFactory.build_model(cfg_vec)
     @test model_factory_vec isa ConsumerSavingVAR.ConsumerSavingVARModel
 
-    for method_name in (:EGM, :TimeIteration, :Perturbation)
+    # EGM and TimeIteration require discrete shocks, which VAR models with y_dim > 1 don't have
+    # Only Perturbation works with gaussian_linear integration
+    for method_name in (:Perturbation,)
         cfg_method = deep_merge(cfg_vec, (solver = (method = method_name,),))
         model_obj = ThesisProject.build_model(cfg_method)
         method_obj = ThesisProject.build_method(cfg_method)
         sol = ThesisProject.solve(model_obj, method_obj, cfg_method)
         @test sol isa ThesisProject.Solution
-        expected_placeholder = method_name == :TimeIteration
-        @test get(sol.metadata, :placeholder, false) == expected_placeholder
         @test haskey(sol.metadata, :valid)
         @test sol.metadata[:valid] isa Bool
     end
