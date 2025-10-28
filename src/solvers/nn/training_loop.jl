@@ -6,7 +6,8 @@ using Lux: fmap
 using ChainRulesCore: ignore_derivatives, AbstractZero
 using LinearAlgebra: diag, dot, I
 using Optimisers
-using Statistics: mean
+using Statistics: mean, std
+using Printf
 
 include("preprocessing.jl")
 
@@ -1330,6 +1331,69 @@ function train_consumption_network!(
         else
             stall_epochs += 1
         end
+
+        # Adaptive v_h: Monitor complementarity term and adjust Euler weight
+        # Strategy: As kt_mean decreases (complementarity satisfied), increase v_h
+        # to focus more on Euler equation accuracy
+        if settings.objective === :euler_fb_aio &&
+           model_cfg !== nothing &&
+           hasproperty(model_cfg, :adaptive_v_h_state) &&
+           epoch % 10 == 0
+            # Get current kt_mean from a quick forward pass on validation batch
+            try
+                val_loss, val_st, val_diag = loss_function(
+                    select_model(chain, train_state),
+                    state_parameters(train_state),
+                    state_states(train_state),
+                    (val_batch,),
+                )
+                if :fb in keys(val_diag)
+                    aux = val_diag.fb
+                    if hasproperty(aux, :kt_mean)
+                        current_kt = Float64(aux.kt_mean)
+                        vh_state = model_cfg.adaptive_v_h_state
+
+                        # Update EMA of kt_mean
+                        kt_ema =
+                            vh_state.ema_alpha * current_kt +
+                            (1 - vh_state.ema_alpha) * vh_state.kt_ema[]
+                        vh_state.kt_ema[] = kt_ema
+
+                        # Adaptive schedule: v_h increases as kt decreases
+                        # When kt < 1e-5: v_h = initial * 10 (focus on Euler)
+                        # When kt > 1e-3: v_h = initial * 1 (balanced)
+                        kt_threshold_low = 1e-5
+                        kt_threshold_high = 1e-3
+
+                        if kt_ema < kt_threshold_low
+                            scale_factor = 10.0
+                        elseif kt_ema < kt_threshold_high
+                            # Logarithmic interpolation in transition zone
+                            log_ratio =
+                                log10(kt_ema / kt_threshold_low) /
+                                log10(kt_threshold_high / kt_threshold_low)
+                            scale_factor = 1.0 + 9.0 * (1.0 - log_ratio)
+                        else
+                            scale_factor = 1.0
+                        end
+
+                        new_v_h = vh_state.initial_v_h * scale_factor
+                        old_v_h = vh_state.v_h[]
+
+                        # Update if changed significantly (>10%)
+                        if abs(new_v_h - old_v_h) > 0.1 * old_v_h
+                            vh_state.v_h[] = new_v_h
+                            if settings.verbose
+                                @printf "[ADAPT_V_H] Epoch %4d: kt_ema=%.2e → v_h: %.3f→%.3f (×%.2f)\n" epoch kt_ema old_v_h new_v_h scale_factor
+                            end
+                        end
+                    end
+                end
+            catch err
+                # If adaptive v_h update fails, continue silently
+            end
+        end
+
         if settings.verbose && (epoch % 100 == 0 || epoch == settings.epochs)
             @printf "Epoch: %3d \t Loss: %.5g \t GradNorm: %.5g\n" epoch average_loss gradient_norm
         end
@@ -1467,6 +1531,74 @@ function train_consumption_network!(
                     state_states(train_state),
                     (val_batch,),
                 )
+
+                # Add detailed network output diagnostics
+                try
+                    current_model = select_model(chain, train_state)
+                    current_ps = state_parameters(train_state)
+                    current_st = state_states(train_state)
+
+                    # Get raw network outputs on validation batch
+                    out, _ = Lux.apply(current_model, val_batch, current_ps, current_st)
+                    if out isa NamedTuple && hasproperty(out, :Φ) && hasproperty(out, :h)
+                        Φ_vals = maybe_to_cpu(vec(out[:Φ]), settings)
+                        h_vals = maybe_to_cpu(vec(out[:h]), settings)
+
+                        # Denormalize to get actual wealth values
+                        w_norm = val_batch[end, :]
+                        w_denorm =
+                            ((maybe_to_cpu(w_norm, settings) .+ 1.0f0) ./ 2.0f0) .*
+                            scaler.w_range .+ scaler.w_min
+
+                        # Compute actual consumption c = Φ * w
+                        c_vals = Φ_vals .* w_denorm
+                        c_over_w = c_vals ./ w_denorm
+
+                        # Compute statistics
+                        phi_stats = (
+                            min = minimum(Φ_vals),
+                            mean = mean(Φ_vals),
+                            max = maximum(Φ_vals),
+                            std = std(Φ_vals),
+                        )
+                        h_stats = (
+                            min = minimum(h_vals),
+                            mean = mean(h_vals),
+                            max = maximum(h_vals),
+                            std = std(h_vals),
+                        )
+                        c_stats = (
+                            min = minimum(c_vals),
+                            mean = mean(c_vals),
+                            max = maximum(c_vals),
+                        )
+                        w_stats = (
+                            min = minimum(w_denorm),
+                            mean = mean(w_denorm),
+                            max = maximum(w_denorm),
+                        )
+                        c_w_stats = (
+                            min = minimum(c_over_w),
+                            mean = mean(c_over_w),
+                            max = maximum(c_over_w),
+                        )
+
+                        # Count violations (should be impossible but let's check)
+                        n_phi_bad = count(x -> x < 0 || x > 1, Φ_vals)
+                        n_h_bad = count(x -> x <= 0, h_vals)
+                        n_c_over_w = count(x -> x > 1.0, c_over_w)
+
+                        @printf "[DIAG] Epoch %4d Network Outputs:\n" epoch
+                        @printf "  Φ ∈ [%.6f, %.6f] mean=%.6f std=%.6f (violations: %d)\n" phi_stats.min phi_stats.max phi_stats.mean phi_stats.std n_phi_bad
+                        @printf "  h ∈ [%.6f, %.6f] mean=%.6f std=%.6f (violations: %d)\n" h_stats.min h_stats.max h_stats.mean h_stats.std n_h_bad
+                        @printf "  c ∈ [%.4f, %.4f] mean=%.4f\n" c_stats.min c_stats.max c_stats.mean
+                        @printf "  w ∈ [%.4f, %.4f] mean=%.4f\n" w_stats.min w_stats.max w_stats.mean
+                        @printf "  c/w ∈ [%.6f, %.6f] mean=%.6f (c>w violations: %d)\n" c_w_stats.min c_w_stats.max c_w_stats.mean n_c_over_w
+                    end
+                catch diag_err
+                    @warn "Network output diagnostics failed" error = diag_err
+                end
+
                 if :fb in keys(val_diag)
                     aux = val_diag.fb
                     try

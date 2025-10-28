@@ -58,6 +58,7 @@ function solve_egm(
     tol::Real = 1e-4,
     tol_pol::Real = 1e-6,
     maxit::Int = 1000,
+    patience::Int = 50,
     interp_kind::InterpKind = LinearInterp(),
     relax::Real = 0.5,
     verbose::Bool = false,
@@ -93,6 +94,10 @@ function solve_egm(
     euler_rmse = Inf
     Δpol = Inf
     rmse_history = Float64[]
+
+    # Patience mechanism for early stopping
+    best_rmse = Inf
+    patience_counter = 0
 
     for it = 1:maxit
         iters = it
@@ -175,13 +180,34 @@ function solve_egm(
         euler_rmse = rmse_nonbinding(resid_mat, a_next, a_min, bind_tol)
         push!(rmse_history, euler_rmse)
 
+        # Update patience counter
+        if euler_rmse < best_rmse * 0.9999  # Improvement threshold
+            best_rmse = euler_rmse
+            patience_counter = 0
+        else
+            patience_counter += 1
+        end
+
         if verbose && it % 10 == 0
             @printf("[EGM] it=%d rmse=%.6e Δpol=%.6e\n", it, euler_rmse, Δpol)
             flush(stdout)
         end
 
+        # Check convergence
         if euler_rmse < tol && Δpol < tol_pol
             converged = true
+            break
+        end
+
+        # Check patience
+        if patience > 0 && patience_counter >= patience
+            if verbose
+                @printf(
+                    "[EGM] Patience exhausted at iteration %d (no improvement for %d iters)\n",
+                    it,
+                    patience
+                )
+            end
             break
         end
     end

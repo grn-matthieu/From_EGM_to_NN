@@ -71,6 +71,7 @@ function solve_projection_det(
     lm_tol::Real = 1e-8,
     lm_maxit::Int = 50,
     lm_verbose::Bool = false,
+    patience::Int = 50,
     rng = nothing,
 )::NamedTuple
     start_time = time_ns()
@@ -130,6 +131,10 @@ function solve_projection_det(
         iters = 0
         rmse_history = Float64[]
 
+        # Patience mechanism for early stopping
+        best_rmse_this_order = Inf
+        patience_counter = 0
+
         last_delta = Inf
         for it = 1:maxit
             iters = it
@@ -169,8 +174,22 @@ function solve_projection_det(
 
             push!(rmse_history, euler_rmse_val)
 
+            # Update patience counter
+            if euler_rmse_val < best_rmse_this_order * 0.9999  # Improvement threshold
+                best_rmse_this_order = euler_rmse_val
+                patience_counter = 0
+            else
+                patience_counter += 1
+            end
+
+            # Check convergence
             if delta < tol_pol && euler_rmse_val < tol
                 converged = true
+                break
+            end
+
+            # Check patience
+            if patience > 0 && patience_counter >= patience
                 break
             end
         end
@@ -262,6 +281,7 @@ function solve_projection_stoch(
     lm_tol::Real = 1e-8,
     lm_maxit::Int = 50,
     lm_verbose::Bool = false,
+    patience::Int = 50,
     integration_method::Symbol = :gh,
     gh_order::Int = 3,
     nsamples::Int = 128,
@@ -283,6 +303,7 @@ function solve_projection_stoch(
             lm_tol = lm_tol,
             lm_maxit = lm_maxit,
             lm_verbose = lm_verbose,
+            patience = patience,
             integration_method = integration_method,
             gh_order = gh_order,
             nsamples = nsamples,
@@ -349,6 +370,10 @@ function solve_projection_stoch(
         iters = 0
         rmse_history = Float64[]
 
+        # Patience mechanism for early stopping
+        best_rmse_this_order = Inf
+        patience_counter = 0
+
         last_delta = Inf
         for it = 1:maxit
             iters = it
@@ -394,9 +419,22 @@ function solve_projection_stoch(
 
             push!(rmse_history, max_resid)
 
-            # use tol_pol for policy iteration delta and tol for residual
+            # Update patience counter
+            if max_resid < best_rmse_this_order * 0.9999  # Improvement threshold
+                best_rmse_this_order = max_resid
+                patience_counter = 0
+            else
+                patience_counter += 1
+            end
+
+            # Check convergence (use tol_pol for policy iteration delta and tol for residual)
             if delta < tol_pol && max_resid < tol
                 converged = true
+                break
+            end
+
+            # Check patience
+            if patience > 0 && patience_counter >= patience
                 break
             end
         end
@@ -502,6 +540,7 @@ function solve_projection_csvar(
     lm_tol::Real = 1e-8,
     lm_maxit::Int = 50,
     lm_verbose::Bool = false,
+    patience::Int = 50,
     integration_method::Symbol = :gh,
     gh_order::Int = 3,
     nsamples::Int = 128,
@@ -564,6 +603,11 @@ function solve_projection_csvar(
         converged = false
         iters = 0
         rmse_history = Float64[]
+
+        # Patience mechanism for early stopping
+        best_rmse_this_order = Inf
+        patience_counter = 0
+
         last_delta = Inf
 
         for it = 1:maxit
@@ -645,8 +689,22 @@ function solve_projection_csvar(
 
             push!(rmse_history, euler_rmse_val)
 
+            # Update patience counter
+            if euler_rmse_val < best_rmse_this_order * 0.9999  # Improvement threshold
+                best_rmse_this_order = euler_rmse_val
+                patience_counter = 0
+            else
+                patience_counter += 1
+            end
+
+            # Check convergence
             if delta < tol_pol && euler_rmse_val < tol
                 converged = true
+                break
+            end
+
+            # Check patience
+            if patience > 0 && patience_counter >= patience
                 break
             end
         end

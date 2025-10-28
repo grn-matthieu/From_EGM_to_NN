@@ -36,14 +36,15 @@ function assemble_features_mean(
 )
     n = length(A_draws)
     X = Matrix{Float32}(undef, n, feature_dim)
-    mean_vec = vec(mean(Y_components; dims = 1))
-    X[:, 1] .= mean_vec
+    # Compute scalar mean income across all samples/states
+    mean_income_scalar = Float32(mean(Y_components))
+    X[:, 1] .= mean_income_scalar
     if extra_cols > 0
         @inbounds for j = 1:extra_cols
             X[:, 1+j] .= Y_components[j, :]
         end
     end
-    X[:, end] .= @. Rg * A_draws + mean_vec
+    X[:, end] .= @. Rg * A_draws + mean_income_scalar
     return X
 end
 

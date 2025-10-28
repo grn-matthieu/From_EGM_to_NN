@@ -91,15 +91,26 @@ function ensure_row(values)
 end
 
 """
-    phi_to_consumption(Φ, w; min_c = CONSUMPTION_FLOOR)
+    phi_to_consumption(Φ, w; min_c = CONSUMPTION_FLOOR, scaler = nothing)
 
 Map the network's Φ output to consumption by multiplying it with cash-on-hand
 `w` and clamping it away from zero. Works transparently with vectors or
 matrices.
 """
-function phi_to_consumption(Φ, w; min_c = CONSUMPTION_FLOOR)
+function phi_to_consumption(Φ, w; min_c = CONSUMPTION_FLOOR, scaler = nothing)
     Φ_row = ensure_row(Φ)
-    w_row = reshape(w, 1, :)
+    w_row = ensure_row(w)
+    if scaler !== nothing
+        # Denormalize if the provided cash-on-hand appears to be normalized
+        w_absmax = Float64(maximum(abs, w_row))
+        if isfinite(w_absmax) && w_absmax ≤ 1.0001
+            Tw = eltype(w_row)
+            w_min = convert(Tw, scaler.w_min)
+            w_range = convert(Tw, scaler.w_range)
+            half = convert(Tw, 0.5)
+            w_row = ((w_row .+ one(Tw)) .* half) .* w_range .+ w_min
+        end
+    end
     consumption = Φ_row .* w_row
     T = eltype(consumption)
     return clamp.(consumption, T(min_c), T(Inf))
@@ -119,7 +130,7 @@ function evaluate_deterministic(model, params, states, P_resid, P, G, scaler)
     prediction = run_model(model, params, states, X_forward)
 
     if prediction isa NamedTuple
-        c_row = phi_to_consumption(prediction[:Φ], w_grid)
+        c_row = phi_to_consumption(prediction[:Φ], w_grid; scaler = scaler)
         a_grid_f32, c_vec, c_vec_f32 = det_residual_inputs(c_row, G)
     else
         a_grid_f32, c_vec, c_vec_f32 = det_residual_inputs(prediction, G)
@@ -165,7 +176,7 @@ function evaluate_stochastic(
     W = settings.use_cuda ? fmap(cu, Rg * A + Y) : Rg * A + Y
 
     if prediction isa NamedTuple
-        c_row = phi_to_consumption(prediction[:Φ], W)
+        c_row = phi_to_consumption(prediction[:Φ], W; scaler = scaler)
         a_grid_f32, z_grid_f32, Pz_f32, c_matrix, c_matrix_f32 =
             stoch_residual_inputs(c_row, G, S)
     else
@@ -221,7 +232,12 @@ function evaluate_csvar(
     prediction = run_model(model, params, states, X_dev)
     if prediction isa NamedTuple
         w_dev = maybe_to_device(w_grid, settings)
-        c_pred = phi_to_consumption(prediction[:Φ], w_dev; min_c = EVAL_MIN_CONSUMPTION)
+        c_pred = phi_to_consumption(
+            prediction[:Φ],
+            w_dev;
+            min_c = EVAL_MIN_CONSUMPTION,
+            scaler = scaler,
+        )
     else
         c_pred = prediction
     end
@@ -262,6 +278,7 @@ function evaluate_csvar(
                 pred_next[:Φ],
                 w_future_dev;
                 min_c = EVAL_MIN_CONSUMPTION,
+                scaler = scaler,
             )
         else
             c1_raw = pred_next

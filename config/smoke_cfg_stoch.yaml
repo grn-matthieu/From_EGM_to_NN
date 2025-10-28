@@ -54,8 +54,8 @@ solver:
     warmup_epochs: 50
     hid1: 64
     hid2: 64
-    samples_per_epoch: 2048
-    objective: euler_fb_bcmc
+    samples_per_epoch: 128
+    objective: euler_fb_aio
     v_h: 2.0
     w_min: 0.1
     w_max: 5.5

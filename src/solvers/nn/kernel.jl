@@ -55,10 +55,18 @@ function build_model_config(P, U, scaler, P_resid, settings)
         A = Ref(0.0),
         B = Ref(0.0),
     )
+    # Adaptive v_h state (held in Ref to allow runtime updates)
+    adaptive_v_h_state = (
+        v_h = Ref(settings.v_h),
+        initial_v_h = settings.v_h,
+        kt_ema = Ref(1.0),
+        ema_alpha = 0.1,
+    )
     return (
         P = P,
         U = U,
-        v_h = settings.v_h,
+        v_h = settings.v_h,  # Keep for backwards compat, but use adaptive_v_h_state.v_h[] in loss
+        adaptive_v_h_state = adaptive_v_h_state,
         scaler = scaler,
         P_resid = P_resid,
         settings = settings,
@@ -398,10 +406,15 @@ function loss_euler_fb_aio_ar1!(chain, ps, st, batch, model_cfg, rng)
     # Euler-KKT residuals r = 1 - q - eta
     r1 = @. one(T) - q1 - eta
     r2 = @. one(T) - q2 - eta
-    # Use product-squared to align with bc-MC N=2 equivalence
-    aio_pen = (r1 .* r2) .^ 2
+    # Paper (eq. 30): AiO term is the product r1*r2, NOT squared
+    aio_pen = r1 .* r2
 
-    v_h = hasproperty(model_cfg, :v_h) ? T(getfield(model_cfg, :v_h)) : one(T)
+    # Use adaptive v_h if available, otherwise fall back to static value
+    v_h = if hasproperty(model_cfg, :adaptive_v_h_state)
+        T(getfield(model_cfg.adaptive_v_h_state, :v_h)[])
+    else
+        hasproperty(model_cfg, :v_h) ? T(getfield(model_cfg, :v_h)) : one(T)
+    end
     loss_vec = kt .+ v_h .* aio_pen
 
     max_abs_q = maximum(abs.(vcat(q1, q2)))
@@ -478,8 +491,15 @@ function loss_euler_fb_aio_csvar!(chain, ps, st, batch, model_cfg, rng)
     kt = @. fb_term^2
     r1 = @. one(T) - q1 - eta
     r2 = @. one(T) - q2 - eta
-    aio_pen = (r1 .* r2) .^ 2
+    # Paper (eq. 30): AiO term is the product r1*r2, NOT squared
+    aio_pen = r1 .* r2
 
+    # Use adaptive v_h if available, otherwise fall back to static value
+    v_h = if hasproperty(model_cfg, :adaptive_v_h_state)
+        T(getfield(model_cfg.adaptive_v_h_state, :v_h)[])
+    else
+        hasproperty(model_cfg, :v_h) ? T(getfield(model_cfg, :v_h)) : one(T)
+    end
     loss_vec = kt .+ v_h .* aio_pen
     max_abs_q = maximum(abs.(vcat(q1, q2)))
 
