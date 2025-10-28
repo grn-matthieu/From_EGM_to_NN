@@ -71,6 +71,10 @@ function _maybe_discretize_shocks(cfg::NamedTuple)
         if sc === nothing
             return false
         end
+        # If active is explicitly set to false, treat as deterministic (no shocks)
+        if hasproperty(sc, :active) && sc.active === false
+            return false
+        end
         keys_present = (:Nz, :σ_shock, :ρ_shock, :method, :m)
         if maybe(sc, :active, false)
             return true
@@ -82,7 +86,14 @@ function _maybe_discretize_shocks(cfg::NamedTuple)
         end
         return false
     end
-    return shocks_specified(shocks_cfg) ? discretize(shocks_cfg) : nothing, shocks_cfg
+
+    if shocks_specified(shocks_cfg)
+        return discretize(shocks_cfg), shocks_cfg
+    else
+        # For deterministic case, create a trivial shock structure with a single state
+        trivial_shocks = ShockOutput([0.0], reshape([1.0], 1, 1), [1.0], [0.0, 0.0, 1.0])
+        return trivial_shocks, shocks_cfg
+    end
 end
 
 function build_cs_model(cfg::NamedTuple)
@@ -91,11 +102,10 @@ function build_cs_model(cfg::NamedTuple)
 
     shocks, shocks_cfg = _maybe_discretize_shocks(cfg)
 
-    if shocks !== nothing
-        ρ_shock = maybe(shocks_cfg, :ρ_shock, 0.0)
-        σ_shock = maybe(shocks_cfg, :σ_shock, 0.0)
-        params = merge(params, (ρ_shock = ρ_shock, σ_shock = σ_shock))
-    end
+    # Always add shock parameters, even for deterministic case
+    ρ_shock = maybe(shocks_cfg, :ρ_shock, 0.0)
+    σ_shock = maybe(shocks_cfg, :σ_shock, 0.0)
+    params = merge(params, (ρ_shock = ρ_shock, σ_shock = σ_shock))
 
     utility = _build_crra_utility(params)
 

@@ -121,18 +121,31 @@ function build_outputs(ctx::EGMRunContext, sol)
     delta_pol = hasproperty(sol, :delta_pol) ? sol.delta_pol : missing
     grid_info = ctx.grids[:a]
     tensor_shape = hasproperty(grid_info, :tensor_shape) ? grid_info.tensor_shape : nothing
+
+    # Convert to vector for deterministic case (single shock state)
+    is_deterministic = ctx.shocks !== nothing && length(ctx.shocks.zgrid) == 1
+    c_value = (is_deterministic && sol.c isa AbstractMatrix) ? vec(sol.c) : sol.c
+    a_next_value =
+        (is_deterministic && sol.a_next isa AbstractMatrix) ? vec(sol.a_next) : sol.a_next
+
     policy = Dict{Symbol,Any}(
         :c => (;
-            value = sol.c,
+            value = c_value,
             grid = grid_info.grid,
             tensor_shape = tensor_shape,
             euler_errors = ee_vec,
             euler_errors_mat = ee_mat,
         ),
-        :a =>
-            (; value = sol.a_next, grid = grid_info.grid, tensor_shape = tensor_shape),
+        :a => (; value = a_next_value, grid = grid_info.grid, tensor_shape = tensor_shape),
     )
-    shocks_for_value = ctx.csvar ? nothing : ctx.shocks
+    # For value function computation, treat single-shock case as deterministic (pass nothing)
+    shocks_for_value = if ctx.csvar
+        nothing
+    elseif is_deterministic
+        nothing
+    else
+        ctx.shocks
+    end
     value =
         compute_value_policy(ctx.params, ctx.grids, shocks_for_value, ctx.utility, policy)
     metadata = Dict{Symbol,Any}(
