@@ -208,13 +208,13 @@ function expected_income_level(params, shocks_info)
     end
     π = Float64.(getproperty(shocks_info, :π))
     if hasproperty(params, :y) && !(params.y isa AbstractVector)
-        base_income = Float64(getfield(params, :y))
+        μ = Float64(getfield(params, :y))
         if hasproperty(shocks_info, :zgrid)
             z = Float64.(getproperty(shocks_info, :zgrid))
-            income_states = base_income .* exp.(z)
+            income_states = exp.(μ .+ z)
             return sum(π .* income_states)
         else
-            return base_income
+            return exp(μ)
         end
     elseif hasproperty(params, :y) && params.y isa AbstractVector
         vals = Float64.(collect(params.y))
