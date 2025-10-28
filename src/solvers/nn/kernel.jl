@@ -92,7 +92,7 @@ function maybe_dense_diagnostics(
 )
     has_stochastic =
         settings.has_shocks ||
-        (S !== nothing && hasproperty(S, :process) && S.process == :gaussian_linear)
+        (S !== nothing && isdefined(S, :process) && S.process == :gaussian_linear)
     if !has_stochastic
         return nothing, nothing
     end
@@ -189,15 +189,15 @@ function solve_nn(model; opts = nothing, rng = nothing)
     U = get_utility(model)
 
     start_time = time_ns()
-    is_csvar = !isnothing(S) && hasproperty(S, :process) && S.process == :gaussian_linear
+    is_csvar = !isnothing(S) && isdefined(S, :process) && S.process == :gaussian_linear
     has_shocks = !isnothing(S) && !is_csvar
     objective_default =
         is_csvar ? :euler_residual : has_shocks ? :euler_fb_aio : :euler_residual
 
     # If provided w-range misses most of the model's cash-on-hand grid, expand it
     X_tmp, w_grid_model = det_forward_inputs(G, P)
-    w_lo_cfg = hasproperty(opts, :w_min) ? getfield(opts, :w_min) : nothing
-    w_hi_cfg = hasproperty(opts, :w_max) ? getfield(opts, :w_max) : nothing
+    w_lo_cfg = isdefined(opts, :w_min) ? opts.w_min : nothing
+    w_hi_cfg = isdefined(opts, :w_max) ? opts.w_max : nothing
     use_opts = opts
     if w_lo_cfg !== nothing && w_hi_cfg !== nothing
         in_win =
@@ -299,14 +299,26 @@ function solve_nn(model; opts = nothing, rng = nothing)
 end
 
 # Fischer–Burmeister (Eq. 25)
-@inline fb(a, h) = a + h .- sqrt.(a .^ 2 .+ h .^ 2)  # zero iff a≥0, h≥0, a*h=0
+@inline fb(a, h) = a + h .- sqrt.(a .^ 2 .+ h .^ 2)
+
+"""Helper to build feature matrix for AR(1) models."""
+@inline function build_ar1_features(y, w, feature_dim, component_levels, μ)
+    T = eltype(y)
+    if feature_dim == 2
+        return vcat(reshape(T.(y), 1, :), reshape(T.(w), 1, :))
+    else
+        n = length(y)
+        comps = Matrix{T}(undef, feature_dim - 2, n)
+        for j = 1:(feature_dim-2)
+            comps[j, :] .= j <= length(component_levels) ? component_levels[j] : T(exp(μ))
+        end
+        return vcat(reshape(T.(y), 1, :), comps, reshape(T.(w), 1, :))
+    end
+end
 
 function loss_euler_fb_aio!(chain, ps, st, batch, model_cfg, rng)
     P = model_cfg.P
-    if hasproperty(P, :A) &&
-       hasproperty(P, :Σ) &&
-       hasproperty(P, :y_dim) &&
-       getproperty(P, :y_dim) > 1
+    if isdefined(P, :A) && isdefined(P, :Σ) && isdefined(P, :y_dim) && P.y_dim > 1
         return loss_euler_fb_aio_csvar!(chain, ps, st, batch, model_cfg, rng)
     else
         return loss_euler_fb_aio_ar1!(chain, ps, st, batch, model_cfg, rng)
@@ -321,10 +333,7 @@ dispatcher.
 """
 function loss_euler_fb_bcmc!(chain, ps, st, batch, model_cfg, rng)
     P = model_cfg.P
-    if hasproperty(P, :A) &&
-       hasproperty(P, :Σ) &&
-       hasproperty(P, :y_dim) &&
-       getproperty(P, :y_dim) > 1
+    if isdefined(P, :A) && isdefined(P, :Σ) && isdefined(P, :y_dim) && P.y_dim > 1
         return loss_euler_fb_bcmc_csvar!(chain, ps, st, batch, model_cfg, rng)
     else
         return loss_euler_fb_bcmc_ar1!(chain, ps, st, batch, model_cfg, rng)
@@ -370,26 +379,15 @@ function loss_euler_fb_aio_ar1!(chain, ps, st, batch, model_cfg, rng)
     w2 = @. Rg * a1 + y2
 
     component_levels =
-        hasproperty(P, :y) && P.y isa AbstractVector ? Float32.(exp.(collect(P.y))) :
+        isdefined(P, :y) && P.y isa AbstractVector ? Float32.(exp.(collect(P.y))) :
         Float32[]
+
     X1n, X2n = ignore_derivatives() do
-        # Build features without in-place slicing; then normalize out-of-place
-        if feature_dim == 2
-            X1 = vcat(reshape(Float32.(y1), 1, :), reshape(Float32.(w1), 1, :))
-            X2 = vcat(reshape(Float32.(y2), 1, :), reshape(Float32.(w2), 1, :))
-            return normalize_feature_batch(scaler, X1), normalize_feature_batch(scaler, X2)
-        else
-            comps = Matrix{Float32}(undef, feature_dim - 2, length(y1))
-            for j = 1:(feature_dim-2)
-                level =
-                    j <= length(component_levels) ? component_levels[j] : Float32(exp(μ))
-                comps[j, :] .= level
-            end
-            X1 = vcat(reshape(Float32.(y1), 1, :), comps, reshape(Float32.(w1), 1, :))
-            X2 = vcat(reshape(Float32.(y2), 1, :), comps, reshape(Float32.(w2), 1, :))
-            return normalize_feature_batch(scaler, X1), normalize_feature_batch(scaler, X2)
-        end
+        X1 = build_ar1_features(y1, w1, feature_dim, component_levels, μ)
+        X2 = build_ar1_features(y2, w2, feature_dim, component_levels, μ)
+        normalize_feature_batch(scaler, X1), normalize_feature_batch(scaler, X2)
     end
+
     out1, st1 = Lux.apply(chain, X1n, ps, st1)
     out2, st2 = Lux.apply(chain, X2n, ps, st1)
 
@@ -410,10 +408,10 @@ function loss_euler_fb_aio_ar1!(chain, ps, st, batch, model_cfg, rng)
     aio_pen = r1 .* r2
 
     # Use adaptive v_h if available, otherwise fall back to static value
-    v_h = if hasproperty(model_cfg, :adaptive_v_h_state)
-        T(getfield(model_cfg.adaptive_v_h_state, :v_h)[])
+    v_h = if isdefined(model_cfg, :adaptive_v_h_state)
+        T(model_cfg.adaptive_v_h_state.v_h[])
     else
-        hasproperty(model_cfg, :v_h) ? T(getfield(model_cfg, :v_h)) : one(T)
+        isdefined(model_cfg, :v_h) ? T(model_cfg.v_h) : one(T)
     end
     loss_vec = kt .+ v_h .* aio_pen
 
@@ -448,7 +446,7 @@ function loss_euler_fb_aio_csvar!(chain, ps, st, batch, model_cfg, rng)
 
     Rg = one(T) + T(P.r)
     β = T(P.β)
-    v_h = hasproperty(model_cfg, :v_h) ? T(getfield(model_cfg, :v_h)) : one(T)
+    v_h = isdefined(model_cfg, :v_h) ? T(model_cfg.v_h) : one(T)
 
     A = Matrix{T}(P.A)
     Σ = Matrix{Float64}(P.Σ)
@@ -495,10 +493,10 @@ function loss_euler_fb_aio_csvar!(chain, ps, st, batch, model_cfg, rng)
     aio_pen = r1 .* r2
 
     # Use adaptive v_h if available, otherwise fall back to static value
-    v_h = if hasproperty(model_cfg, :adaptive_v_h_state)
-        T(getfield(model_cfg.adaptive_v_h_state, :v_h)[])
+    v_h = if isdefined(model_cfg, :adaptive_v_h_state)
+        T(model_cfg.adaptive_v_h_state.v_h[])
     else
-        hasproperty(model_cfg, :v_h) ? T(getfield(model_cfg, :v_h)) : one(T)
+        isdefined(model_cfg, :v_h) ? T(model_cfg.v_h) : one(T)
     end
     loss_vec = kt .+ v_h .* aio_pen
     max_abs_q = maximum(abs.(vcat(q1, q2)))
@@ -537,10 +535,10 @@ function loss_euler_fb_bcmc_ar1!(chain, ps, st, batch, model_cfg, rng; mode = :d
     a_term = @. one(T) - c0 / w0
     a_curr = @. w0 - c0
 
-    auto = hasproperty(settings, :bcmc_auto_N) && settings.bcmc_auto_N
+    auto = isdefined(settings, :bcmc_auto_N) && settings.bcmc_auto_N
     N_cap = typemax(Int)
-    if hasproperty(settings, :bcmc_budget_T) && settings.bcmc_budget_T !== nothing
-        Tbudget = Int(getfield(settings, :bcmc_budget_T))
+    if isdefined(settings, :bcmc_budget_T) && settings.bcmc_budget_T !== nothing
+        Tbudget = Int(settings.bcmc_budget_T)
         M = state_count
         pairs_per_state = max(Tbudget / max(M, 1), 0)
         approxN = Int(floor((1 + sqrt(1 + 8 * pairs_per_state)) / 2))
@@ -556,24 +554,8 @@ function loss_euler_fb_bcmc_ar1!(chain, ps, st, batch, model_cfg, rng; mode = :d
         y_next = exp.(μ .+ z_next)
         w_next = Rg .* a_curr .+ y_next
         Xn = ignore_derivatives() do
-            if feature_dim == 2
-                X = vcat(
-                    reshape(T.(y_next), 1, state_count),
-                    reshape(T.(w_next), 1, state_count),
-                )
-                normalize_feature_batch(scaler, X)
-            else
-                comps = Matrix{T}(undef, feature_dim - 2, state_count)
-                for j = 1:(feature_dim-2)
-                    comps[j, :] .= T(exp(μ))
-                end
-                X = vcat(
-                    reshape(T.(y_next), 1, state_count),
-                    comps,
-                    reshape(T.(w_next), 1, state_count),
-                )
-                normalize_feature_batch(scaler, X)
-            end
+            X = build_ar1_features(y_next, w_next, feature_dim, T[], μ)
+            normalize_feature_batch(scaler, X)
         end
         outn, _ = Lux.apply(chain, Xn, ps, st1)
         cn = vec(phi_to_consumption(outn[:Φ], w_next; min_c = C_MIN))
@@ -595,7 +577,7 @@ function loss_euler_fb_bcmc_ar1!(chain, ps, st, batch, model_cfg, rng; mode = :d
     β = T(P.β)
     ρ = T(P.ρ_shock)
     σ_shocks = T(P.σ_shock)
-    v_h = hasproperty(model_cfg, :v_h) ? T(getfield(model_cfg, :v_h)) : one(T)
+    v_h = isdefined(model_cfg, :v_h) ? T(model_cfg.v_h) : one(T)
 
     fb_term = fb(a_term, eta)
     kt = @. fb_term^2
@@ -608,7 +590,7 @@ function loss_euler_fb_bcmc_ar1!(chain, ps, st, batch, model_cfg, rng; mode = :d
     max_abs_q = zero(T)
 
     component_levels =
-        hasproperty(P, :y) && P.y isa AbstractVector ? T.(exp.(collect(P.y))) : T[]
+        isdefined(P, :y) && P.y isa AbstractVector ? T.(exp.(collect(P.y))) : T[]
 
     for draw = 1:N
         ε = randn_like(rng, z0)
@@ -617,25 +599,8 @@ function loss_euler_fb_bcmc_ar1!(chain, ps, st, batch, model_cfg, rng; mode = :d
         w_next = Rg .* a_curr .+ y_next
 
         Xn = ignore_derivatives() do
-            if feature_dim == 2
-                X = vcat(
-                    reshape(T.(y_next), 1, state_count),
-                    reshape(T.(w_next), 1, state_count),
-                )
-                normalize_feature_batch(scaler, X)
-            else
-                comps = Matrix{T}(undef, feature_dim - 2, state_count)
-                for j = 1:(feature_dim-2)
-                    level = j <= length(component_levels) ? component_levels[j] : T(exp(μ))
-                    comps[j, :] .= level
-                end
-                X = vcat(
-                    reshape(T.(y_next), 1, state_count),
-                    comps,
-                    reshape(T.(w_next), 1, state_count),
-                )
-                normalize_feature_batch(scaler, X)
-            end
+            X = build_ar1_features(y_next, w_next, feature_dim, component_levels, μ)
+            normalize_feature_batch(scaler, X)
         end
 
         outn, st1 = Lux.apply(chain, Xn, ps, st1)
@@ -660,8 +625,7 @@ function loss_euler_fb_bcmc_ar1!(chain, ps, st, batch, model_cfg, rng; mode = :d
     gvar_mean = mean(var_vec)
 
     loss_vec = kt .+ v_h .* bcmc
-    proxy_state =
-        hasproperty(model_cfg, :bcmc_state) ? getfield(model_cfg, :bcmc_state) : nothing
+    proxy_state = isdefined(model_cfg, :bcmc_state) ? model_cfg.bcmc_state : nothing
     A_proxy = proxy_state === nothing ? NaN : Float64(proxy_state.A[])
     B_proxy = proxy_state === nothing ? NaN : Float64(proxy_state.B[])
     ratio_proxy = isnan(B_proxy) || abs(B_proxy) ≤ EPS_VAR ? Inf : A_proxy / B_proxy
@@ -705,10 +669,10 @@ function loss_euler_fb_bcmc_csvar!(chain, ps, st, batch, model_cfg, rng; mode = 
     a_term = @. one(T) - c0 / w0
     a_curr = @. w0 - c0
 
-    auto = hasproperty(settings, :bcmc_auto_N) && settings.bcmc_auto_N
+    auto = isdefined(settings, :bcmc_auto_N) && settings.bcmc_auto_N
     N_cap = typemax(Int)
-    if hasproperty(settings, :bcmc_budget_T) && settings.bcmc_budget_T !== nothing
-        Tbudget = Int(getfield(settings, :bcmc_budget_T))
+    if isdefined(settings, :bcmc_budget_T) && settings.bcmc_budget_T !== nothing
+        Tbudget = Int(settings.bcmc_budget_T)
         M = n
         pairs_per_state = max(Tbudget / max(M, 1), 0)
         approxN = Int(floor((1 + sqrt(1 + 8 * pairs_per_state)) / 2))
@@ -742,8 +706,8 @@ function loss_euler_fb_bcmc_csvar!(chain, ps, st, batch, model_cfg, rng; mode = 
     end
 
     baseN = settings.n_mc
-    if auto && hasproperty(model_cfg, :bcmc_state)
-        st_auto = getfield(model_cfg, :bcmc_state)
+    if auto && isdefined(model_cfg, :bcmc_state)
+        st_auto = model_cfg.bcmc_state
         baseN = Int(clamp(round(st_auto.n_eff[]), 2, typemax(Int)))
     end
     N = min(baseN, N_cap == typemax(Int) ? baseN : N_cap)
@@ -752,7 +716,7 @@ function loss_euler_fb_bcmc_csvar!(chain, ps, st, batch, model_cfg, rng; mode = 
 
     Rg = one(T) + T(P.r)
     β = T(P.β)
-    v_h = hasproperty(model_cfg, :v_h) ? T(getfield(model_cfg, :v_h)) : one(T)
+    v_h = isdefined(model_cfg, :v_h) ? T(model_cfg.v_h) : one(T)
 
     A = Matrix{T}(P.A)
     Σ = Matrix{Float64}(P.Σ)
@@ -802,8 +766,7 @@ function loss_euler_fb_bcmc_csvar!(chain, ps, st, batch, model_cfg, rng; mode = 
     gvar_mean = mean(var_vec)
 
     loss_vec = kt .+ v_h .* bcmc
-    proxy_state =
-        hasproperty(model_cfg, :bcmc_state) ? getfield(model_cfg, :bcmc_state) : nothing
+    proxy_state = isdefined(model_cfg, :bcmc_state) ? model_cfg.bcmc_state : nothing
     A_proxy = proxy_state === nothing ? NaN : Float64(proxy_state.A[])
     B_proxy = proxy_state === nothing ? NaN : Float64(proxy_state.B[])
     ratio_proxy = isnan(B_proxy) || abs(B_proxy) ≤ EPS_VAR ? Inf : A_proxy / B_proxy

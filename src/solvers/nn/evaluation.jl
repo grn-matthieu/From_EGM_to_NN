@@ -34,12 +34,12 @@ const EVAL_MIN_CONSUMPTION = 1.0f-3
 end
 @inline is_csvar_problem(P, S) =
     S !== nothing &&
-    hasproperty(S, :process) &&
+    isdefined(S, :process) &&
     S.process == :gaussian_linear &&
-    hasproperty(P, :A) &&
-    hasproperty(P, :Σ) &&
-    hasproperty(P, :y_dim) &&
-    getproperty(P, :y_dim) > 1
+    isdefined(P, :A) &&
+    isdefined(P, :Σ) &&
+    isdefined(P, :y_dim) &&
+    P.y_dim > 1
 const CSVAR_EVAL_SAMPLES = 512
 
 @inline function denormalize_features(scaler::FeatureScaler, batch)
@@ -69,7 +69,7 @@ end
 end
 
 function get_uprime(U, P_resid)
-    if U !== nothing && hasproperty(U, :u_prime)
+    if U !== nothing && isdefined(U, :u_prime)
         return U.u_prime
     else
         γ = Float64(P_resid.γ)
@@ -123,6 +123,28 @@ function next_assets_from_cash(w, consumption)
 end
 
 @inline maybe_to_cpu(x, settings) = settings.use_cuda ? Array(x) : x
+
+"""Helper to build feature matrix from income and wealth vectors."""
+function build_feature_matrix(y_cpu, w_cpu, component_levels::Vector{Float32})
+    feature_dim = 2 + length(component_levels)
+    N = length(y_cpu)
+    X = Matrix{Float32}(undef, feature_dim, N)
+    X[1, :] .= y_cpu
+    for j in eachindex(component_levels)
+        X[1+j, :] .= component_levels[j]
+    end
+    X[end, :] .= w_cpu
+    return X
+end
+
+"""Compute residual statistics with percentiles."""
+function compute_residual_stats(resid_cpu)
+    sr = sort(vec(resid_cpu))
+    n = length(sr)
+    p50 = sr[clamp(Int(round(0.5 * n)), 1, n)]
+    p95 = sr[clamp(Int(ceil(0.95 * n)), 1, n)]
+    return (mean = mean(resid_cpu), p50 = p50, p95 = p95, max = maximum(resid_cpu))
+end
 
 function evaluate_deterministic(model, params, states, P_resid, P, G, scaler)
     X_forward, w_grid = det_forward_inputs(G, P)
@@ -437,25 +459,13 @@ function eval_euler_residuals_mc(
     a1 = @. w0 - c0
     w1 = @. Rg * a1 + y1
 
-    feature_dim = size(batch, 1)
     component_levels =
-        hasproperty(P, :y) && P.y isa AbstractVector ? Float32.(exp.(collect(P.y))) :
+        isdefined(P, :y) && P.y isa AbstractVector ? Float32.(exp.(collect(P.y))) :
         Float32[]
 
-    # Build feature matrix on CPU (so assignment works regardless of whether
-    # y1/w1 are on the GPU). After normalization, move the batch to device if
-    # settings.use_cuda is set.
     y1_cpu = maybe_to_cpu(y1, settings)
     w1_cpu = maybe_to_cpu(w1, settings)
-    X1 = Matrix{Float32}(undef, feature_dim, length(y1_cpu))
-    X1[1, :] .= y1_cpu
-    if feature_dim > 2
-        for j = 1:(feature_dim-2)
-            level = j <= length(component_levels) ? component_levels[j] : Float32(P_resid.y)
-            X1[1+j, :] .= level
-        end
-    end
-    X1[end, :] .= w1_cpu
+    X1 = build_feature_matrix(y1_cpu, w1_cpu, component_levels)
     normalize_feature_batch!(scaler, X1)
 
     X1_dev = maybe_to_device(X1, settings)
@@ -485,12 +495,7 @@ function eval_euler_residuals_mc(
         h_cpu = h
     end
 
-    sr = sort(vec(resid_cpu))
-    n = length(sr)
-    p50 = sr[clamp(Int(round(0.5 * n)), 1, n)]
-    p95 = sr[clamp(Int(ceil(0.95 * n)), 1, n)]
-
-    stats = (mean = mean(resid_cpu), p50 = p50, p95 = p95, max = maximum(resid_cpu))
+    stats = compute_residual_stats(resid_cpu)
     return (
         abs_resid = Float32.(resid_cpu),
         w = Float32.(w_cpu),
@@ -574,12 +579,7 @@ function eval_euler_residuals_mc_csvar(
     c_cpu = Float32.(c0_cpu)
     h_cpu_f32 = Float32.(h_cpu)
 
-    sr = sort(vec(resid_cpu))
-    n = length(sr)
-    p50 = sr[clamp(Int(round(0.5 * n)), 1, n)]
-    p95 = sr[clamp(Int(ceil(0.95 * n)), 1, n)]
-
-    stats = (mean = mean(resid_cpu), p50 = p50, p95 = p95, max = maximum(resid_cpu))
+    stats = compute_residual_stats(resid_cpu)
     return (
         abs_resid = resid_cpu,
         w = w_cpu,
@@ -694,6 +694,10 @@ function eval_euler_residuals_gh(
 
     EUprime =
         settings.use_cuda ? cu(zeros(Float32, length(w0))) : zeros(Float32, length(w0))
+
+    component_levels =
+        isdefined(P, :y) && P.y isa AbstractVector ? Float32.(collect(P.y)) : Float32[]
+
     @inbounds for k in eachindex(GH10_X)
         εk = GH10_X[k]
         wk = GH10_W[k] / sqrt(pi)
@@ -701,37 +705,17 @@ function eval_euler_residuals_gh(
         y1 = exp.(μ .+ z1)
         a1 = @. w0 - c0
         w1 = @. Rg * a1 + y1
-        feature_dim = size(batch, 1)
-        component_levels =
-            hasproperty(P, :y) && P.y isa AbstractVector ? Float32.(collect(P.y)) :
-            Float32[]
-        # Build feature matrix on CPU (so assignment works regardless of whether
-        # y1/w1 are on the GPU). After normalization, move the batch to device if
-        # settings.use_cuda is set.
+
         y1_cpu = maybe_to_cpu(y1, settings)
         w1_cpu = maybe_to_cpu(w1, settings)
-        X1 = Matrix{Float32}(undef, feature_dim, length(y1_cpu))
-        X1[1, :] .= y1_cpu
-        if feature_dim > 2
-            for j = 1:(feature_dim-2)
-                level =
-                    j <= length(component_levels) ? component_levels[j] : Float32(P_resid.y)
-                X1[1+j, :] .= level
-            end
-        end
-        X1[end, :] .= w1_cpu
+        X1 = build_feature_matrix(y1_cpu, w1_cpu, component_levels)
         normalize_feature_batch!(scaler, X1)
 
         X1_dev = maybe_to_device(X1, settings)
         out1, _ = Lux.apply(model, X1_dev, ps, st)
 
-        # Ensure the cash-on-hand passed to phi_to_consumption lives on the same
-        # device as the model output.
         w1_dev = maybe_to_device(w1_cpu, settings)
         c1 = vec(phi_to_consumption(out1[:Φ], w1_dev; min_c = 1.0f-3))
-        normalize_feature_batch!(scaler, X1)
-        out1, _ = Lux.apply(model, X1, ps, st)
-        c1 = vec(phi_to_consumption(out1[:Φ], w1; min_c = 1.0f-3))
         EUprime .+= wk .* uprime(c1)
     end
     ratio = @. β * Rg * EUprime / uprime(c0)

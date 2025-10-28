@@ -60,7 +60,7 @@ maybe_to_host(x::Nothing, ::NNSolverSettings) = nothing
 maybe_to_host(x, settings::NNSolverSettings) = settings.use_cuda ? Adapt.adapt(Array, x) : x
 
 function maybe_to_host(state::Lux.Training.TrainState, settings::NNSolverSettings)
-    mdl = hasproperty(state, :model) ? getfield(state, :model) : nothing
+    mdl = isdefined(state, :model) ? getfield(state, :model) : nothing
     ps = state_parameters(state)
     st = state_states(state)
     return (
@@ -97,7 +97,7 @@ function fill_like(value, ref)
 end
 
 get_option(opts, key::Symbol, default) =
-    opts === nothing ? default : (hasproperty(opts, key) ? getfield(opts, key) : default)
+    opts === nothing ? default : (isdefined(opts, key) ? getfield(opts, key) : default)
 
 const CUDA_OBJECTIVES = (:euler_fb_aio, :euler_fb_bcmc)
 
@@ -232,7 +232,7 @@ function solver_settings(
             return (0.0, 1.0)
         end
         # CSVAR: components follow log-Gaussian process. Use log means adjusted for variance.
-        if hasproperty(params, :A) && hasproperty(params, :Σ)
+        if isdefined(params, :A) && isdefined(params, :Σ)
             μ_log = csvar_component_log_means(params)
             Σ = Matrix{Float64}(params.Σ)
             σ = sqrt.(max.(diag(Σ), 0.0))
@@ -242,12 +242,12 @@ function solver_settings(
         end
         # AR(1) log-income (stochastic): y is log-mean, use exp(μ ± 3σ)
         if shocks !== nothing || has_shocks
-            μ = hasproperty(params, :y) ? Float64(getfield(params, :y)) : 0.0
-            σ = hasproperty(params, :σ_shock) ? Float64(getfield(params, :σ_shock)) : 0.0
+            μ = isdefined(params, :y) ? Float64(getfield(params, :y)) : 0.0
+            σ = isdefined(params, :σ_shock) ? Float64(getfield(params, :σ_shock)) : 0.0
             return (exp(μ - 3σ), exp(μ + 3σ))
         end
         # Deterministic: take income level(s)
-        if hasproperty(params, :y) && params.y isa AbstractVector
+        if isdefined(params, :y) && params.y isa AbstractVector
             return (
                 mean(exp.(Float64.(collect(params.y)))),
                 mean(exp.(Float64.(collect(params.y)))),
@@ -265,11 +265,7 @@ function solver_settings(
         a_max = Float64(getproperty(grids[:a], :max))
         Rg =
             1.0 + Float64(
-                get_option(
-                    params,
-                    :r,
-                    hasproperty(params, :r) ? getfield(params, :r) : 0.0,
-                ),
+                get_option(params, :r, isdefined(params, :r) ? getfield(params, :r) : 0.0),
             )
         return (Rg * a_min + inc_lo, Rg * a_max + inc_hi)
     end
@@ -451,16 +447,16 @@ end
 
 function rebuild_adam_family(opt, lr)
     pairs = Pair{Symbol,Any}[:eta=>Float64(lr)]
-    if hasproperty(opt, :beta)
+    if isdefined(opt, :beta)
         push!(pairs, :beta => getproperty(opt, :beta))
     end
     eps_val =
-        hasproperty(opt, :epsilon) ? getproperty(opt, :epsilon) :
-        (hasproperty(opt, :eps) ? getproperty(opt, :eps) : nothing)
+        isdefined(opt, :epsilon) ? getproperty(opt, :epsilon) :
+        (isdefined(opt, :eps) ? getproperty(opt, :eps) : nothing)
     if eps_val !== nothing
         push!(pairs, :epsilon => eps_val)
     end
-    if opt isa Optimisers.AdamW && hasproperty(opt, :weight_decay)
+    if opt isa Optimisers.AdamW && isdefined(opt, :weight_decay)
         push!(pairs, :weight_decay => getproperty(opt, :weight_decay))
     end
     constructor = opt isa Optimisers.AdamW ? Optimisers.AdamW : Optimisers.Adam
@@ -510,23 +506,23 @@ end
 
 function apply_optimizer_learning_rate!(state, lr)
     # Support both older `:opt` field and Lux.Training.TrainState's `:optimizer`
-    if hasproperty(state, :opt)
+    if isdefined(state, :opt)
         current_opt = getfield(state, :opt)
         updated_opt = adjust_learning_rate(current_opt, lr)
         if updated_opt !== current_opt
             setfield!(state, :opt, updated_opt)
         end
         return state
-    elseif hasproperty(state, :optimizer)
+    elseif isdefined(state, :optimizer)
         current_opt = getfield(state, :optimizer)
         updated_opt = adjust_learning_rate(current_opt, lr)
         if updated_opt === current_opt
             return state
         end
         # Lux.Training.TrainState is immutable; construct a new TrainState
-        mdl = hasproperty(state, :model) ? getfield(state, :model) : nothing
-        ps = hasproperty(state, :parameters) ? getfield(state, :parameters) : nothing
-        st = hasproperty(state, :states) ? getfield(state, :states) : nothing
+        mdl = isdefined(state, :model) ? getfield(state, :model) : nothing
+        ps = isdefined(state, :parameters) ? getfield(state, :parameters) : nothing
+        st = isdefined(state, :states) ? getfield(state, :states) : nothing
         return Lux.Training.TrainState(mdl, ps, st, updated_opt)
     end
     return state
@@ -551,8 +547,8 @@ function build_loss_function(
     function fb_supported(model_cfg)
         model_cfg === nothing && return false
         P_full = model_cfg.P
-        has_ar1 = hasproperty(P_full, :ρ_shock) && hasproperty(P_full, :σ_shock)
-        has_var = hasproperty(P_full, :A) && hasproperty(P_full, :Σ)
+        has_ar1 = isdefined(P_full, :ρ_shock) && isdefined(P_full, :σ_shock)
+        has_var = isdefined(P_full, :A) && isdefined(P_full, :Σ)
         return has_ar1 || has_var
     end
 
@@ -579,9 +575,9 @@ function build_loss_function(
                 else
                     P_full = model_cfg.P
                     is_csvar =
-                        hasproperty(P_full, :A) &&
-                        hasproperty(P_full, :Σ) &&
-                        hasproperty(P_full, :y_dim) &&
+                        isdefined(P_full, :A) &&
+                        isdefined(P_full, :Σ) &&
+                        isdefined(P_full, :y_dim) &&
                         getproperty(P_full, :y_dim) > 1
                     if is_csvar
                         loss_euler_fb_bcmc_csvar!(model, ps, st, X, model_cfg, rng)
@@ -690,9 +686,9 @@ function build_loss_function(
                 # `bcmc_state.n_eff` on the model_cfg; prefer that value when
                 # present so Auto-N takes effect during iterations.
                 K = settings.n_mc
-                if model_cfg !== nothing && hasproperty(model_cfg, :bcmc_state)
+                if model_cfg !== nothing && isdefined(model_cfg, :bcmc_state)
                     st_auto = getfield(model_cfg, :bcmc_state)
-                    if hasproperty(st_auto, :n_eff)
+                    if isdefined(st_auto, :n_eff)
                         try
                             # n_eff may be a Ref or numeric container; round and
                             # clamp to a safe integer ≥ 2 when possible.
@@ -715,7 +711,7 @@ function build_loss_function(
                 draws = Matrix{Float32}(undef, y_dim, K)
                 mul!(draws, L, innovations)                # y components
                 μ_vec =
-                    hasproperty(base_P, :y) && base_P.y isa AbstractVector ?
+                    isdefined(base_P, :y) && base_P.y isa AbstractVector ?
                     Float32.(collect(base_P.y)) : Float32[Float32(getfield(base_P, :y))]
                 @. draws += μ_vec
                 income_draws = Float32.(csvar_income(draws))   # scalar income from components
@@ -940,19 +936,19 @@ function create_training_batch(
 
     Rg = 1.0f0 + Float32(P_resid.r)
     base_P = P === nothing ? P_resid : P
-    is_csvar = hasproperty(base_P, :A) && hasproperty(base_P, :Σ)
+    is_csvar = isdefined(base_P, :A) && isdefined(base_P, :Σ)
     if is_csvar
         log_means = csvar_component_log_means(base_P)
         y_dim = length(log_means)
         extra_cols = y_dim
         income_targets =
-            hasproperty(base_P, :y) && base_P.y isa AbstractVector ?
+            isdefined(base_P, :y) && base_P.y isa AbstractVector ?
             Float64.(collect(base_P.y)) : Float64[Float64(getfield(base_P, :y))]
         base_income = sum(income_targets)
         feature_dim = 1 + extra_cols + 1
     else
         y_levels =
-            hasproperty(base_P, :y) && base_P.y isa AbstractVector ?
+            isdefined(base_P, :y) && base_P.y isa AbstractVector ?
             Float32.(collect(base_P.y)) : Float32[Float32(getfield(base_P, :y))]
         y_dim = length(y_levels)
         extra_cols = y_dim > 1 ? y_dim : 0
@@ -962,7 +958,7 @@ function create_training_batch(
     a_min = Float32(G[:a].min)
     a_max = Float32(G[:a].max)
 
-    if settings.has_shocks && !isnothing(S) && hasproperty(S, :zgrid)
+    if settings.has_shocks && !isnothing(S) && isdefined(S, :zgrid)
         z_min = Float32(minimum(S.zgrid))
         z_max = Float32(maximum(S.zgrid))
     else
@@ -983,9 +979,9 @@ function create_training_batch(
         a_draw = rand(rng, Float32, m) .* (a_max - a_min) .+ a_min
         z_draw = rand(rng, Float32, m) .* (z_max - z_min) .+ z_min
         if is_csvar &&
-           hasproperty(base_P, :Σ) &&
+           isdefined(base_P, :Σ) &&
            !isnothing(S) &&
-           hasproperty(S, :process) &&
+           isdefined(S, :process) &&
            S.process == :gaussian_linear
             Σ = Matrix{Float64}(base_P.Σ)
             chol = cholesky(Symmetric(Σ), check = false).L
@@ -1042,13 +1038,13 @@ function create_training_batch(
 end
 
 function select_model(chain, state)
-    return hasproperty(state, :model) ? getfield(state, :model) : chain
+    return isdefined(state, :model) ? getfield(state, :model) : chain
 end
 
 function state_parameters(state)
-    if hasproperty(state, :parameters)
+    if isdefined(state, :parameters)
         return getfield(state, :parameters)
-    elseif hasproperty(state, :params)
+    elseif isdefined(state, :params)
         return getfield(state, :params)
     else
         return nothing
@@ -1056,9 +1052,9 @@ function state_parameters(state)
 end
 
 function state_states(state)
-    if hasproperty(state, :states)
+    if isdefined(state, :states)
         return getfield(state, :states)
-    elseif hasproperty(state, :state)
+    elseif isdefined(state, :state)
         return getfield(state, :state)
     else
         return nothing
@@ -1206,7 +1202,7 @@ function train_consumption_network!(
             if settings.objective === :euler_fb_bcmc &&
                settings.bcmc_auto_N &&
                model_cfg !== nothing &&
-               hasproperty(model_cfg, :bcmc_state)
+               isdefined(model_cfg, :bcmc_state)
                 step_id = (epoch - 1) * batches_per_epoch + cld(stop, batch_size)
                 if step_id % settings.bcmc_update_every == 0
                     pairs0 = max(div(settings.n_mc * (settings.n_mc - 1), 2), 1)
@@ -1236,7 +1232,7 @@ function train_consumption_network!(
                     scalar_forward = function (x, ps_, st_; mode = :default)
                         Xmat = ndims(x) == 1 ? reshape(x, :, 1) : x
                         if mode === :fb_scalar
-                            if hasproperty(model_cfg.P, :Σ) && hasproperty(model_cfg.P, :A)
+                            if isdefined(model_cfg.P, :Σ) && isdefined(model_cfg.P, :A)
                                 vals = loss_euler_fb_bcmc_csvar!(
                                     base_model,
                                     ps_,
@@ -1332,7 +1328,7 @@ function train_consumption_network!(
         # to focus more on Euler equation accuracy
         if settings.objective === :euler_fb_aio &&
            model_cfg !== nothing &&
-           hasproperty(model_cfg, :adaptive_v_h_state) &&
+           isdefined(model_cfg, :adaptive_v_h_state) &&
            epoch % 10 == 0
             # Get current kt_mean from a quick forward pass on validation batch
             try
@@ -1344,7 +1340,7 @@ function train_consumption_network!(
                 )
                 if :fb in keys(val_diag)
                     aux = val_diag.fb
-                    if hasproperty(aux, :kt_mean)
+                    if isdefined(aux, :kt_mean)
                         current_kt = Float64(aux.kt_mean)
                         vh_state = model_cfg.adaptive_v_h_state
 
@@ -1464,15 +1460,14 @@ function train_consumption_network!(
                         P = model_cfg.P,
                     )
                     # Compute RMSE of Euler residuals
-                    if hasproperty(gh_result, :abs_resid)
+                    if isdefined(gh_result, :abs_resid)
                         euler_rmse = sqrt(mean(Float64.(gh_result.abs_resid) .^ 2))
-                    elseif hasproperty(gh_result, :stats) &&
-                           hasproperty(gh_result.stats, :rmse)
+                    elseif isdefined(gh_result, :stats) && isdefined(gh_result.stats, :rmse)
                         euler_rmse = Float64(gh_result.stats.rmse)
                     end
                 else
                     # Deterministic case: use grid-based residuals
-                    if hasproperty(P_resid, :a) && hasproperty(model_cfg.G, :a)
+                    if isdefined(P_resid, :a) && isdefined(model_cfg.G, :a)
                         a_grid_f32 = Float32.(model_cfg.G.a.grid)
                         c_pred_vec_f32 = current_c[1:length(a_grid_f32)]
                         residuals = euler_resid_grid(P_resid, a_grid_f32, c_pred_vec_f32)
@@ -1534,7 +1529,7 @@ function train_consumption_network!(
 
                     # Get raw network outputs on validation batch
                     out, _ = Lux.apply(current_model, val_batch, current_ps, current_st)
-                    if out isa NamedTuple && hasproperty(out, :Φ) && hasproperty(out, :h)
+                    if out isa NamedTuple && isdefined(out, :Φ) && isdefined(out, :h)
                         Φ_vals = maybe_to_cpu(vec(out[:Φ]), settings)
                         h_vals = maybe_to_cpu(vec(out[:h]), settings)
 
@@ -1598,11 +1593,9 @@ function train_consumption_network!(
                     try
                         if settings.objective === :euler_fb_bcmc
                             bcmc_val =
-                                hasproperty(aux, :bcmc_mean) ? getfield(aux, :bcmc_mean) :
-                                NaN
-                            n_eff =
-                                hasproperty(aux, :n_eff) ? getfield(aux, :n_eff) : missing
-                            if hasproperty(aux, :gvar_mean)
+                                isdefined(aux, :bcmc_mean) ? getfield(aux, :bcmc_mean) : NaN
+                            n_eff = isdefined(aux, :n_eff) ? getfield(aux, :n_eff) : missing
+                            if isdefined(aux, :gvar_mean)
                                 if n_eff === missing
                                     @printf(
                                         "[VAL] Epoch %4d: kt_mean=%.6g bcmc_mean=%.6g gvar=%.6g max_abs_q=%.6g\n",
@@ -1646,7 +1639,7 @@ function train_consumption_network!(
                         else
                             # Default to AiO-style logging when active or when bcmc fields missing
                             aio_val =
-                                hasproperty(aux, :aio_mean) ? getfield(aux, :aio_mean) : NaN
+                                isdefined(aux, :aio_mean) ? getfield(aux, :aio_mean) : NaN
                             @printf(
                                 "[VAL] Epoch %4d: kt_mean=%.6g aio_mean=%.6g max_abs_q=%.6g\n",
                                 epoch,

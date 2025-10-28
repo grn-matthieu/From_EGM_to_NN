@@ -24,43 +24,40 @@ struct FeatureScaler
 end
 
 function _income_bounds(P, S)
-    if hasproperty(P, :A) && hasproperty(P, :Σ)
-        μ_vec = csvar_component_log_means(P)
-    else
-        μ_vec =
-            hasproperty(P, :y) && P.y isa AbstractVector ? Float64.(collect(P.y)) :
-            [Float64(getfield(P, :y))]
-    end
+    is_csvar = isdefined(P, :A) && isdefined(P, :Σ)
+    μ_vec =
+        is_csvar ? csvar_component_log_means(P) :
+        (
+            isdefined(P, :y) && P.y isa AbstractVector ? Float64.(collect(P.y)) :
+            [Float64(P.y)]
+        )
+
     d = length(μ_vec)
-    lower = Vector{Float64}(undef, d)
-    upper = Vector{Float64}(undef, d)
-    if S === nothing
-        @inbounds for i = 1:d
-            val = μ_vec[i]
-            lower[i] = val
-            upper[i] = val
-        end
-    elseif hasproperty(S, :zgrid) && S.zgrid !== nothing && length(S.zgrid) > 0
-        zmin = Float64(minimum(S.zgrid))
-        zmax = Float64(maximum(S.zgrid))
+    lower, upper = Vector{Float64}(undef, d), Vector{Float64}(undef, d)
+
+    if S === nothing ||
+       !(isdefined(S, :zgrid) && S.zgrid !== nothing && length(S.zgrid) > 0) &&
+       !(isdefined(P, :Σ) && P.Σ !== nothing)
+        # No shocks: bounds equal means
+        lower .= μ_vec
+        upper .= μ_vec
+    elseif isdefined(S, :zgrid) && S.zgrid !== nothing && length(S.zgrid) > 0
+        # Discrete shocks: add min/max shock values
+        zmin, zmax = Float64(minimum(S.zgrid)), Float64(maximum(S.zgrid))
         @inbounds for i = 1:d
             lower[i] = μ_vec[i] + zmin
             upper[i] = μ_vec[i] + zmax
         end
-    elseif hasproperty(P, :Σ) && P.Σ !== nothing
-        Σ = Matrix{Float64}(P.Σ)
-        diag_vals = diag(Σ)
-        std_vec = sqrt.(max.(diag_vals, 0.0))
+    elseif isdefined(P, :Σ) && P.Σ !== nothing
+        # Continuous shocks (CSVAR): use 3σ bounds
+        std_vec = sqrt.(max.(diag(Matrix{Float64}(P.Σ)), 0.0))
         @inbounds for i = 1:d
             lower[i] = μ_vec[i] - 3 * std_vec[i]
             upper[i] = μ_vec[i] + 3 * std_vec[i]
         end
     else
-        @inbounds for i = 1:d
-            val = μ_vec[i]
-            lower[i] = val
-            upper[i] = val
-        end
+        lower .= μ_vec
+        upper .= μ_vec
     end
     return lower, upper
 end
@@ -68,30 +65,27 @@ end
 function FeatureScaler(P, G, S, settings)
     lower, upper = _income_bounds(P, S)
     y_dim = length(lower)
-    is_csvar = hasproperty(P, :A) && hasproperty(P, :Σ)
-    if is_csvar
-        income_lower = sum(exp.(lower))
-        income_upper = sum(exp.(upper))
+    is_csvar = isdefined(P, :A) && isdefined(P, :Σ)
+
+    # Compute income bounds based on model type
+    income_lower, income_upper = if is_csvar
+        sum(exp.(lower)), sum(exp.(upper))
     else
-        income_lower = y_dim > 1 ? sum(lower) : mean(lower)
-        income_upper = y_dim > 1 ? sum(upper) : mean(upper)
+        y_dim > 1 ? (sum(lower), sum(upper)) : (mean(lower), mean(upper))
     end
-    mean_lower = income_lower
-    mean_upper = income_upper
-    mean_min = Float32(mean_lower)
-    mean_range = max(Float32(mean_upper - mean_lower), 1.0f-6)
-    include_components = is_csvar ? true : y_dim > 1
-    if include_components
-        y_min_vec = Float32.(lower)
-        y_range_vec = Float32.(max.(upper - lower, fill(1e-6, y_dim)))
-    else
-        y_min_vec = Float32[]
-        y_range_vec = Float32[]
-    end
-    # w
+
+    mean_min = Float32(income_lower)
+    mean_range = max(Float32(income_upper - income_lower), 1.0f-6)
+
+    # Component-level normalization (CSVAR or multi-component models)
+    include_components = is_csvar || y_dim > 1
+    y_min_vec = include_components ? Float32.(lower) : Float32[]
+    y_range_vec =
+        include_components ? Float32.(max.(upper - lower, fill(1e-6, y_dim))) : Float32[]
+
+    # Wealth bounds
     w_min = Float32(settings.w_min)
-    w_max = Float32(settings.w_max)
-    w_range = max(w_max - w_min, 1.0f-6)
+    w_range = max(Float32(settings.w_max) - w_min, 1.0f-6)
 
     return FeatureScaler(
         mean_min,
@@ -261,26 +255,16 @@ function normalize_feature_batch(s::FeatureScaler, X::AbstractMatrix)
     end
 end
 
-get_param(container, name::Symbol, default) = begin
-    value = hasproperty(container, name) ? getfield(container, name) : default
-    return value === nothing ? default : value
-end
+get_param(container, name::Symbol, default) =
+    isdefined(container, name) ?
+    (val = getfield(container, name); val === nothing ? default : val) : default
 
 function scalar_params(P)
-    if hasproperty(P, :y) && P.y isa AbstractVector
-        y_vec = Float64.(collect(P.y))
-        y_mean = mean(y_vec)
-        extra = length(y_vec) > 1 ? y_vec : Float64[]
-        return ScalarParams(Float64(P.γ), Float64(P.β), Float64(P.r), y_mean, extra)
-    else
-        return ScalarParams(
-            Float64(P.γ),
-            Float64(P.β),
-            Float64(P.r),
-            Float64(P.y),
-            Float64[],
-        )
-    end
+    is_vector = isdefined(P, :y) && P.y isa AbstractVector
+    y_vec = is_vector ? Float64.(collect(P.y)) : Float64[Float64(P.y)]
+    y_mean = mean(y_vec)
+    extra = is_vector && length(y_vec) > 1 ? y_vec : Float64[]
+    return ScalarParams(Float64(P.γ), Float64(P.β), Float64(P.r), y_mean, extra)
 end
 
 function clamp_to_asset_bounds(values, grid_info)
@@ -293,7 +277,7 @@ function clamp_to_asset_bounds(values, grid_info)
     end
 end
 
-income_dimension(P) = (hasproperty(P, :y) && P.y isa AbstractVector) ? length(P.y) : 1
+income_dimension(P) = (isdefined(P, :y) && P.y isa AbstractVector) ? length(P.y) : 1
 
 function nn_input_dimension(P)
     d = income_dimension(P)
