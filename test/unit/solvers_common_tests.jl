@@ -233,22 +233,22 @@ end
 @testset "Euler residuals" begin
     params = (β = 1 / 1.01, γ = 1.0, r = 0.01, y = 1.0)
     c = fill(1.0, 5)
-    resid = EulerResiduals.euler_resid_det(params, c, c)
+    resid = EulerResiduals.euler_resid(params, c, c)
     @test all(resid .<= 1e-12)
 
     a_grid = collect(range(0.0, 4.0; length = 5))
     c_grid = fill(1.0, 5)
-    resid_grid = EulerResiduals.euler_resid_det_grid(params, a_grid, c_grid)
+    resid_grid = EulerResiduals.euler_resid_grid(params, a_grid, c_grid)
     @test length(resid_grid) == length(a_grid)
 
     z_grid = [-0.1, 0.1]
     Π = [0.9 0.1; 0.2 0.8]
     c_stoch = fill(1.0, length(a_grid), length(z_grid))
-    resid_stoch = EulerResiduals.euler_resid_stoch(params, a_grid, z_grid, Π, c_stoch)
+    resid_stoch = EulerResiduals.euler_resid(params, a_grid, z_grid, Π, c_stoch)
     @test size(resid_stoch) == size(c_stoch)
 
     resid_buf = similar(c_stoch)
-    EulerResiduals.euler_resid_stoch!(resid_buf, params, a_grid, z_grid, Π, c_stoch)
+    EulerResiduals.euler_resid!(resid_buf, params, a_grid, z_grid, Π, c_stoch)
     @test all(resid_buf .>= 0)
 
     EulerResiduals.euler_resid_stoch_interp!(

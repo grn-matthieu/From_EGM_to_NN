@@ -136,7 +136,7 @@ function evaluate_deterministic(model, params, states, P_resid, P, G, scaler)
         a_grid_f32, c_vec, c_vec_f32 = det_residual_inputs(prediction, G)
     end
 
-    residuals = euler_resid_det_grid(P_resid, a_grid_f32, c_vec_f32)
+    residuals = euler_resid_grid(P_resid, a_grid_f32, c_vec_f32)
     c_on_grid = convert_to_grid_eltype(G[:a].grid, c_vec)
     a_next = next_assets_from_cash(w_grid, c_on_grid)
     a_next = clamp_to_asset_bounds(a_next, G[:a])
@@ -184,8 +184,7 @@ function evaluate_stochastic(
             stoch_residual_inputs(prediction, G, S)
     end
 
-    residuals =
-        euler_resid_stoch_grid(P_resid, a_grid_f32, z_grid_f32, Pz_f32, c_matrix_f32)
+    residuals = euler_resid_grid(P_resid, a_grid_f32, z_grid_f32, Pz_f32, c_matrix_f32)
     c_on_grid = convert_to_grid_eltype(G[:a].grid, c_matrix)
     w_matrix = reshape(W, Na, Nz)
     a_next = next_assets_from_cash(w_matrix, c_on_grid)

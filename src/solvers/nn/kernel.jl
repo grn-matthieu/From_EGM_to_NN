@@ -11,7 +11,7 @@ using ..GridHelpers: fit_values_on_backend!, eval_backend_at_points, grid_backen
 using ..API: get_grids, get_params, get_shocks, get_utility
 using ..CommonInterp: InterpKind, LinearInterp
 using ..DataNN: generate_dataset
-using ..EulerResiduals: euler_resid_det_grid, euler_resid_stoch_grid
+using ..EulerResiduals: euler_resid_grid
 using ..Determinism: derive_rng, promote_master_rng
 using ..CSVarUtils: csvar_income
 using ChainRulesCore: ignore_derivatives

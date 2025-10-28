@@ -8,7 +8,7 @@ module EGMKernel
 
 using Base.Threads: @threads
 using ..CommonInterp: interpolate, InterpKind, LinearInterp, MonotoneCubicInterp
-using ..EulerResiduals: euler_resid_det!, euler_resid_stoch!, euler_resid_stoch_interp!
+using ..EulerResiduals: euler_resid!, euler_resid_stoch_interp!
 using ..PolicyUtils:
     clamp_policy!,
     compute_binding_tolerance,

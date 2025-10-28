@@ -16,7 +16,7 @@ using ..CommonInterp:
     InterpKind,
     LinearInterp,
     MonotoneCubicInterp
-using ..EulerResiduals: euler_resid_det!, euler_resid_stoch!, euler_resid_stoch_interp!
+using ..EulerResiduals: euler_resid!, euler_resid_stoch_interp!
 using ..PolicyUtils:
     clamp_policy!,
     compute_binding_tolerance,
@@ -219,7 +219,7 @@ function solve_ti_det_impl(
         end
         ensure_minimum!(cnext, cmin)
 
-        euler_resid_det!(resid, model_params, c, cnext)
+        euler_resid!(resid, model_params, c, cnext)
         euler_rmse = rmse_nonbinding(resid, a_next, a_min, bind_tol)
         push!(rmse_history, euler_rmse)
 
@@ -251,7 +251,7 @@ function solve_ti_det_impl(
         interp_linear!(cnext, a_grid, c, a_next)
     end
     ensure_minimum!(cnext, cmin)
-    euler_resid_det!(resid, model_params, c, cnext)
+    euler_resid!(resid, model_params, c, cnext)
     euler_rmse = rmse_nonbinding(resid, a_next, a_min, bind_tol)
 
     runtime = (time_ns() - start_time) / 1e9
@@ -450,7 +450,7 @@ function solve_ti_det_impl(
         end
         ensure_minimum!(cnext, cmin)
 
-        euler_resid_det!(resid, model_params, c, cnext)
+        euler_resid!(resid, model_params, c, cnext)
         euler_rmse = rmse_nonbinding(resid, a_next, a_min, bind_tol)
         push!(rmse_history, euler_rmse)
 
@@ -480,7 +480,7 @@ function solve_ti_det_impl(
     @. a_next = clamp(R * a_grid + model_params.y - c, a_min, a_max)
     interp_pchip!(cnext, a_grid, c, a_next)
     ensure_minimum!(cnext, cmin)
-    euler_resid_det!(resid, model_params, c, cnext)
+    euler_resid!(resid, model_params, c, cnext)
     euler_rmse = rmse_nonbinding(resid, a_next, a_min, bind_tol)
 
     runtime = (time_ns() - start_time) / 1e9

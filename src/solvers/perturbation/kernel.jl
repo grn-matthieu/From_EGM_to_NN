@@ -10,9 +10,7 @@ First-order perturbation produces a local linear solution capturing immediate po
 to shocks. Second-order perturbation incorporates non-linear effects via quadratic terms.
 """
 module PerturbationKernel
-
-using ..EulerResiduals:
-    euler_resid_det, euler_resid_stoch, euler_resid_det_grid, euler_resid_stoch_grid
+using ..EulerResiduals: euler_resid, euler_resid_grid
 using ..CommonInterp: InterpKind, LinearInterp
 using ..PolicyUtils:
     clamp_policy!, compute_binding_tolerance, rmse_nonbinding, enforce_monotone!
@@ -249,7 +247,7 @@ function solve_perturbation_det(
     a_next = @. R * a_grid + ȳ - c
     @. a_next = clamp(a_next, a_min, a_max)
 
-    resid = euler_resid_det_grid(p, a_grid, c)
+    resid = euler_resid_grid(p, a_grid, c)
     iters = 1
     converged = true
     # RMSE on non-binding points (where a' > a_min + tol)
@@ -403,7 +401,7 @@ function solve_perturbation_stoch(
         @. a_col = clamp(R * a_grid + exp(z) - col, a_min, a_max)
     end
 
-    resid = euler_resid_stoch_grid(p, a_grid, z_grid, Π, c)
+    resid = euler_resid_grid(p, a_grid, z_grid, Π, c)
     iters = 1
     converged = true
     # RMSE on non-binding entries

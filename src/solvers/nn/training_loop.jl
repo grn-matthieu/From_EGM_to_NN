@@ -663,7 +663,7 @@ function build_loss_function(
 
         if isnothing(S)
             a_grid_f32, _, c_pred_vec_f32 = det_residual_inputs(c_pred, G)
-            resid = euler_resid_det_grid(P_resid, a_grid_f32, c_pred_vec_f32)
+            resid = euler_resid_grid(P_resid, a_grid_f32, c_pred_vec_f32)
             loss = mean(huber_loss.(resid, 1.0f0))
         else
             if is_csvar_problem(model_cfg === nothing ? P_resid : model_cfg.P, S)
@@ -746,13 +746,8 @@ function build_loss_function(
                 # Discrete scalar z with grid
                 a_grid_f32, z_grid_f32, Pz_f32, _, c_pred_f32 =
                     stoch_residual_inputs(c_pred, G, S)
-                resid = euler_resid_stoch_grid(
-                    P_resid,
-                    a_grid_f32,
-                    z_grid_f32,
-                    Pz_f32,
-                    c_pred_f32,
-                )
+                resid =
+                    euler_resid_grid(P_resid, a_grid_f32, z_grid_f32, Pz_f32, c_pred_f32)
                 loss = mean(huber_loss.(resid, 1.0f0))
             end
         end
@@ -1480,8 +1475,7 @@ function train_consumption_network!(
                     if hasproperty(P_resid, :a) && hasproperty(model_cfg.G, :a)
                         a_grid_f32 = Float32.(model_cfg.G.a.grid)
                         c_pred_vec_f32 = current_c[1:length(a_grid_f32)]
-                        residuals =
-                            euler_resid_det_grid(P_resid, a_grid_f32, c_pred_vec_f32)
+                        residuals = euler_resid_grid(P_resid, a_grid_f32, c_pred_vec_f32)
                         euler_rmse = sqrt(mean(Float64.(residuals) .^ 2))
                     end
                 end

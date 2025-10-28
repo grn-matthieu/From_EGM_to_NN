@@ -17,8 +17,7 @@ module ProjectionKernel
 
 using ..Chebyshev: chebyshev_basis, gauss_lobatto_nodes
 using ..ProjectionCoefficients: solve_coefficients, solve_coefficients_lm
-using ..EulerResiduals:
-    euler_resid_det, euler_resid_stoch, euler_resid_det_grid, euler_resid_stoch_grid
+using ..EulerResiduals: euler_resid, euler_resid_grid
 using ..CommonInterp: interp_pchip!
 using ..GridHelpers: fit_values_on_backend!, eval_backend_at_points, grid_backend_available
 using ..PolicyUtils:
@@ -167,7 +166,7 @@ function solve_projection_det(
             @. a_next = clamp(R * a_grid + income - c, a_min, a_max)
             B_val_temp = chebyshev_basis(a_val, order, a_min, a_max)
             c_val_temp = B_val_temp * coeffs
-            resid_val_temp = euler_resid_det_grid(model_params, a_val, c_val_temp)
+            resid_val_temp = euler_resid_grid(model_params, a_val, c_val_temp)
             a_next_val_temp = clamp.(R .* a_val .+ income .- c_val_temp, a_min, a_max)
             euler_rmse_val =
                 rmse_nonbinding(resid_val_temp, a_next_val_temp, a_min, bind_tol)
@@ -197,7 +196,7 @@ function solve_projection_det(
         @. a_next = clamp(R * a_grid + income - c, a_min, a_max)
         B_val = B_val_cache[:, 1:(order+1)]
         c_val = B_val * coeffs
-        resid_val = euler_resid_det_grid(model_params, a_val, c_val)
+        resid_val = euler_resid_grid(model_params, a_val, c_val)
         a_next_val = clamp.(R .* a_val .+ income .- c_val, a_min, a_max)
         euler_rmse_val = rmse_nonbinding(resid_val, a_next_val, a_min, bind_tol)
 
@@ -206,7 +205,7 @@ function solve_projection_det(
             best_coeffs = coeffs
             best_c = copy(c)
             best_a_next = copy(a_next)
-            best_resid = euler_resid_det_grid(model_params, a_grid, c)
+            best_resid = euler_resid_grid(model_params, a_grid, c)
             best_euler_rmse = rmse_nonbinding(best_resid, best_a_next, a_min, bind_tol)
             best_iters = iters
             best_converged = converged
@@ -229,7 +228,7 @@ function solve_projection_det(
         end
     end
     a_next_out = clamp.(R .* a_out .+ income .- c_out, a_min, a_max)
-    resid_out = euler_resid_det_grid(model_params, a_out, c_out)
+    resid_out = euler_resid_grid(model_params, a_out, c_out)
     euler_rmse_out = rmse_nonbinding(resid_out, a_next_out, a_min, bind_tol)
 
     runtime = (time_ns() - start_time) / 1e9
@@ -414,7 +413,7 @@ function solve_projection_stoch(
             delta = maximum(abs.(c_new .- c))
             last_delta = delta
             c .= c_new
-            resid_mat = euler_resid_stoch_grid(model_params, a_grid, z_grid, transition, c)
+            resid_mat = euler_resid_grid(model_params, a_grid, z_grid, transition, c)
             max_resid = rmse_nonbinding(resid_mat, a_next, a_min, bind_tol)
 
             push!(rmse_history, max_resid)
@@ -446,7 +445,7 @@ function solve_projection_stoch(
 
         B_val = B_val_cache[:, 1:(order+1)]
         c_val = B_val * coeffs
-        resid_val = euler_resid_stoch_grid(model_params, a_val, z_grid, transition, c_val)
+        resid_val = euler_resid_grid(model_params, a_val, z_grid, transition, c_val)
         a_next_val = similar(c_val)
         for j = 1:Nz
             income = exp(z_grid[j])
@@ -460,7 +459,7 @@ function solve_projection_stoch(
             best_coeffs = coeffs
             best_c = copy(c)
             best_a_next = copy(a_next)
-            best_resid = euler_resid_stoch_grid(model_params, a_grid, z_grid, transition, c)
+            best_resid = euler_resid_grid(model_params, a_grid, z_grid, transition, c)
             best_euler_rmse = rmse_nonbinding(best_resid, best_a_next, a_min, bind_tol)
             best_iters = iters
             best_converged = converged
@@ -492,7 +491,7 @@ function solve_projection_stoch(
         @views @. a_next_out[:, j] = clamp(R * a_out + income - c_out[:, j], a_min, a_max)
     end
 
-    resid_out = euler_resid_stoch_grid(model_params, a_out, z_grid, transition, c_out)
+    resid_out = euler_resid_grid(model_params, a_out, z_grid, transition, c_out)
     euler_rmse_out = rmse_nonbinding(resid_out, a_next_out, a_min, bind_tol)
 
     runtime = (time_ns() - start_time) / 1e9

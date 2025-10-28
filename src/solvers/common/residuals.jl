@@ -11,9 +11,9 @@ using ..API
 using Zygote
 using ChainRulesCore: ignore_derivatives
 
-export euler_resid_det, euler_resid_stoch
-export euler_resid_det!, euler_resid_stoch!
-export euler_resid_det_grid, euler_resid_stoch_grid
+export euler_resid
+export euler_resid!
+export euler_resid_grid
 export euler_resid_stoch_interp!
 
 # helpers
@@ -21,16 +21,16 @@ export euler_resid_stoch_interp!
 @inline _eps(::Type{T}) where {T<:AbstractFloat} = T(1e-12)
 
 # -------------------------
-# Deterministic (pure, AD-safe)
+# Pure, AD-safe residuals
 # -------------------------
 
 """
-    euler_resid_det(params, c, c_next)
+    euler_resid(params, c, c_next)
 
-Absolute Euler residuals given current and next consumption.
+Absolute Euler residuals given current and next consumption (deterministic case).
 Pure. Zygote-compatible.
 """
-function euler_resid_det(params, c::AbstractVector, c_next::AbstractVector)
+function euler_resid(params, c::AbstractVector, c_next::AbstractVector)
     @assert length(c) == length(c_next)
     T = _T(c, c_next)
     β = T(params.β)
@@ -43,53 +43,12 @@ function euler_resid_det(params, c::AbstractVector, c_next::AbstractVector)
 end
 
 """
-    euler_resid_det(params, a_grid, c)
+    euler_resid(params, a_grid, z_grid, Π, c)
 
-Absolute residuals on asset grid using linear interpolation of c'.
+Absolute Euler residuals on grid with shocks (stochastic case).
 Pure. Zygote-compatible.
 """
-function euler_resid_det_grid(params, a_grid::AbstractVector, c::AbstractVector)
-    @assert length(a_grid) == length(c)
-    T = _T(a_grid, c)
-    R = T(1) + T(params.r)
-    # params may omit `:y` or have it set to `nothing` (e.g., some model configs).
-    rawy = (:y in propertynames(params)) ? getfield(params, :y) : zero(T)
-    rawy = rawy === nothing ? zero(T) : rawy
-    y = T(rawy)
-    ϵ = _eps(T)
-    a = T.(a_grid)
-    cT = T.(c)
-    n = length(a)
-    # compute ap elementwise without mutating existing arrays
-    ap_vals = [clamp(R * a[i] + y - cT[i], first(a), last(a)) for i = 1:n]
-    c_next = [interp_linear(a, cT, ap_i) for ap_i in ap_vals]
-    euler_resid_det(params, cT, c_next)
-end
-
-# Mutating variant (not AD-safe)
-function euler_resid_det!(
-    resid::AbstractVector,
-    params,
-    c::AbstractVector,
-    c_next::AbstractVector,
-)
-    @assert length(resid) == length(c) == length(c_next)
-    β = params.β
-    γ = params.γ
-    R = 1 + params.r
-    @inbounds for i in eachindex(resid)
-        c0 = c[i] <= 1e-12 ? 1e-12 : c[i]
-        c1 = c_next[i] <= 1e-12 ? 1e-12 : c_next[i]
-        resid[i] = abs(1 - β * R * (c0 / c1)^γ)
-    end
-    resid
-end
-ignore_derivatives(() -> euler_resid_det!)
-
-# -------------------------
-# Stochastic (pure, AD-safe)
-# -------------------------
-function euler_resid_stoch(
+function euler_resid(
     params,
     a_grid::AbstractVector,
     z_grid::AbstractVector,
@@ -134,11 +93,80 @@ function euler_resid_stoch(
     reshape(res, Na, Nz)
 end
 
-# Alias for grid-based stochastic residuals
-const euler_resid_stoch_grid = euler_resid_stoch
+"""
+    euler_resid_grid(params, a_grid, c)
 
-# Mutating stochastic (not AD-safe)
-function euler_resid_stoch!(resid::AbstractMatrix, params, a_grid, z_grid, Π, c)
+Absolute residuals on asset grid using linear interpolation of c' (deterministic case).
+Pure. Zygote-compatible.
+"""
+function euler_resid_grid(params, a_grid::AbstractVector, c::AbstractVector)
+    @assert length(a_grid) == length(c)
+    T = _T(a_grid, c)
+    R = T(1) + T(params.r)
+    # params may omit `:y` or have it set to `nothing` (e.g., some model configs).
+    rawy = (:y in propertynames(params)) ? getfield(params, :y) : zero(T)
+    rawy = rawy === nothing ? zero(T) : rawy
+    y = T(rawy)
+    ϵ = _eps(T)
+    a = T.(a_grid)
+    cT = T.(c)
+    n = length(a)
+    # compute ap elementwise without mutating existing arrays
+    ap_vals = [clamp(R * a[i] + y - cT[i], first(a), last(a)) for i = 1:n]
+    c_next = [interp_linear(a, cT, ap_i) for ap_i in ap_vals]
+    euler_resid(params, cT, c_next)
+end
+
+"""
+    euler_resid_grid(params, a_grid, z_grid, Π, c)
+
+Absolute residuals on grid with shocks (stochastic case).
+Alias for `euler_resid(params, a_grid, z_grid, Π, c)`.
+Pure. Zygote-compatible.
+"""
+euler_resid_grid(
+    params,
+    a_grid::AbstractVector,
+    z_grid::AbstractVector,
+    Π::AbstractMatrix,
+    c::AbstractMatrix,
+) = euler_resid(params, a_grid, z_grid, Π, c)
+
+# -------------------------
+# Mutating variants (not AD-safe)
+# -------------------------
+
+"""
+    euler_resid!(resid, params, c, c_next)
+
+Mutating deterministic Euler residuals.
+Computes absolute residuals given current and next consumption.
+"""
+function euler_resid!(
+    resid::AbstractVector,
+    params,
+    c::AbstractVector,
+    c_next::AbstractVector,
+)
+    @assert length(resid) == length(c) == length(c_next)
+    β = params.β
+    γ = params.γ
+    R = 1 + params.r
+    @inbounds for i in eachindex(resid)
+        c0 = c[i] <= 1e-12 ? 1e-12 : c[i]
+        c1 = c_next[i] <= 1e-12 ? 1e-12 : c_next[i]
+        resid[i] = abs(1 - β * R * (c0 / c1)^γ)
+    end
+    resid
+end
+
+"""
+    euler_resid!(resid, params, a_grid, z_grid, Π, c)
+
+Mutating stochastic Euler residuals on grid.
+Computes absolute residuals for each (asset, shock) state.
+"""
+function euler_resid!(resid::AbstractMatrix, params, a_grid, z_grid, Π, c)
     Na, Nz = size(c)
     @assert size(resid) == (Na, Nz)
     β = params.β
@@ -160,10 +188,9 @@ function euler_resid_stoch!(resid::AbstractMatrix, params, a_grid, z_grid, Π, c
         end
     end
     resid
-
 end
 
-ignore_derivatives(() -> euler_resid_stoch!)
+ignore_derivatives(() -> euler_resid!)
 
 """
     euler_resid_stoch_interp!(resid, params, a_grid, z_grid, Π, c, interp_kind)
