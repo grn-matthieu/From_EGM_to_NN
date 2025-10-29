@@ -53,11 +53,9 @@ struct TrainingResult
     rmse_history::Vector{Float64}
 end
 
-maybe_to_device(x::Nothing, ::NNSolverSettings) = nothing
-maybe_to_device(x, settings::NNSolverSettings) =
-    settings.use_cuda ? Adapt.adapt(CUDA.CuArray, x) : x
-maybe_to_host(x::Nothing, ::NNSolverSettings) = nothing
-maybe_to_host(x, settings::NNSolverSettings) = settings.use_cuda ? Adapt.adapt(Array, x) : x
+# Device placement helpers are provided by `mixed_precision.jl` (included by
+# the parent `kernel.jl`) and are used throughout the NN kernel. Do not
+# redefine them here to avoid duplication.
 
 function maybe_to_host(state::Lux.Training.TrainState, settings::NNSolverSettings)
     mdl = state.model

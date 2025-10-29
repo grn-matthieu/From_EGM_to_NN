@@ -2,6 +2,8 @@ module NNLosses
 
 import CUDA
 import Zygote
+using Random
+const PARENT = parentmodule(@__MODULE__)
 using ChainRulesCore: ignore_derivatives, AbstractZero
 using LinearAlgebra: I, dot
 using Statistics: mean
@@ -18,8 +20,10 @@ export build_loss_function,
     randn_like,
     fill_like
 
-maybe_to_device(x::Nothing, ::Any) = nothing
-maybe_to_device(x, settings) = settings.use_cuda ? x : x
+# Device placement helpers are defined in `mixed_precision.jl` (included by
+# `kernel.jl`). Loss routines should call `maybe_to_device` / `maybe_to_host`
+# from that central location when they need to move data between host and
+# device.
 
 function randn_like(rng, ref::CUDA.AbstractGPUArray)
     # GPU gaussian noise
@@ -87,14 +91,14 @@ function build_loss_function(
         objective = settings.objective
         # the loss routines return (loss, (st1, aux_namedtuple))
         loss_val, st_pack = if objective == :euler_fb_aio
-            loss_euler_fb_aio!(model, ps, st, X, model_cfg, rng)
+            PARENT.loss_euler_fb_aio!(model, ps, st, X, model_cfg, rng)
         else
             P_full = model_cfg.P
-            is_csvar = P_full.y_dim > 1
+            is_csvar = isdefined(P_full, :y_dim) && P_full.y_dim > 1
             if is_csvar
-                loss_euler_fb_bcmc_csvar!(model, ps, st, X, model_cfg, rng)
+                PARENT.loss_euler_fb_bcmc_csvar!(model, ps, st, X, model_cfg, rng)
             else
-                loss_euler_fb_bcmc_ar1!(model, ps, st, X, model_cfg, rng)
+                PARENT.loss_euler_fb_bcmc_ar1!(model, ps, st, X, model_cfg, rng)
             end
         end
         st1, aux = st_pack

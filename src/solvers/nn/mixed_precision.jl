@@ -5,6 +5,8 @@ Centralises every conversion to `Float32` (and back) so that the main kernel
 remains focused on the training logic.
 """
 
+import CUDA
+import Adapt
 using CUDA: cu
 using Statistics: mean
 using ..CSVarUtils: csvar_component_log_means
@@ -15,9 +17,39 @@ float32_vector(x) = Vector{Float32}(collect(x))
 float32_matrix(x) = Array{Float32}(collect(x))
 float32_loss(x) = Float32(x)
 
-"""Prepare the input batch for Lux by ensuring `Float32` features."""
+"""Prepare the input batch for Lux by ensuring `Float32` features.
+
+This helper centralises the choice of CPU vs GPU representation. Call sites
+should use `prepare_training_batch(X, Val(settings.use_cuda))` so that the
+conversion policy is explicit and reliable.
+"""
 prepare_training_batch(X, ::Val{false}) = Array{Float32}(permutedims(X))
-prepare_training_batch(X, ::Val{true}) = cu(permutedims(X))  # X est déjà Float32
+prepare_training_batch(X, ::Val{true}) = Adapt.adapt(CUDA.CuArray, permutedims(X))
+
+# -- Device / precision helpers -------------------------------------------
+
+"""Move an object to the compute device requested by `settings`.
+
+If `settings.use_cuda` is true the value is adapted to `CUDA.CuArray` using
+`Adapt.adapt`, otherwise the value is returned unchanged. This keeps logic
+around device placement in a single place.
+"""
+maybe_to_device(x::Nothing, ::Any) = nothing
+maybe_to_device(x, settings) =
+    (isdefined(settings, :use_cuda) && settings.use_cuda) ? Adapt.adapt(CUDA.CuArray, x) : x
+
+"""Bring an object back to host (Array) when `settings.use_cuda` is true.
+
+This uses `Adapt.adapt(Array, ...)` to allow converting CuArrays back to CPU
+arrays without copying when unnecessary.
+"""
+maybe_to_host(x::Nothing, ::Any) = nothing
+maybe_to_host(x, settings) =
+    (isdefined(settings, :use_cuda) && settings.use_cuda) ? Adapt.adapt(Array, x) : x
+
+"""Alias: explicit CPU/GPU helpers for clarity in call sites."""
+maybe_to_cpu(x, settings) = maybe_to_host(x, settings)
+maybe_to_gpu(x, settings) = maybe_to_device(x, settings)
 
 # Recursively extract the consumption prediction from various model output
 # shapes. Models (or Lux) sometimes return `(y, state)` tuples and our new

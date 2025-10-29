@@ -123,7 +123,7 @@ function next_assets_from_cash(w, consumption)
     return convert.(T, w) .- consumption
 end
 
-@inline maybe_to_cpu(x, settings) = settings.use_cuda ? Array(x) : x
+# Device helpers are defined in `mixed_precision.jl` (included by kernel.jl)
 
 """Helper to build feature matrix from income and wealth vectors."""
 function build_feature_matrix(y_cpu, w_cpu, component_levels::Vector{Float32})
