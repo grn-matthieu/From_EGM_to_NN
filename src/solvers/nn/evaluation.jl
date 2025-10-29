@@ -441,7 +441,7 @@ function eval_euler_residuals_mc(
     c0 = vec(phi_to_consumption(out[:Φ], w0; min_c = 1.0f-3))
     h = vec(ensure_row(out[:h]))
 
-    μ = Float32(P_resid.y)
+    μ = Float32(log(P_resid.y))
     z0 = log.(y0) .- μ
     ρ = Float32(P.ρ_shock)
     σϵ =
@@ -682,7 +682,7 @@ function eval_euler_residuals_gh(
     out, _ = Lux.apply(model, batch, ps, st)
     c0 = vec(phi_to_consumption(out[:Φ], w0; min_c = 1.0f-3))
 
-    μ = Float32(P_resid.y)
+    μ = Float32(log(P_resid.y))
     z0 = log.(y0) .- μ
     ρ = Float32(P.ρ_shock)
     σϵ =

@@ -66,6 +66,7 @@ solver:
     bcmc_auto_N: false
     bcmc_budget_T: null
     bcmc_update_every: 10
+    resample_every: 1
 
 shocks:
   active: true

@@ -34,6 +34,7 @@ function build_nn_method(cfg::NamedTuple)
         batch = nn_cfg.batch,
         lr = nn_cfg.lr,
         verbose = solver_cfg.verbose,
+        resample_every = nn_cfg.resample_every,
 
         # Architecture: hidden sizes (paper compares 8x8, 16x16, ...)
         hid1 = nn_cfg.hid1,
