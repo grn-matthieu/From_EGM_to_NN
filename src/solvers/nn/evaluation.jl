@@ -24,10 +24,10 @@ struct EvaluationResult
     max_resid::Float64
 end
 
-const CONSUMPTION_FLOOR = 1.0f-8
+const CONSUMPTION_FLOOR = 1.0f-12
 
 const DEFAULT_EVAL_SAMPLES = 8192
-const EVAL_MIN_CONSUMPTION = 1.0f-3
+const EVAL_MIN_CONSUMPTION = 1.0f-12
 @inline function maybe_fit_backend!(a_info, x_points, values)
     grid_backend_available(a_info) || return nothing
     fit_values_on_backend!(a_info, x_points, values)
@@ -413,7 +413,7 @@ function eval_euler_residuals_mc(
     end
 
     out, _ = Lux.apply(model, batch, ps, st)
-    c0 = vec(phi_to_consumption(out[:Φ], w0; min_c = 1.0f-3))
+    c0 = vec(phi_to_consumption(out[:Φ], w0; min_c = EVAL_MIN_CONSUMPTION))
     h = vec(ensure_row(out[:h]))
 
     # Compute log-mean of income (μ) from full params P
@@ -453,7 +453,7 @@ function eval_euler_residuals_mc(
     # Ensure the cash-on-hand passed to phi_to_consumption lives on the same
     # device as the model output.
     w1_dev = maybe_to_device(w1_cpu, settings)
-    c1 = vec(phi_to_consumption(out1[:Φ], w1_dev; min_c = 1.0f-3))
+    c1 = vec(phi_to_consumption(out1[:Φ], w1_dev; min_c = EVAL_MIN_CONSUMPTION))
 
     uprime = U.u_prime
     ratio = @. β * Rg * uprime(c1) / uprime(c0)
@@ -521,7 +521,7 @@ function eval_euler_residuals_mc_csvar(
 
     w0_dev = maybe_to_device(w0_cpu, settings)
     out, _ = Lux.apply(model, batch, ps, st)
-    c0 = vec(phi_to_consumption(out[:Φ], w0_dev; min_c = 1.0f-3))
+    c0 = vec(phi_to_consumption(out[:Φ], w0_dev; min_c = EVAL_MIN_CONSUMPTION))
     h = vec(ensure_row(out[:h]))
 
     c0_cpu = maybe_to_cpu(c0, settings)
@@ -545,7 +545,7 @@ function eval_euler_residuals_mc_csvar(
     X1_dev = maybe_to_device(X1, settings)
     out1, _ = Lux.apply(model, X1_dev, ps, st)
     w1_dev = maybe_to_device(Float32.(w1_cpu), settings)
-    c1 = vec(phi_to_consumption(out1[:Φ], w1_dev; min_c = 1.0f-3))
+    c1 = vec(phi_to_consumption(out1[:Φ], w1_dev; min_c = EVAL_MIN_CONSUMPTION))
     c1_cpu = maybe_to_cpu(c1, settings)
 
     ratio = @. β * Rg * uprime(c1_cpu) / uprime(c0_cpu)
@@ -656,7 +656,7 @@ function eval_euler_residuals_gh(
         w0 = cu(w0)
     end
     out, _ = Lux.apply(model, batch, ps, st)
-    c0 = vec(phi_to_consumption(out[:Φ], w0; min_c = 1.0f-3))
+    c0 = vec(phi_to_consumption(out[:Φ], w0; min_c = EVAL_MIN_CONSUMPTION))
 
     μ = Float32(
         isdefined(P, :y) && P.y isa AbstractVector ? mean(Float64.(collect(P.y))) :
@@ -694,7 +694,7 @@ function eval_euler_residuals_gh(
         out1, _ = Lux.apply(model, X1_dev, ps, st)
 
         w1_dev = maybe_to_device(w1_cpu, settings)
-        c1 = vec(phi_to_consumption(out1[:Φ], w1_dev; min_c = 1.0f-3))
+        c1 = vec(phi_to_consumption(out1[:Φ], w1_dev; min_c = EVAL_MIN_CONSUMPTION))
         EUprime .+= wk .* uprime(c1)
     end
     ratio = @. β * Rg * EUprime / uprime(c0)

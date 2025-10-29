@@ -315,7 +315,7 @@ function loss_euler_fb_aio_ar1!(chain, ps, st, batch, model_cfg, rng)
     uprime = U.u_prime
 
     T = eltype(batch)
-    C_MIN = T(1e-3)
+    C_MIN = T(1e-12)
 
     Rg = one(T) + T(P.r)
     if isdefined(P, :y) && P.y isa AbstractVector
@@ -399,7 +399,7 @@ function loss_euler_fb_aio_csvar!(chain, ps, st, batch, model_cfg, rng)
     uprime = U.u_prime
 
     T = eltype(batch)
-    C_MIN = T(1e-3)
+    C_MIN = T(1e-12)
     feature_dim = size(batch, 1)
     n = size(batch, 2)
 
@@ -482,7 +482,7 @@ function loss_euler_fb_bcmc_ar1!(chain, ps, st, batch, model_cfg, rng; mode = :d
     uprime = U.u_prime
 
     T = eltype(batch)
-    C_MIN = T(1e-3)
+    C_MIN = T(1e-12)
 
     Rg = one(T) + T(P.r)
     if isdefined(P, :y) && P.y isa AbstractVector
@@ -625,7 +625,7 @@ function loss_euler_fb_bcmc_csvar!(chain, ps, st, batch, model_cfg, rng; mode = 
     uprime = U.u_prime
 
     T = eltype(batch)
-    C_MIN = T(1e-3)
+    C_MIN = T(1e-12)
     feature_dim = size(batch, 1)
     n = size(batch, 2)
 

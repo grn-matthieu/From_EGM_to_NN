@@ -304,7 +304,7 @@ function train_consumption_network!(
                     w_batch = cu(w_batch)
                 end
                 w_denorm = ((w_batch .+ 1.0f0) ./ 2.0f0) .* scaler.w_range .+ scaler.w_min
-                current_c = vec(phi_to_consumption(out[:Φ], w_denorm; min_c = 1.0f-3))
+                current_c = vec(phi_to_consumption(out[:Φ], w_denorm; min_c = 1.0f-12))
 
                 # Compute policy update sup-norm if we have previous policy
                 Δ_pol = Inf
