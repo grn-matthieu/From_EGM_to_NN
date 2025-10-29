@@ -23,6 +23,19 @@ using Statistics: mean, quantile
 using LinearAlgebra: cholesky, mul!, Symmetric
 
 include("mixed_precision.jl")
+include("losses.jl")
+using .NNLosses:
+    build_loss_function,
+    flatten_sum_squares,
+    _var_bcmc_given_N,
+    estimate_linearized_components,
+    _shift_features,
+    _shift_eps_state,
+    _shift_s_state,
+    _grad_to_vector,
+    suggest_bcmc_N,
+    randn_like,
+    fill_like
 include("training_loop.jl")
 include("evaluation.jl")
 
