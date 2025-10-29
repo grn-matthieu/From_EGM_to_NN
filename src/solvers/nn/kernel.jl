@@ -194,27 +194,8 @@ function solve_nn(model; opts = nothing, rng = nothing)
     objective_default =
         is_csvar ? :euler_residual : has_shocks ? :euler_fb_aio : :euler_residual
 
-    # If provided w-range misses most of the model's cash-on-hand grid, expand it
-    X_tmp, w_grid_model = det_forward_inputs(G, P)
-    w_lo_cfg = isdefined(opts, :w_min) ? opts.w_min : nothing
-    w_hi_cfg = isdefined(opts, :w_max) ? opts.w_max : nothing
-    use_opts = opts
-    if w_lo_cfg !== nothing && w_hi_cfg !== nothing
-        in_win =
-            (w_grid_model .>= Float32(w_lo_cfg)) .& (w_grid_model .<= Float32(w_hi_cfg))
-        frac = sum(in_win) / max(length(in_win), 1)
-        if frac < 0.8
-            auto_lo = minimum(w_grid_model)
-            auto_hi = maximum(w_grid_model)
-            @info "Expanding NN training w-range to cover grid" cfg =
-                (w_min = w_lo_cfg, w_max = w_hi_cfg) auto =
-                (w_min = auto_lo, w_max = auto_hi) frac_in_window = frac
-            use_opts = merge(opts, (w_min = Float64(auto_lo), w_max = Float64(auto_hi)))
-        end
-    end
-
     settings = solver_settings(
-        use_opts,
+        opts,
         P,
         G,
         S;

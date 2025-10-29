@@ -192,9 +192,9 @@ function evaluate_stochastic(
     Nz = length(z_f32)
     A = repeat(a_f32, inner = Nz)
     Z = repeat(z_f32, outer = Na)
-    μ = Float32(P_resid.y)
+    # Z contains log income deviations from 0, so exp.(Z) gives actual income with mean 1.0
     Rg = 1.0f0 + Float32(P_resid.r)
-    Y = exp.(μ .+ Z)
+    Y = exp.(Z)
     W = settings.use_cuda ? fmap(cu, Rg * A + Y) : Rg * A + Y
 
     if prediction isa NamedTuple
