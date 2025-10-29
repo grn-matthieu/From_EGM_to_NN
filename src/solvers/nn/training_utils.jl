@@ -5,6 +5,7 @@ import Adapt
 import Lux
 import LinearAlgebra: diag, dot, I
 using Printf
+using Statistics: mean, std
 using ..NNLosses: _var_bcmc_given_N, estimate_linearized_components, suggest_bcmc_N
 
 # General-purpose helpers (previously in utils.jl) inserted at top-level so
@@ -108,14 +109,14 @@ function verbose_validation_logging(
         # Get raw network outputs on validation batch
         out, _ = Lux.apply(current_model, val_batch, current_ps, current_st)
         if out isa NamedTuple && isdefined(out, :Φ) && isdefined(out, :h)
-            Φ_vals = maybe_to_cpu(vec(out[:Φ]), settings)
-            h_vals = maybe_to_cpu(vec(out[:h]), settings)
+            Φ_vals = PARENT.maybe_to_cpu(vec(out[:Φ]), settings)
+            h_vals = PARENT.maybe_to_cpu(vec(out[:h]), settings)
 
             # Denormalize to get actual wealth values
             w_norm = val_batch[end, :]
             w_denorm =
-                ((maybe_to_cpu(w_norm, settings) .+ 1.0f0) ./ 2.0f0) .* scaler.w_range .+
-                scaler.w_min
+                ((PARENT.maybe_to_cpu(w_norm, settings) .+ 1.0f0) ./ 2.0f0) .*
+                scaler.w_range .+ scaler.w_min
 
             # Compute actual consumption c = Φ * w
             c_vals = Φ_vals .* w_denorm
