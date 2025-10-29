@@ -12,6 +12,7 @@ using Lux: fmap
 using LinearAlgebra: cholesky, mul!, Symmetric
 using ..CSVarUtils: csvar_income, csvar_component_log_means
 using ..GridHelpers: fit_values_on_backend!, grid_backend_available
+using ..DataNN: generate_dataset, sample_training_features
 
 # Local sigmoid function to avoid NNlib dependency
 @inline sigmoid(x) = 1 / (1 + exp(-x))
@@ -414,17 +415,18 @@ function eval_euler_residuals_mc(
     @assert !(S === nothing) "eval_euler_residuals_mc requires S to be provided"
     @assert !(P === nothing) "eval_euler_residuals_mc requires P to be provided"
 
-    batch, _ = create_training_batch(
+    X_mc, _ = sample_training_features(
         G,
         S,
-        scaler;
+        P_resid;
         mode = :rand,
         nsamples = N,
         rng = rng,
-        P_resid = P_resid,
         settings = settings,
         P = P,
     )
+    normalize_samples!(scaler, X_mc)
+    batch = prepare_training_batch(X_mc, Val(settings.use_cuda))
 
     mean_norm = batch[1, :]
     w_norm = batch[end, :]
@@ -524,17 +526,18 @@ function eval_euler_residuals_mc_csvar(
     @assert !(P === nothing) "eval_euler_residuals_mc_csvar requires P to be provided"
     @assert !(S === nothing) "eval_euler_residuals_mc_csvar requires S to be provided"
 
-    batch, _ = create_training_batch(
+    X_mc, _ = sample_training_features(
         G,
         S,
-        scaler;
+        P_resid;
         mode = :rand,
         nsamples = N,
         rng = rng,
-        P_resid = P_resid,
         settings = settings,
         P = P,
     )
+    normalize_samples!(scaler, X_mc)
+    batch = prepare_training_batch(X_mc, Val(settings.use_cuda))
 
     batch_cpu = maybe_to_cpu(batch, settings)
     mean_vals, comps, w0_cpu = denormalize_feature_batch(scaler, batch_cpu)
@@ -660,17 +663,18 @@ function eval_euler_residuals_gh(
     @assert !(S === nothing) "eval_euler_residuals_gh requires S to be provided"
     @assert !(P === nothing) "eval_euler_residuals_gh requires P to be provided"
 
-    batch, _ = create_training_batch(
+    X_gh, _ = sample_training_features(
         G,
         S,
-        scaler;
+        P_resid;
         mode = :rand,
         nsamples = N,
         rng = rng,
-        P_resid = P_resid,
         settings = settings,
         P = P,
     )
+    normalize_samples!(scaler, X_gh)
+    batch = prepare_training_batch(X_gh, Val(settings.use_cuda))
     mean_norm = batch[1, :]
     w_norm = batch[end, :]
     y0 = ((mean_norm .+ 1.0f0) ./ 2.0f0) .* scaler.mean_range .+ scaler.mean_min

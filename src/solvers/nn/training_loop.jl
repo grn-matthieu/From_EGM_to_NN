@@ -8,7 +8,7 @@ using LinearAlgebra: diag, dot, I
 using Optimisers
 using Statistics: mean, std
 using Printf
-using ..CSVarUtils: csvar_component_log_means
+using ..DataNN: sample_training_features
 
 include("preprocessing.jl")
 
@@ -667,102 +667,6 @@ function suggest_bcmc_N(sigma2_f::Float64, rho_f::Float64, T::Int; N_cap::Int = 
 end
 
 
-function create_training_batch(
-    G,
-    S,
-    scaler::FeatureScaler;
-    mode = :rand,
-    nsamples::Int = 4096,
-    rng::AbstractRNG,
-    P_resid = nothing,
-    settings::Union{NNSolverSettings,Nothing} = nothing,
-    P = nothing,
-)
-
-    base_P = P === nothing ? P_resid : P
-
-    if mode == :full
-        X, _ = generate_dataset(G, S, base_P; mode = :full, rng = rng)
-        normalize_samples!(scaler, X)
-        return prepare_training_batch(X, Val(settings.use_cuda)), size(X, 1)
-    end
-    w_lo = settings.w_min
-    w_hi = settings.w_max
-
-    Rg = 1.0f0 + Float32(P_resid.r)
-    is_csvar = size(base_P.y, 1) > 1
-
-    if is_csvar
-        log_means = csvar_component_log_means(base_P)
-        y_dim = length(log_means)
-        extra_cols = y_dim
-        income_targets =
-            base_P.y isa AbstractVector ? Float64.(collect(base_P.y)) :
-            Float64[Float64(getfield(base_P, :y))]
-        base_income = sum(income_targets)
-        feature_dim = 1 + extra_cols + 1
-    else
-        feature_dim = 2
-        extra_cols = 0
-        base_income = base_P.y
-    end
-
-    mean_vec = Vector{Float32}(undef, nsamples)
-    component_mat =
-        extra_cols > 0 ? Matrix{Float32}(undef, extra_cols, nsamples) :
-        Matrix{Float32}(undef, 1, nsamples)
-    W = Vector{Float32}(undef, nsamples)
-
-    if is_csvar
-        # Gaussian linear process: correlated shocks across y components
-        Σ = Matrix{Float64}(base_P.Σ)
-        chol = cholesky(Symmetric(Σ), check = false).L
-        comps_tmp = Matrix{Float32}(undef, extra_cols, nsamples)
-        @inbounds for i = 1:nsamples
-            ε = randn(rng, Float64, y_dim)
-            y_vec = log_means .+ chol * ε
-            comps_tmp[:, i] .= Float32.(y_vec)
-        end
-        mean_draw = vec(sum(exp.(comps_tmp); dims = 1))
-        W .= rand(rng, Float32, nsamples) .* (w_hi - w_lo) .+ w_lo
-        mean_vec .= mean_draw
-        component_mat .= comps_tmp
-
-    else
-        # Independent draws: scalar Gaussian y, uniform assets a ⇒ W
-        y_draw = exp.(randn(rng, Float32, nsamples))
-
-        # Sample assets, generate w draw and reject out-of-bounds samples
-        filled = 0
-        while filled < nsamples
-            a_draw = rand(rng, Float32, nsamples) .* 3.0f0
-            W_tmp = (1.0f0 + Float32(P.y)) .* a_draw .+ y_draw
-            keep = (W_tmp .>= 0.1f0) .& (W_tmp .<= 3.5f0)
-            k = count(keep)
-            if k > 0
-                idx = findall(keep)
-                take = min(k, nsamples - filled)
-                W[filled+1:filled+take] .= W_tmp[idx[1:take]]
-                mean_vec[filled+1:filled+take] .= y_draw[idx[1:take]]
-                component_mat[1, filled+1:filled+take] .= y_draw[idx[1:take]]
-                filled += take
-            end
-        end
-    end
-
-    X = Matrix{Float32}(undef, nsamples, feature_dim)
-    X[:, 1] .= mean_vec
-    if extra_cols > 0
-        for j = 1:extra_cols
-            X[:, 1+j] .= component_mat[j, :]
-        end
-    end
-    X[:, end] .= W
-    normalize_samples!(scaler, X)
-    batch = prepare_training_batch(X, Val(settings.use_cuda))
-    return batch, nsamples
-end
-
 function select_model(chain, state)
     return isdefined(state, :model) ? getfield(state, :model) : chain
 end
@@ -817,31 +721,33 @@ function train_consumption_network!(
     loss_function = build_loss_function(P_resid, G, S, scaler, settings, rng, model_cfg)
     # draw uniform cash-on-hand samples for the initial training batch
     samples_per_epoch = settings.samples_per_epoch
-    batch, sample_count = create_training_batch(
+    X_train, sample_count = sample_training_features(
         G,
         S,
-        scaler;
+        P_resid;
         mode = :rand,
         nsamples = samples_per_epoch,
         rng = rng,
-        P_resid = P_resid,
         settings = settings,
         P = model_cfg === nothing ? nothing : model_cfg.P,
     )
+    normalize_samples!(scaler, X_train)
+    batch = prepare_training_batch(X_train, Val(settings.use_cuda))
     # create a fixed validation batch for periodic diagnostics (held out)
     val_nsamples = min(4096, sample_count)
     validation_rng = derive_rng(rng, settings.epochs + 1)
-    val_batch, _ = create_training_batch(
+    X_val, _ = sample_training_features(
         G,
         S,
-        scaler;
+        P_resid;
         mode = :rand,
         nsamples = val_nsamples,
         rng = validation_rng,
-        P_resid = P_resid,
         settings = settings,
         P = model_cfg === nothing ? nothing : model_cfg.P,
     )
+    normalize_samples!(scaler, X_val)
+    val_batch = prepare_training_batch(X_val, Val(settings.use_cuda))
     total_samples = size(batch, 2)
     batch_size = compute_batch_size(total_samples, settings.batch_choice)
     if settings.use_cuda
@@ -877,18 +783,18 @@ function train_consumption_network!(
         end
         if epoch % settings.resample_interval == 0
             epoch_rng = derive_rng(rng, epoch)
-            batch, _ = create_training_batch(
+            X_epoch, _ = sample_training_features(
                 G,
                 S,
-                scaler;
+                P_resid;
                 mode = :rand,
                 nsamples = samples_per_epoch,
                 rng = epoch_rng,
-                P_resid = P_resid,
                 settings = settings,
                 P = model_cfg === nothing ? nothing : model_cfg.P,
             )
-            batch = maybe_to_device(batch, settings)
+            normalize_samples!(scaler, X_epoch)
+            batch = prepare_training_batch(X_epoch, Val(settings.use_cuda))
             total_samples = size(batch, 2)
             batch_size = compute_batch_size(total_samples, settings.batch_choice)
             # same rule: force full-batch when stochastic
@@ -1119,21 +1025,19 @@ function train_consumption_network!(
             try
                 # Create/reuse held-out batch for convergence check
                 if convergence_check_batch === nothing
-                    convergence_check_batch, _ = create_training_batch(
+                    X_check, _ = sample_training_features(
                         G,
                         S,
-                        scaler;
+                        P_resid;
                         mode = :rand,
                         nsamples = min(2048, samples_per_epoch),
                         rng = rng,
-                        P_resid = P_resid,
                         settings = settings,
                         P = model_cfg === nothing ? nothing : model_cfg.P,
                     )
-                    if settings.use_cuda
-                        convergence_check_batch =
-                            maybe_to_device(convergence_check_batch, settings)
-                    end
+                    normalize_samples!(scaler, X_check)
+                    convergence_check_batch =
+                        prepare_training_batch(X_check, Val(settings.use_cuda))
                 end
 
                 # Evaluate current policy on held-out grid
