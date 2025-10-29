@@ -8,7 +8,7 @@ module NN
 using ..API
 using Printf
 import ..API: solve
-using ..NNKernel: solve_nn
+using ..NNKernel: solve_nn, solver_settings
 using ..ValueFunction: compute_value_policy
 using ..Determinism: canonicalize_cfg, derive_rng, hash_hex, promote_master_rng
 using ..UtilsDiagnostics: mean_abs_error
@@ -76,8 +76,30 @@ function solve(
 
     master = cfg.random.master_rng
 
+    # Build solver settings at the method layer and pass them to the kernel.
+    # This moves responsibility for extracting/validating options to the
+    # method layer while preserving the kernel's usage of the settings.
+    is_csvar = !isnothing(S) && isdefined(S, :process) && S.process == :gaussian_linear
+    has_shocks = !isnothing(S) && !is_csvar
+    objective_default =
+        is_csvar ? :euler_residual : has_shocks ? :euler_fb_aio : :euler_residual
+
+    settings = solver_settings(
+        method.opts,
+        p,
+        g,
+        S;
+        has_shocks = has_shocks,
+        objective_default = objective_default,
+    )
+
     # Call the NN kernel to solve the model and return the solution struct
-    sol = solve_nn(model; opts = method.opts, rng = derive_rng(master, :nn_kernel))
+    sol = solve_nn(
+        model;
+        opts = method.opts,
+        settings = settings,
+        rng = derive_rng(master, :nn_kernel),
+    )
 
     ee = sol.resid
     ee_vec = ee isa AbstractMatrix ? vec(maximum(ee, dims = 2)) : ee

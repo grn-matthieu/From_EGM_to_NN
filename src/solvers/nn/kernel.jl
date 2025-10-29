@@ -36,11 +36,13 @@ using .NNLosses:
     suggest_bcmc_N,
     randn_like,
     fill_like
+include("training_utils.jl")
+include("settings.jl")
 include("training_loop.jl")
 include("evaluation.jl")
 
 
-export solve_nn
+export solve_nn, solver_settings
 
 const H_ALPHA = 1.0f0
 const EPS_VAR = 1e-12
@@ -190,7 +192,7 @@ function build_options_summary(settings, training_result, runtime)
     )
 end
 
-function solve_nn(model; opts = nothing, rng = nothing)
+function solve_nn(model; opts = nothing, settings = nothing, rng = nothing)
     rng === nothing && error("solve_nn requires a `rng` keyword argument")
     master = promote_master_rng(rng)
     train_rng = derive_rng(master, :train)
@@ -203,19 +205,24 @@ function solve_nn(model; opts = nothing, rng = nothing)
     U = get_utility(model)
 
     start_time = time_ns()
-    is_csvar = !isnothing(S) && isdefined(S, :process) && S.process == :gaussian_linear
-    has_shocks = !isnothing(S) && !is_csvar
-    objective_default =
-        is_csvar ? :euler_residual : has_shocks ? :euler_fb_aio : :euler_residual
+    # If no settings were provided by the caller (backwards compat), build
+    # them here using the same heuristics as before. New preferred flow is
+    # for the method layer to construct and pass `settings`.
+    if settings === nothing
+        is_csvar = !isnothing(S) && isdefined(S, :process) && S.process == :gaussian_linear
+        has_shocks = !isnothing(S) && !is_csvar
+        objective_default =
+            is_csvar ? :euler_residual : has_shocks ? :euler_fb_aio : :euler_residual
 
-    settings = solver_settings(
-        opts,
-        P,
-        G,
-        S;
-        has_shocks = has_shocks,
-        objective_default = objective_default,
-    )
+        settings = solver_settings(
+            opts,
+            P,
+            G,
+            S;
+            has_shocks = has_shocks,
+            objective_default = objective_default,
+        )
+    end
     scaler = FeatureScaler(P, G, S, settings)
 
     chain = build_dual_head_network(nn_input_dimension(P), settings.hidden_sizes)
