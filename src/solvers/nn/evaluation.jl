@@ -12,7 +12,7 @@ using Lux: fmap
 using LinearAlgebra: cholesky, mul!, Symmetric
 using ..CSVarUtils: csvar_income, csvar_component_log_means
 using ..GridHelpers: fit_values_on_backend!, grid_backend_available
-using ..DataNN: generate_dataset, sample_training_features
+using ..DataNN: sample_training
 
 # Local sigmoid function to avoid NNlib dependency
 @inline sigmoid(x) = 1 / (1 + exp(-x))
@@ -182,7 +182,7 @@ function evaluate_stochastic(
     U,
     rng::AbstractRNG,
 )
-    X_eval, _ = generate_dataset(G, S, P; mode = :full, rng = rng)
+    X_eval, _ = sample_training(G, S, P; mode = :full, rng = rng)
     normalize_samples!(scaler, X_eval)
     batch = prepare_training_batch(X_eval, Val(settings.use_cuda))
     prediction = run_model(model, params, states, batch)
@@ -415,7 +415,7 @@ function eval_euler_residuals_mc(
     @assert !(S === nothing) "eval_euler_residuals_mc requires S to be provided"
     @assert !(P === nothing) "eval_euler_residuals_mc requires P to be provided"
 
-    X_mc, _ = sample_training_features(
+    X_mc, _ = sample_training(
         G,
         S,
         P_resid;
@@ -526,7 +526,7 @@ function eval_euler_residuals_mc_csvar(
     @assert !(P === nothing) "eval_euler_residuals_mc_csvar requires P to be provided"
     @assert !(S === nothing) "eval_euler_residuals_mc_csvar requires S to be provided"
 
-    X_mc, _ = sample_training_features(
+    X_mc, _ = sample_training(
         G,
         S,
         P_resid;
@@ -663,7 +663,7 @@ function eval_euler_residuals_gh(
     @assert !(S === nothing) "eval_euler_residuals_gh requires S to be provided"
     @assert !(P === nothing) "eval_euler_residuals_gh requires P to be provided"
 
-    X_gh, _ = sample_training_features(
+    X_gh, _ = sample_training(
         G,
         S,
         P_resid;

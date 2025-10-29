@@ -8,7 +8,7 @@ using LinearAlgebra: diag, dot, I
 using Optimisers
 using Statistics: mean, std
 using Printf
-using ..DataNN: sample_training_features
+using ..DataNN: sample_training
 
 include("preprocessing.jl")
 
@@ -508,7 +508,7 @@ function train_consumption_network!(
     loss_function = build_loss_function(P_resid, G, S, scaler, settings, rng, model_cfg)
     # draw uniform cash-on-hand samples for the initial training batch
     samples_per_epoch = settings.samples_per_epoch
-    X_train, sample_count = sample_training_features(
+    X_train, sample_count = sample_training(
         G,
         S,
         P_resid;
@@ -523,7 +523,7 @@ function train_consumption_network!(
     # create a fixed validation batch for periodic diagnostics (held out)
     val_nsamples = min(4096, sample_count)
     validation_rng = derive_rng(rng, settings.epochs + 1)
-    X_val, _ = sample_training_features(
+    X_val, _ = sample_training(
         G,
         S,
         P_resid;
@@ -570,7 +570,7 @@ function train_consumption_network!(
         end
         if epoch % settings.resample_interval == 0
             epoch_rng = derive_rng(rng, epoch)
-            X_epoch, _ = sample_training_features(
+            X_epoch, _ = sample_training(
                 G,
                 S,
                 P_resid;
@@ -812,7 +812,7 @@ function train_consumption_network!(
             try
                 # Create/reuse held-out batch for convergence check
                 if convergence_check_batch === nothing
-                    X_check, _ = sample_training_features(
+                    X_check, _ = sample_training(
                         G,
                         S,
                         P_resid;
