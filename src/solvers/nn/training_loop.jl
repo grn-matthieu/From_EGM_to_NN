@@ -63,43 +63,11 @@ struct TrainingResult
     rmse_history::Vector{Float64}
 end
 
-# Device placement helpers are provided by `mixed_precision.jl` (included by
-# the parent `kernel.jl`) and are used throughout the NN kernel. Do not
-# redefine them here to avoid duplication.
-
-function maybe_to_host(state::Lux.Training.TrainState, settings::NNSolverSettings)
-    mdl = state.model
-    ps = state_parameters(state)
-    st = state_states(state)
-    return (
-        model = mdl,
-        parameters = maybe_to_host(ps, settings),
-        states = maybe_to_host(st, settings),
-    )
-end
 
 # Loss / noise helpers moved to `losses.jl` (NNLosses). Those symbols are
 # imported into this module scope via `kernel.jl` so they are available here.
 
 
-get_option(opts, key::Symbol, default) =
-    isdefined(opts, key) ? getfield(opts, key) : default
-
-const CUDA_OBJECTIVES = (:euler_fb_aio, :euler_fb_bcmc)
-
-function detect_cuda_preference(objective, opts)
-    requested = opts[:use_cuda]
-    if requested
-        try
-            CUDA.functional()
-        catch
-            @warn "CUDA requested but CUDA.jl is not functional. Falling back to CPU." use_cuda =
-                false
-            return false
-        end
-        return requested
-    end
-end
 
 function solver_settings(
     opts,
@@ -285,10 +253,6 @@ end
 
 
 
-function compute_batch_size(total_samples::Int, choice::Union{Nothing,Int})
-    return isnothing(choice) ? max(total_samples, 1) :
-           clamp(choice, 1, max(total_samples, 1))
-end
 
 
 # Loss builder and FB objective dispatchers were moved to `losses.jl` as
@@ -303,38 +267,10 @@ end
 
 
 
-function select_model(chain, state)
-    return isdefined(state, :model) ? getfield(state, :model) : chain
-end
-
-function state_parameters(state)
-    if isdefined(state, :parameters)
-        return getfield(state, :parameters)
-    elseif isdefined(state, :params)
-        return getfield(state, :params)
-    else
-        return nothing
-    end
-end
-
-function state_states(state)
-    if isdefined(state, :states)
-        return getfield(state, :states)
-    elseif isdefined(state, :state)
-        return getfield(state, :state)
-    else
-        return nothing
-    end
-end
-
-function run_model(model, params, states, X)
-    # Call the model (Lux may call with or without params/states). If the
-    # model returns a Tuple like `(prediction, state)` unwrap and return the
-    # prediction (first element) to maintain backwards compatibility with
-    # callers that expect the raw prediction array.
-    out = params === nothing ? model(X) : model(X, params, states)
-    return out isa Tuple ? out[1] : out
-end
+# General-purpose helpers (option parsing, state accessors, small wrappers)
+# have been moved to `utils.jl` to keep the training loop focused on the
+# optimization flow. They are included into the `NNKernel` module so they
+# remain available here.
 
 function train_consumption_network!(
     chain,
@@ -696,146 +632,17 @@ function train_consumption_network!(
                     (val_batch,),
                 )
 
-                # Add detailed network output diagnostics
-                try
-                    current_model = select_model(chain, train_state)
-                    current_ps = state_parameters(train_state)
-                    current_st = state_states(train_state)
-
-                    # Get raw network outputs on validation batch
-                    out, _ = Lux.apply(current_model, val_batch, current_ps, current_st)
-                    if out isa NamedTuple && isdefined(out, :Φ) && isdefined(out, :h)
-                        Φ_vals = maybe_to_cpu(vec(out[:Φ]), settings)
-                        h_vals = maybe_to_cpu(vec(out[:h]), settings)
-
-                        # Denormalize to get actual wealth values
-                        w_norm = val_batch[end, :]
-                        w_denorm =
-                            ((maybe_to_cpu(w_norm, settings) .+ 1.0f0) ./ 2.0f0) .*
-                            scaler.w_range .+ scaler.w_min
-
-                        # Compute actual consumption c = Φ * w
-                        c_vals = Φ_vals .* w_denorm
-                        c_over_w = c_vals ./ w_denorm
-
-                        # Compute statistics
-                        phi_stats = (
-                            min = minimum(Φ_vals),
-                            mean = mean(Φ_vals),
-                            max = maximum(Φ_vals),
-                            std = std(Φ_vals),
-                        )
-                        h_stats = (
-                            min = minimum(h_vals),
-                            mean = mean(h_vals),
-                            max = maximum(h_vals),
-                            std = std(h_vals),
-                        )
-                        c_stats = (
-                            min = minimum(c_vals),
-                            mean = mean(c_vals),
-                            max = maximum(c_vals),
-                        )
-                        w_stats = (
-                            min = minimum(w_denorm),
-                            mean = mean(w_denorm),
-                            max = maximum(w_denorm),
-                        )
-                        c_w_stats = (
-                            min = minimum(c_over_w),
-                            mean = mean(c_over_w),
-                            max = maximum(c_over_w),
-                        )
-
-                        # Count violations (should be impossible but let's check)
-                        n_phi_bad = count(x -> x < 0 || x > 1, Φ_vals)
-                        n_h_bad = count(x -> x <= 0, h_vals)
-                        n_c_over_w = count(x -> x > 1.0, c_over_w)
-
-                        @printf "[DIAG] Epoch %4d Network Outputs:\n" epoch
-                        @printf "  Φ ∈ [%.6f, %.6f] mean=%.6f std=%.6f (violations: %d)\n" phi_stats.min phi_stats.max phi_stats.mean phi_stats.std n_phi_bad
-                        @printf "  h ∈ [%.6f, %.6f] mean=%.6f std=%.6f (violations: %d)\n" h_stats.min h_stats.max h_stats.mean h_stats.std n_h_bad
-                        @printf "  c ∈ [%.4f, %.4f] mean=%.4f\n" c_stats.min c_stats.max c_stats.mean
-                        @printf "  w ∈ [%.4f, %.4f] mean=%.4f\n" w_stats.min w_stats.max w_stats.mean
-                        @printf "  c/w ∈ [%.6f, %.6f] mean=%.6f (c>w violations: %d)\n" c_w_stats.min c_w_stats.max c_w_stats.mean n_c_over_w
-                    end
-                catch diag_err
-                    @warn "Network output diagnostics failed" error = diag_err
-                end
-
-                if :fb in keys(val_diag)
-                    aux = val_diag.fb
-                    try
-                        if settings.objective === :euler_fb_bcmc
-                            bcmc_val =
-                                isdefined(aux, :bcmc_mean) ? getfield(aux, :bcmc_mean) : NaN
-                            n_eff = isdefined(aux, :n_eff) ? getfield(aux, :n_eff) : missing
-                            if isdefined(aux, :gvar_mean)
-                                if n_eff === missing
-                                    @printf(
-                                        "[VAL] Epoch %4d: kt_mean=%.6g bcmc_mean=%.6g gvar=%.6g max_abs_q=%.6g\n",
-                                        epoch,
-                                        aux.kt_mean,
-                                        bcmc_val,
-                                        getfield(aux, :gvar_mean),
-                                        aux.max_abs_q,
-                                    )
-                                else
-                                    @printf(
-                                        "[VAL] Epoch %4d: kt_mean=%.6g bcmc_mean=%.6g gvar=%.6g N=%.0f max_abs_q=%.6g\n",
-                                        epoch,
-                                        aux.kt_mean,
-                                        bcmc_val,
-                                        getfield(aux, :gvar_mean),
-                                        Float64(n_eff),
-                                        aux.max_abs_q,
-                                    )
-                                end
-                            else
-                                if n_eff === missing
-                                    @printf(
-                                        "[VAL] Epoch %4d: kt_mean=%.6g bcmc_mean=%.6g max_abs_q=%.6g\n",
-                                        epoch,
-                                        aux.kt_mean,
-                                        bcmc_val,
-                                        aux.max_abs_q,
-                                    )
-                                else
-                                    @printf(
-                                        "[VAL] Epoch %4d: kt_mean=%.6g bcmc_mean=%.6g N=%.0f max_abs_q=%.6g\n",
-                                        epoch,
-                                        aux.kt_mean,
-                                        bcmc_val,
-                                        Float64(n_eff),
-                                        aux.max_abs_q,
-                                    )
-                                end
-                            end
-                        else
-                            # Default to AiO-style logging when active or when bcmc fields missing
-                            aio_val =
-                                isdefined(aux, :aio_mean) ? getfield(aux, :aio_mean) : NaN
-                            @printf(
-                                "[VAL] Epoch %4d: kt_mean=%.6g aio_mean=%.6g max_abs_q=%.6g\n",
-                                epoch,
-                                aux.kt_mean,
-                                aio_val,
-                                aux.max_abs_q,
-                            )
-                        end
-                    catch
-                        @printf(
-                            "[VAL] Epoch %4d: diagnostics present but failed to print (missing fields)\n",
-                            epoch
-                        )
-                    end
-                else
-                    @printf(
-                        "[VAL] Epoch %4d: validation loss=%.6g (no FB diagnostics)\n",
-                        epoch,
-                        val_loss
-                    )
-                end
+                # Delegate verbose printing to shared helper
+                verbose_validation_logging(
+                    epoch,
+                    settings,
+                    chain,
+                    train_state,
+                    val_batch,
+                    scaler,
+                    val_loss,
+                    val_diag,
+                )
             catch err
                 @warn "Validation logging failed" error = err
             end
