@@ -51,15 +51,7 @@ function fill_like(value, ref)
     end
 end
 
-function build_loss_function(
-    P_resid,
-    G,
-    S,
-    scaler,
-    settings,
-    rng::AbstractRNG,
-    model_cfg = nothing,
-)
+function build_loss_function(G, S, scaler, settings, rng::AbstractRNG, model_cfg = nothing)
     # Validate that objective is one of the supported FB methods
     if settings.objective ∉ (:euler_fb_aio, :euler_fb_bcmc)
         throw(

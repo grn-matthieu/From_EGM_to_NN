@@ -62,7 +62,7 @@ function build_dual_head_network(input_dim::Int, hidden::NTuple{2,Int})
     return Chain(trunk, postprocess)
 end
 
-function build_model_config(P, U, scaler, P_resid, settings)
+function build_model_config(P, U, scaler, settings)
     # Internal adaptive state for bc-MC Auto-N (held in Refs to allow updates)
     bcmc_state = (
         n_eff = Ref(settings.n_mc),
@@ -84,7 +84,6 @@ function build_model_config(P, U, scaler, P_resid, settings)
         v_h = settings.v_h,  # Keep for backwards compat, but use adaptive_v_h_state.v_h[] in loss
         adaptive_v_h_state = adaptive_v_h_state,
         scaler = scaler,
-        P_resid = P_resid,
         settings = settings,
         sigma_shocks = settings.sigma_shocks,
         bcmc_state = bcmc_state,
@@ -95,7 +94,6 @@ function maybe_dense_diagnostics(
     model,
     params,
     states,
-    P_resid,
     U,
     scaler,
     settings;
@@ -126,44 +124,22 @@ function maybe_dense_diagnostics(
     mc_diag = nothing
     gh_diag = nothing
     try
-        mc_diag = fmc(
-            model,
-            params,
-            states,
-            P_resid,
-            U,
-            scaler,
-            settings;
-            G = G,
-            S = S,
-            P = P,
-            rng = rng,
-        )
+        mc_diag =
+            fmc(model, params, states, U, scaler, settings; G = G, S = S, P = P, rng = rng)
     catch err
         if err isa MethodError
-            mc_diag = fmc(model, params, states, P_resid, U, scaler, settings)
+            mc_diag = fmc(model, params, states, U, scaler, settings)
         else
             rethrow()
         end
     end
 
     try
-        gh_diag = fgh(
-            model,
-            params,
-            states,
-            P_resid,
-            U,
-            scaler,
-            settings;
-            G = G,
-            S = S,
-            P = P,
-            rng = rng,
-        )
+        gh_diag =
+            fgh(model, params, states, U, scaler, settings; G = G, S = S, P = P, rng = rng)
     catch err
         if err isa MethodError
-            gh_diag = fgh(model, params, states, P_resid, U, scaler, settings)
+            gh_diag = fgh(model, params, states, U, scaler, settings)
         else
             rethrow()
         end
@@ -227,19 +203,10 @@ function solve_nn(model; opts = nothing, settings = nothing, rng = nothing)
 
     chain = build_dual_head_network(nn_input_dimension(P), settings.hidden_sizes)
 
-    P_resid = scalar_params(P)
-    model_cfg = build_model_config(P, U, scaler, P_resid, settings)
+    model_cfg = build_model_config(P, U, scaler, settings)
 
-    training_result = train_consumption_network!(
-        chain,
-        settings,
-        scaler,
-        P_resid,
-        G,
-        S,
-        train_rng,
-        model_cfg,
-    )
+    training_result =
+        train_consumption_network!(chain, settings, scaler, G, S, train_rng, model_cfg)
 
     best_state = training_result.best_state
     trained_model = select_model(chain, best_state)
@@ -253,7 +220,6 @@ function solve_nn(model; opts = nothing, settings = nothing, rng = nothing)
         trained_model,
         params,
         states,
-        P_resid,
         P,
         G,
         S,
@@ -271,7 +237,6 @@ function solve_nn(model; opts = nothing, settings = nothing, rng = nothing)
         trained_model,
         params,
         states,
-        P_resid,
         U,
         scaler,
         settings;
@@ -346,7 +311,6 @@ function loss_euler_fb_aio_ar1!(chain, ps, st, batch, model_cfg, rng)
     P = model_cfg.P
     U = model_cfg.U
     scaler = model_cfg.scaler
-    P_resid = model_cfg.P_resid
     settings = model_cfg.settings
     uprime = U.u_prime
 
@@ -354,7 +318,11 @@ function loss_euler_fb_aio_ar1!(chain, ps, st, batch, model_cfg, rng)
     C_MIN = T(1e-3)
 
     Rg = one(T) + T(P.r)
-    μ = T(P_resid.y)
+    if isdefined(P, :y) && P.y isa AbstractVector
+        μ = T(mean(Float64.(collect(P.y))))
+    else
+        μ = T(P.y)
+    end
     feature_dim = size(batch, 1)
     mean_norm = batch[1, :]
     w_norm = batch[end, :]
@@ -427,7 +395,6 @@ function loss_euler_fb_aio_csvar!(chain, ps, st, batch, model_cfg, rng)
     P = model_cfg.P
     U = model_cfg.U
     scaler = model_cfg.scaler
-    P_resid = model_cfg.P_resid
     settings = model_cfg.settings
     uprime = U.u_prime
 
@@ -511,7 +478,6 @@ function loss_euler_fb_bcmc_ar1!(chain, ps, st, batch, model_cfg, rng; mode = :d
     P = model_cfg.P
     U = model_cfg.U
     scaler = model_cfg.scaler
-    P_resid = model_cfg.P_resid
     settings = model_cfg.settings
     uprime = U.u_prime
 
@@ -519,7 +485,11 @@ function loss_euler_fb_bcmc_ar1!(chain, ps, st, batch, model_cfg, rng; mode = :d
     C_MIN = T(1e-3)
 
     Rg = one(T) + T(P.r)
-    μ = T(P_resid.y)
+    if isdefined(P, :y) && P.y isa AbstractVector
+        μ = T(mean(Float64.(collect(P.y))))
+    else
+        μ = T(P.y)
+    end
     feature_dim = size(batch, 1)
     state_count = size(batch, 2)
 

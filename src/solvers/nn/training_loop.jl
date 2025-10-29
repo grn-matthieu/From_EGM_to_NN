@@ -37,40 +37,16 @@ struct TrainingResult
     rmse_history::Vector{Float64}
 end
 
-# Loss / noise helpers moved to `losses.jl` (NNLosses). Those symbols are
-# imported into this module scope via `kernel.jl` so they are available here.
 
 function build_network(input_dim::Int, settings::NNSolverSettings)
     h1, h2 = settings.hidden_sizes
     return Chain(Dense(input_dim, h1, relu), Dense(h1, h2, relu), Dense(h2, 1, softplus))
 end
 
-
-
-
-
-# Loss builder and FB objective dispatchers were moved to `losses.jl` as
-# the `NNLosses` module. Symbols are imported by `kernel.jl` so they're
-# available in this scope.
-
-
-# Loss-related helpers (flatten_sum_squares, variance estimators, linearized
-# component estimators and small feature-shift helpers) were moved to
-# `losses.jl` (module `NNLosses`). They are imported into the containing
-# module namespace by `kernel.jl` so they remain available here.
-
-
-
-# General-purpose helpers (option parsing, state accessors, small wrappers)
-# have been moved to `utils.jl` to keep the training loop focused on the
-# optimization flow. They are included into the `NNKernel` module so they
-# remain available here.
-
 function train_consumption_network!(
     chain,
     settings::NNSolverSettings,
     scaler::FeatureScaler,
-    P_resid,
     G,
     S,
     rng::AbstractRNG,
@@ -84,13 +60,12 @@ function train_consumption_network!(
     opt = create_optimizer(settings)
     train_state = Lux.Training.TrainState(chain, ps, st, opt)
     # build loss with scaler so we can compute cash-on-hand inside the loss
-    loss_function = build_loss_function(P_resid, G, S, scaler, settings, rng, model_cfg)
+    loss_function = build_loss_function(G, S, scaler, settings, rng, model_cfg)
     # draw uniform cash-on-hand samples for the initial training batch
     samples_per_epoch = settings.samples_per_epoch
     X_train, sample_count = sample_training(
         G,
-        S,
-        P_resid;
+        S;
         mode = :rand,
         nsamples = samples_per_epoch,
         rng = rng,
@@ -104,8 +79,7 @@ function train_consumption_network!(
     validation_rng = derive_rng(rng, settings.epochs + 1)
     X_val, _ = sample_training(
         G,
-        S,
-        P_resid;
+        S;
         mode = :rand,
         nsamples = val_nsamples,
         rng = validation_rng,
@@ -151,8 +125,7 @@ function train_consumption_network!(
             epoch_rng = derive_rng(rng, epoch)
             X_epoch, _ = sample_training(
                 G,
-                S,
-                P_resid;
+                S;
                 mode = :rand,
                 nsamples = samples_per_epoch,
                 rng = epoch_rng,
@@ -303,8 +276,7 @@ function train_consumption_network!(
                 if convergence_check_batch === nothing
                     X_check, _ = sample_training(
                         G,
-                        S,
-                        P_resid;
+                        S;
                         mode = :rand,
                         nsamples = min(2048, samples_per_epoch),
                         rng = rng,
@@ -357,7 +329,6 @@ function train_consumption_network!(
                             current_model,
                             current_ps,
                             current_st,
-                            P_resid,
                             model_cfg.U,
                             scaler,
                             settings;
@@ -380,24 +351,25 @@ function train_consumption_network!(
                     catch err
                         # If GH evaluation fails for any reason, fall back to
                         # grid residuals when possible.
-                        if isdefined(P_resid, :a) && isdefined(model_cfg.G, :a)
+                        if isdefined(model_cfg.P, :a) && isdefined(model_cfg.G, :a)
                             a_grid_f32 = Float32.(model_cfg.G.a.grid)
                             c_pred_vec_f32 = current_c[1:length(a_grid_f32)]
                             residuals =
-                                euler_resid_grid(P_resid, a_grid_f32, c_pred_vec_f32)
+                                euler_resid_grid(model_cfg.P, a_grid_f32, c_pred_vec_f32)
                             euler_rmse = sqrt(mean(Float64.(residuals) .^ 2))
                         end
                     end
                 else
                     # Fallback for older configs that may not provide full
                     # stochastic fields: use grid residuals when available.
-                    if isdefined(P_resid, :a) &&
+                    if isdefined(model_cfg.P, :a) &&
                        model_cfg !== nothing &&
                        isdefined(model_cfg, :G) &&
                        isdefined(model_cfg.G, :a)
                         a_grid_f32 = Float32.(model_cfg.G.a.grid)
                         c_pred_vec_f32 = current_c[1:length(a_grid_f32)]
-                        residuals = euler_resid_grid(P_resid, a_grid_f32, c_pred_vec_f32)
+                        residuals =
+                            euler_resid_grid(model_cfg.P, a_grid_f32, c_pred_vec_f32)
                         euler_rmse = sqrt(mean(Float64.(residuals) .^ 2))
                     end
                 end

@@ -69,11 +69,11 @@ end
     return value^(-gamma)
 end
 
-function get_uprime(U, P_resid)
+function get_uprime(U, P)
     if U !== nothing && isdefined(U, :u_prime)
         return U.u_prime
     else
-        γ = Float64(P_resid.γ)
+        γ = Float64(P.γ)
         return c -> max.(c, 1e-8) .^ (-γ)
     end
 end
@@ -153,7 +153,6 @@ function evaluate_stochastic(
     model,
     params,
     states,
-    P_resid,
     P,
     G,
     S,
@@ -162,7 +161,7 @@ function evaluate_stochastic(
     U,
     rng::AbstractRNG,
 )
-    X_eval, _ = sample_training(G, S, P; mode = :full, rng = rng)
+    X_eval, _ = sample_training(G, S; mode = :full, rng = rng, P = P)
     normalize_samples!(scaler, X_eval)
     batch = prepare_training_batch(X_eval, Val(settings.use_cuda))
     prediction = run_model(model, params, states, batch)
@@ -174,7 +173,7 @@ function evaluate_stochastic(
     A = repeat(a_f32, inner = Nz)
     Z = repeat(z_f32, outer = Na)
     # Z contains log income deviations from 0, so exp.(Z) gives actual income with mean 1.0
-    Rg = 1.0f0 + Float32(P_resid.r)
+    Rg = 1.0f0 + Float32(P.r)
     Y = exp.(Z)
     W = settings.use_cuda ? fmap(cu, Rg * A + Y) : Rg * A + Y
 
@@ -187,7 +186,7 @@ function evaluate_stochastic(
             stoch_residual_inputs(prediction, G, S)
     end
 
-    residuals = euler_resid_grid(P_resid, a_grid_f32, z_grid_f32, Pz_f32, c_matrix_f32)
+    residuals = euler_resid_grid(P, a_grid_f32, z_grid_f32, Pz_f32, c_matrix_f32)
     c_on_grid = convert_to_grid_eltype(G[:a].grid, c_matrix)
     w_matrix = reshape(W, Na, Nz)
     a_next = next_assets_from_cash(w_matrix, c_on_grid)
@@ -202,7 +201,6 @@ function evaluate_csvar(
     model,
     params,
     states,
-    P_resid,
     P,
     G,
     S,
@@ -217,7 +215,7 @@ function evaluate_csvar(
 
     a_grid_f32 = float32_vector(G[:a].grid)
     Na = length(a_grid_f32)
-    Rg = 1.0f0 + Float32(P_resid.r)
+    Rg = 1.0f0 + Float32(P.r)
     income_curr = Float32(csvar_income(y_state))
 
     feature_dim = y_dim + 2
@@ -249,8 +247,8 @@ function evaluate_csvar(
     a_next = clamp_to_asset_bounds(a_next, G[:a])
     maybe_fit_backend!(G[:a], G[:a].grid, reshape(c_on_grid, :, 1))
 
-    uprime = get_uprime(U, P_resid)
-    β = Float32(P_resid.β)
+    uprime = get_uprime(U, P)
+    β = Float32(P.β)
 
     Σ = Matrix{Float64}(P.Σ)
     chol = cholesky(Symmetric(Σ), check = false)
@@ -305,7 +303,6 @@ function evaluate_solution(
     model,
     params,
     states,
-    P_resid,
     P,
     G,
     S,
@@ -330,7 +327,6 @@ function evaluate_solution(
             model,
             params,
             states,
-            P_resid,
             P,
             G,
             S,
@@ -348,7 +344,6 @@ function evaluate_solution(
             model,
             params,
             states,
-            P_resid,
             P,
             G,
             S,
@@ -365,7 +360,6 @@ function eval_euler_residuals_mc(
     model,
     ps,
     st,
-    P_resid,
     U,
     scaler,
     settings;
@@ -380,7 +374,6 @@ function eval_euler_residuals_mc(
             model,
             ps,
             st,
-            P_resid,
             U,
             scaler,
             settings;
@@ -398,8 +391,7 @@ function eval_euler_residuals_mc(
 
     X_mc, _ = sample_training(
         G,
-        S,
-        P_resid;
+        S;
         mode = :rand,
         nsamples = N,
         rng = rng,
@@ -424,7 +416,11 @@ function eval_euler_residuals_mc(
     c0 = vec(phi_to_consumption(out[:Φ], w0; min_c = 1.0f-3))
     h = vec(ensure_row(out[:h]))
 
-    μ = Float32(log(P_resid.y))
+    # Compute log-mean of income (μ) from full params P
+    μ = Float32(
+        isdefined(P, :y) && P.y isa AbstractVector ? mean(Float64.(collect(P.y))) :
+        Float64(P.y),
+    )
     z0 = log.(y0) .- μ
     ρ = Float32(P.ρ_shock)
     σϵ =
@@ -493,7 +489,6 @@ function eval_euler_residuals_mc_csvar(
     model,
     ps,
     st,
-    P_resid,
     U,
     scaler,
     settings;
@@ -509,8 +504,7 @@ function eval_euler_residuals_mc_csvar(
 
     X_mc, _ = sample_training(
         G,
-        S,
-        P_resid;
+        S;
         mode = :rand,
         nsamples = N,
         rng = rng,
@@ -606,7 +600,6 @@ function eval_euler_residuals_gh(
     model,
     ps,
     st,
-    P_resid,
     U,
     scaler,
     settings;
@@ -621,7 +614,6 @@ function eval_euler_residuals_gh(
             model,
             ps,
             st,
-            P_resid,
             U,
             scaler,
             settings;
@@ -646,8 +638,7 @@ function eval_euler_residuals_gh(
 
     X_gh, _ = sample_training(
         G,
-        S,
-        P_resid;
+        S;
         mode = :rand,
         nsamples = N,
         rng = rng,
@@ -667,7 +658,10 @@ function eval_euler_residuals_gh(
     out, _ = Lux.apply(model, batch, ps, st)
     c0 = vec(phi_to_consumption(out[:Φ], w0; min_c = 1.0f-3))
 
-    μ = Float32(log(P_resid.y))
+    μ = Float32(
+        isdefined(P, :y) && P.y isa AbstractVector ? mean(Float64.(collect(P.y))) :
+        Float64(P.y),
+    )
     z0 = log.(y0) .- μ
     ρ = Float32(P.ρ_shock)
     σϵ =

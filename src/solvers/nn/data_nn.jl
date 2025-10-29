@@ -10,25 +10,27 @@ using ..CSVarUtils: csvar_component_log_means
 sample_uniform(rng, n, lo, hi) = rand(rng, Float32, n) .* (hi - lo) .+ lo
 
 """
-    sample_training(G, S, P_resid; mode = :rand, nsamples = 4096, rng = Random.default_rng(), settings = nothing, P = nothing)
+    sample_training(G, S; mode = :rand, nsamples = 4096, rng = Random.default_rng(), settings = nothing, P = nothing)
 
 Unified data generation helper for the NN solver.
 Implements the previous `sample_training_features` behaviour and also
 supports `mode=:full` (replacing the deprecated `generate_dataset`).
 Returns `(X, nsamples)` where `X` is a Float32 matrix with shape
 `(nsamples, n_features)`.
+Requires `P` to be provided via keyword argument.
 """
 function sample_training(
     G,
-    S,
-    P_resid;
+    S;
     mode = :rand,
     nsamples::Int = 4096,
     rng::AbstractRNG = Random.default_rng(),
     settings = nothing,
     P = nothing,
 )
-    base_P = P === nothing ? P_resid : P
+    base_P =
+        P === nothing ?
+        error("sample_training requires parameter container `P` via keyword argument") : P
 
     # Full-mode: construct dataset covering the grid (Na * Nz where applicable)
     if mode === :full
@@ -119,7 +121,7 @@ function sample_training(
     w_lo = Float32(getproperty(settings, :w_min))
     w_hi = Float32(getproperty(settings, :w_max))
 
-    Rg = 1.0f0 + Float32(P_resid.r)
+    Rg = 1.0f0 + Float32(base_P.r)
     is_csvar = size(base_P.y, 1) > 1
 
     if is_csvar
