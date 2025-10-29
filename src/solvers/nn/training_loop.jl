@@ -21,7 +21,14 @@ using .NNTrainUtils:
     learning_rate_for_epoch,
     adjust_learning_rate,
     apply_optimizer_learning_rate!,
-    bcmc_auto_update!
+    bcmc_auto_update!,
+    get_option,
+    compute_batch_size,
+    maybe_to_host,
+    select_model,
+    state_parameters,
+    state_states,
+    run_model
 
 struct NNSolverSettings
     epochs::Int
@@ -548,37 +555,59 @@ function train_consumption_network!(
                 end
                 prev_policy = copy(current_c)
 
-                # Evaluate Euler residuals using GH quadrature (for stochastic) or grid (for deterministic)
+                # Unified Euler residual evaluation: prefer GH-based evaluation
+                # (works for specs that include stochastic fields and for grid-
+                # based evaluations). Fall back to grid residuals if GH
+                # evaluation isn't possible.
                 euler_rmse = Inf
-                if settings.has_shocks &&
+                if model_cfg !== nothing &&
                    G !== nothing &&
                    S !== nothing &&
-                   model_cfg !== nothing &&
+                   isdefined(model_cfg, :P) &&
                    model_cfg.P !== nothing
-                    # Use GH quadrature for stochastic case
-                    gh_result = eval_euler_residuals_gh(
-                        current_model,
-                        current_ps,
-                        current_st,
-                        P_resid,
-                        model_cfg.U,
-                        scaler,
-                        settings;
-                        N = min(2048, samples_per_epoch),
-                        rng = rng,
-                        G = G,
-                        S = S,
-                        P = model_cfg.P,
-                    )
-                    # Compute RMSE of Euler residuals
-                    if isdefined(gh_result, :abs_resid)
-                        euler_rmse = sqrt(mean(Float64.(gh_result.abs_resid) .^ 2))
-                    elseif isdefined(gh_result, :stats) && isdefined(gh_result.stats, :rmse)
-                        euler_rmse = Float64(gh_result.stats.rmse)
+                    try
+                        gh_result = eval_euler_residuals_gh(
+                            current_model,
+                            current_ps,
+                            current_st,
+                            P_resid,
+                            model_cfg.U,
+                            scaler,
+                            settings;
+                            N = min(2048, samples_per_epoch),
+                            rng = rng,
+                            G = G,
+                            S = S,
+                            P = model_cfg.P,
+                        )
+                        # Compute RMSE from returned diagnostics
+                        if isdefined(gh_result, :abs_resid)
+                            euler_rmse = sqrt(mean(Float64.(gh_result.abs_resid) .^ 2))
+                        elseif isdefined(gh_result, :stats) &&
+                               isdefined(gh_result.stats, :rmse)
+                            euler_rmse = Float64(gh_result.stats.rmse)
+                        else
+                            # Keep Inf if diagnostics missing
+                            euler_rmse = Inf
+                        end
+                    catch err
+                        # If GH evaluation fails for any reason, fall back to
+                        # grid residuals when possible.
+                        if isdefined(P_resid, :a) && isdefined(model_cfg.G, :a)
+                            a_grid_f32 = Float32.(model_cfg.G.a.grid)
+                            c_pred_vec_f32 = current_c[1:length(a_grid_f32)]
+                            residuals =
+                                euler_resid_grid(P_resid, a_grid_f32, c_pred_vec_f32)
+                            euler_rmse = sqrt(mean(Float64.(residuals) .^ 2))
+                        end
                     end
                 else
-                    # Deterministic case: use grid-based residuals
-                    if isdefined(P_resid, :a) && isdefined(model_cfg.G, :a)
+                    # Fallback for older configs that may not provide full
+                    # stochastic fields: use grid residuals when available.
+                    if isdefined(P_resid, :a) &&
+                       model_cfg !== nothing &&
+                       isdefined(model_cfg, :G) &&
+                       isdefined(model_cfg.G, :a)
                         a_grid_f32 = Float32.(model_cfg.G.a.grid)
                         c_pred_vec_f32 = current_c[1:length(a_grid_f32)]
                         residuals = euler_resid_grid(P_resid, a_grid_f32, c_pred_vec_f32)

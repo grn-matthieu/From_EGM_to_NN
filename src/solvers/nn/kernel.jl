@@ -274,7 +274,7 @@ function solve_nn(model; opts = nothing, rng = nothing)
         rng = diag_rng,
     )
 
-    _, w_grid = det_forward_inputs(G, P)
+    _, w_grid = grid_forward_inputs(G, P)
 
     return (;
         w_grid = w_grid,

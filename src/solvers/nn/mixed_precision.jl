@@ -66,17 +66,17 @@ function extract_consumption(pred)
 end
 
 """
-Return the `Float32` asset grid and predicted consumption (vectorised) used in
-Euler residual evaluation for the deterministic problem.
+Return the `Float32` asset grid and predicted consumption (vectorised)
+used in Euler/grid residual evaluation on the asset grid.
 """
-function det_residual_inputs(c_predicted, G)
+function grid_residual_inputs(c_predicted, G)
     cp = extract_consumption(c_predicted)
     c_vec = vec(permutedims(cp))
     return float32_vector(G[:a].grid), c_vec, float32_vector(c_vec)
 end
 
-"""Map deterministic residuals to a `Float32` loss value."""
-det_loss(resid) = float32_loss(sum(resid))
+"""Map grid residuals to a `Float32` loss value."""
+grid_loss(resid) = float32_loss(sum(resid))
 
 """
 Return the `Float32` grids and predicted consumption matrix used for the
@@ -113,8 +113,8 @@ end
 """Map stochastic residuals to a `Float32` loss value."""
 stoch_loss(resid) = float32_loss(sum(abs2, resid))
 
-"""Return the `(y, w)` feature grid (and cash-on-hand) for deterministic passes."""
-function det_forward_inputs(G, P_full)
+"""Return the `(y, w)` feature grid (and cash-on-hand) for grid-based evaluation passes."""
+function grid_forward_inputs(G, P_full)
     a_grid_f32 = float32_vector(G[:a].grid)
     Rg = 1.0f0 + Float32(P_full.r)
 

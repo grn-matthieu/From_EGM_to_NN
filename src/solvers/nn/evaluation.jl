@@ -147,27 +147,7 @@ function compute_residual_stats(resid_cpu)
     return (mean = mean(resid_cpu), p50 = p50, p95 = p95, max = maximum(resid_cpu))
 end
 
-function evaluate_deterministic(model, params, states, P_resid, P, G, scaler)
-    X_forward, w_grid = det_forward_inputs(G, P)
-    normalize_feature_batch!(scaler, X_forward)
-    prediction = run_model(model, params, states, X_forward)
 
-    if prediction isa NamedTuple
-        c_row = phi_to_consumption(prediction[:Φ], w_grid; scaler = scaler)
-        a_grid_f32, c_vec, c_vec_f32 = det_residual_inputs(c_row, G)
-    else
-        a_grid_f32, c_vec, c_vec_f32 = det_residual_inputs(prediction, G)
-    end
-
-    residuals = euler_resid_grid(P_resid, a_grid_f32, c_vec_f32)
-    c_on_grid = convert_to_grid_eltype(G[:a].grid, c_vec)
-    a_next = next_assets_from_cash(w_grid, c_on_grid)
-    a_next = clamp_to_asset_bounds(a_next, G[:a])
-    max_resid = maximum(abs.(residuals))
-    maybe_fit_backend!(G[:a], G[:a].grid, reshape(c_on_grid, :, 1))
-
-    return EvaluationResult(c_on_grid, a_next, residuals, max_resid)
-end
 
 function evaluate_stochastic(
     model,
@@ -263,7 +243,7 @@ function evaluate_csvar(
     else
         c_pred = prediction
     end
-    _, c_vec, _ = det_residual_inputs(c_pred, G)
+    _, c_vec, _ = grid_residual_inputs(c_pred, G)
     c_on_grid = convert_to_grid_eltype(G[:a].grid, c_vec)
     a_next = next_assets_from_cash(w_grid, Float32.(c_on_grid))
     a_next = clamp_to_asset_bounds(a_next, G[:a])
@@ -342,8 +322,7 @@ function evaluate_solution(
             G,
             S;
             has_shocks = scaler.has_shocks,
-            objective_default = is_csvar_problem(P, S) ? :euler_residual :
-                                (scaler.has_shocks ? :euler_fb_aio : :euler_residual),
+            objective_default = is_csvar_problem(P, S) ? :euler_residual : :euler_fb_aio,
         ) : settings
     local_rng = rng === nothing ? Random.default_rng() : rng
     if is_csvar_problem(P, S)
@@ -360,7 +339,11 @@ function evaluate_solution(
             U,
             local_rng,
         )
-    elseif scaler.has_shocks
+    else
+        # Non-CSVAR problems use the general full-grid/stochastic evaluator.
+        # `evaluate_stochastic` handles both full-grid and stochastic
+        # evaluations; keep `evaluate_deterministic` as a compatibility
+        # helper but prefer the unified evaluator.
         return evaluate_stochastic(
             model,
             params,
@@ -374,8 +357,6 @@ function evaluate_solution(
             U,
             local_rng,
         )
-    else
-        return evaluate_deterministic(model, params, states, P_resid, P, G, scaler)
     end
 end
 
