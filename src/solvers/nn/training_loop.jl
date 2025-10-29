@@ -12,6 +12,16 @@ using ..DataNN: sample_training
 
 include("preprocessing.jl")
 
+include("training_utils.jl")
+using .NNTrainUtils:
+    base_optimizer,
+    create_optimizer,
+    cosine_learning_rate,
+    exponential_learning_rate,
+    learning_rate_for_epoch,
+    adjust_learning_rate,
+    apply_optimizer_learning_rate!,
+    bcmc_auto_update!
 
 struct NNSolverSettings
     epochs::Int
@@ -273,166 +283,7 @@ function build_network(input_dim::Int, settings::NNSolverSettings)
     return Chain(Dense(input_dim, h1, relu), Dense(h1, h2, relu), Dense(h2, 1, softplus))
 end
 
-function base_optimizer(optimizer::Symbol, lr::Float64)
-    if optimizer === :adam
-        return Optimisers.AdamW(lr)
-    elseif optimizer === :adamw
-        return Optimisers.AdamW(lr)
-    elseif optimizer === :rmsprop
-        return Optimisers.RMSProp(lr)
-    elseif optimizer === :adagrad
-        return Optimisers.AdaGrad(lr)
-    elseif optimizer === :sgd
-        return Optimisers.Descent(lr)
-    else
-        @warn "Unsupported optimizer=$(optimizer); falling back to AdamW"
-        return Optimisers.AdamW(lr)
-    end
-end
 
-function create_optimizer(settings::NNSolverSettings)
-    base = base_optimizer(settings.optimizer, settings.learning_rate)
-    return Optimisers.OptimiserChain(Optimisers.ClipGrad(0.02), base)
-end
-
-function cosine_learning_rate(settings::NNSolverSettings, epoch::Int)
-    epoch ≤ 0 && return settings.lr_max
-    warmup = settings.warmup_epochs
-    lr_min = settings.lr_min
-    lr_max = settings.lr_max
-    if warmup > 0 && epoch ≤ warmup
-        frac = epoch / warmup
-        return lr_min + (lr_max - lr_min) * frac
-    end
-    t = max(epoch - warmup, 0)
-    horizon = settings.lr_decay_horizon
-    if horizon ≤ 0
-        return lr_min
-    end
-    if t ≥ horizon
-        return lr_min
-    end
-    cos_term = 0.5 * (1 + cos(pi * t / horizon))
-    return lr_min + (lr_max - lr_min) * cos_term
-end
-
-function exponential_learning_rate(settings::NNSolverSettings, epoch::Int)
-    epoch ≤ 0 && return settings.lr_max
-    warmup = settings.warmup_epochs
-    lr_min = settings.lr_min
-    lr_max = settings.lr_max
-    if warmup > 0 && epoch ≤ warmup
-        frac = epoch / warmup
-        return lr_min + (lr_max - lr_min) * frac
-    end
-    # Steps counted after warmup
-    t = max(epoch - warmup, 0)
-    gamma = settings.lr_gamma
-    milestones = settings.lr_milestones
-    horizon = settings.lr_decay_horizon
-    if isempty(milestones)
-        steps = horizon > 0 ? min(t, horizon) : t
-    else
-        steps = count(m -> epoch ≥ m, milestones)
-    end
-    if steps <= 0
-        return lr_max
-    end
-    new_lr = lr_max * gamma^steps
-    floor_val = max(lr_min, floatmin(Float64))
-    return clamp(new_lr, floor_val, lr_max)
-end
-
-function learning_rate_for_epoch(settings::NNSolverSettings, epoch::Int)
-    if settings.lr_schedule === :cosine
-        return cosine_learning_rate(settings, epoch)
-    elseif settings.lr_schedule === :exponential
-        return exponential_learning_rate(settings, epoch)
-    else
-        return settings.lr_max
-    end
-end
-
-function rebuild_adam_family(opt, lr)
-    pairs = Pair{Symbol,Any}[:eta=>Float64(lr)]
-    if isdefined(opt, :beta)
-        push!(pairs, :beta => getproperty(opt, :beta))
-    end
-    eps_val = opt[:epsilon]
-    if eps_val !== nothing
-        push!(pairs, :epsilon => eps_val)
-    end
-    if opt isa Optimisers.AdamW && isdefined(opt, :weight_decay)
-        push!(pairs, :weight_decay => getproperty(opt, :weight_decay))
-    end
-    constructor = opt isa Optimisers.AdamW ? Optimisers.AdamW : Optimisers.Adam
-    return constructor(; pairs...)
-end
-
-function rebuild_with_lr(opt, lr)
-    fields = fieldnames(typeof(opt))
-    target =
-        findfirst(name -> name === :eta || name === :lr || name === :learning_rate, fields)
-    if target === nothing
-        return opt
-    end
-    target_field = fields[target]
-    values = map(fields) do name
-        name === target_field ? Float64(lr) : getfield(opt, name)
-    end
-    try
-        return (typeof(opt))(values...)
-    catch
-        return opt
-    end
-end
-
-function adjust_learning_rate(opt, lr)
-    # Prefer explicit handling for common optimisers to avoid MethodErrors
-    # when constructors differ across Optimisers.jl versions.
-    if opt isa Union{Optimisers.Adam,Optimisers.AdamW}
-        try
-            return rebuild_adam_family(opt, lr)
-        catch
-            return rebuild_with_lr(opt, lr)
-        end
-    end
-
-    # Generic fallback: try to locate a common learning-rate-like field and
-    # reconstruct the optimiser. If that fails, return the original optimiser.
-    return rebuild_with_lr(opt, lr)
-end
-
-function adjust_learning_rate(opt::Optimisers.OptimiserChain, lr)
-    # OptimiserChain stores its stages in the `opts` field
-    # Map over the inner stages and adjust each stage's learning rate.
-    new_opts = map(stage -> adjust_learning_rate(stage, lr), opt.opts)
-    return Optimisers.OptimiserChain(new_opts...)
-end
-
-function apply_optimizer_learning_rate!(state, lr)
-    # Support both older `:opt` field and Lux.Training.TrainState's `:optimizer`
-    if isdefined(state, :opt)
-        current_opt = getfield(state, :opt)
-        updated_opt = adjust_learning_rate(current_opt, lr)
-        if updated_opt !== current_opt
-            setfield!(state, :opt, updated_opt)
-        end
-        return state
-    elseif isdefined(state, :optimizer)
-        current_opt = getfield(state, :optimizer)
-        updated_opt = adjust_learning_rate(current_opt, lr)
-        if updated_opt === current_opt
-            return state
-        end
-        # Lux.Training.TrainState is immutable; construct a new TrainState
-        mdl = isdefined(state, :model) ? getfield(state, :model) : nothing
-        ps = isdefined(state, :parameters) ? getfield(state, :parameters) : nothing
-        st = isdefined(state, :states) ? getfield(state, :states) : nothing
-        return Lux.Training.TrainState(mdl, ps, st, updated_opt)
-    end
-    return state
-end
 
 function compute_batch_size(total_samples::Int, choice::Union{Nothing,Int})
     return isnothing(choice) ? max(total_samples, 1) :
@@ -620,112 +471,22 @@ function train_consumption_network!(
                model_cfg !== nothing &&
                isdefined(model_cfg, :bcmc_state)
                 step_id = (epoch - 1) * batches_per_epoch + cld(stop, batch_size)
-                if step_id % settings.bcmc_update_every == 0
-                    pairs0 = max(div(settings.n_mc * (settings.n_mc - 1), 2), 1)
-                    default_T = settings.samples_per_epoch * pairs0
-                    Tbudget = something(settings.bcmc_budget_T, default_T)
-                    Tbudget ≤ 0 && continue
-                    st_auto = getfield(model_cfg, :bcmc_state)
-                    curN = Int(clamp(round(st_auto.n_eff[]), 2, typemax(Int)))
-                    M_est = max(fld(2 * Tbudget, max(curN, 1)), 1)
-                    if M_est < 1
-                        continue
-                    end
-
-                    cur_batch = data[1]
-                    sqrt_cols = sqrt(Float64(size(cur_batch, 2)))
-                    probe_cols =
-                        min(size(cur_batch, 2), max(64, max(Int(floor(sqrt_cols)), 1)))
-                    X_probe = @view cur_batch[:, 1:probe_cols]
-                    Xp = settings.use_cuda ? Adapt.adapt(Array, X_probe) : X_probe
-
-                    base_model = select_model(chain, train_state)
-                    ps_cur = state_parameters(train_state)
-                    st_cur = state_states(train_state)
-                    ps_cpu = maybe_to_host(ps_cur, settings)
-                    st_cpu = maybe_to_host(st_cur, settings)
-
-                    scalar_forward = function (x, ps_, st_; mode = :default)
-                        Xmat = ndims(x) == 1 ? reshape(x, :, 1) : x
-                        if mode === :fb_scalar
-                            if isdefined(model_cfg.P, :Σ) && isdefined(model_cfg.P, :A)
-                                vals = loss_euler_fb_bcmc_csvar!(
-                                    base_model,
-                                    ps_,
-                                    st_,
-                                    Xmat,
-                                    model_cfg,
-                                    rng;
-                                    mode = :fb_scalar,
-                                )
-                            else
-                                vals = loss_euler_fb_bcmc_ar1!(
-                                    base_model,
-                                    ps_,
-                                    st_,
-                                    Xmat,
-                                    model_cfg,
-                                    rng;
-                                    mode = :fb_scalar,
-                                )
-                            end
-                            return Float64(vals[1])
-                        else
-                            error("fb_scalar wrapper only supports mode=:fb_scalar")
-                        end
-                    end
-
-                    if scaler.csvar_mode
-                        dε = max(length(scaler.y_range), 1)
-                        Σε = Matrix{Float64}(I, dε, dε)
-                        ds = dε + 1
-                        Σs = Matrix{Float64}(I, ds, ds)
-                    else
-                        Σε = Matrix{Float64}(I, 1, 1)
-                        Σs = Matrix{Float64}(I, 2, 2)
-                    end
-
-                    sigma2_f, rho_f, A_lin, B_lin = estimate_linearized_components(
-                        scalar_forward,
-                        ps_cpu,
-                        st_cpu,
-                        Xp,
+                # Delegate the probing and possible update to the helper module
+                try
+                    bcmc_auto_update!(
+                        chain,
+                        train_state,
+                        settings,
+                        model_cfg,
+                        data[1],
                         scaler,
-                        Σs,
-                        Σε,
+                        rng,
+                        step_id,
+                        settings.samples_per_epoch,
                     )
-
-                    rho_eps = max(rho_f, eps(Float32))
-                    A_eps = max(A_lin, eps(Float32))
-                    if rho_eps ≤ 10 * eps(Float32)
-                        N_star = min(max(Int(round(2 * Tbudget)), 2), 1024)
-                        V_star = _var_bcmc_given_N(sigma2_f, rho_eps, N_star, Tbudget)
-                    elseif A_eps ≤ 10 * eps(Float32)
-                        N_star = 2
-                        V_star = _var_bcmc_given_N(sigma2_f, rho_eps, N_star, Tbudget)
-                    else
-                        N_star, V_star =
-                            suggest_bcmc_N(sigma2_f, rho_eps, Tbudget; N_cap = 1024)
-                    end
-                    curV = _var_bcmc_given_N(sigma2_f, rho_eps, curN, Tbudget)
-
-                    st_auto.sigma2[] = sigma2_f
-                    st_auto.rho[] = rho_f
-                    st_auto.A[] = A_lin
-                    st_auto.B[] = B_lin
-
-                    if V_star ≤ 0.98 * curV && N_star != curN
-                        st_auto.n_eff[] = N_star
-                        if settings.verbose
-                            ratio = B_lin ≈ 0 ? Inf : A_lin / max(B_lin, eps(Float32))
-                            @info "bc-MC auto-N update" step = step_id N_old = curN N_new =
-                                N_star sigma2 = sigma2_f rho = rho_f A = A_lin B = B_lin ratio =
-                                ratio
-                        end
-                    elseif settings.verbose
-                        ratio = B_lin ≈ 0 ? Inf : A_lin / max(B_lin, eps(Float32))
-                        @info "bc-MC auto-N probe" step = step_id N_cur = curN sigma2 =
-                            sigma2_f rho = rho_f A = A_lin B = B_lin ratio = ratio
+                catch err
+                    if settings.verbose
+                        @warn "BCMC auto-N probe failed" err = err
                     end
                 end
             end
