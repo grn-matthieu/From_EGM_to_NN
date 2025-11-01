@@ -44,7 +44,7 @@ solver:
     tol_fit: 1e-8
     maxit_fit: 25
   nn:
-    epochs: 100000
+    epochs: 2000
     batch: 2048
     optimizer: adamW
     lr: 1e-3

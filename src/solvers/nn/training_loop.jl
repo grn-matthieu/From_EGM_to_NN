@@ -325,18 +325,33 @@ function train_consumption_network!(
                    model_cfg.P !== nothing
                     try
                         eval_rng = derive_rng(rng, (:conv_check, epoch))
-                        eval_result = evaluate_stochastic(
-                            current_model,
-                            current_ps,
-                            current_st,
-                            model_cfg.P,
-                            G,
-                            S,
-                            scaler,
-                            settings,
-                            model_cfg.U,
-                            eval_rng,
-                        )
+                        eval_result = if is_csvar_problem(model_cfg.P, S)
+                            evaluate_csvar(
+                                current_model,
+                                current_ps,
+                                current_st,
+                                model_cfg.P,
+                                G,
+                                S,
+                                scaler,
+                                settings,
+                                model_cfg.U,
+                                eval_rng,
+                            )
+                        else
+                            evaluate_stochastic(
+                                current_model,
+                                current_ps,
+                                current_st,
+                                model_cfg.P,
+                                G,
+                                S,
+                                scaler,
+                                settings,
+                                model_cfg.U,
+                                eval_rng,
+                            )
+                        end
                         resid_vals = vec(Float64.(eval_result.resid))
                         euler_rmse = sqrt(mean(abs2, resid_vals))
                     catch err
