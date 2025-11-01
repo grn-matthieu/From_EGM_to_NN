@@ -13,6 +13,7 @@ using LinearAlgebra: cholesky, mul!, Symmetric
 using ..CSVarUtils: csvar_income, csvar_component_log_means
 using ..GridHelpers: fit_values_on_backend!, grid_backend_available
 using ..DataNN: sample_training
+import ..SolverIntegration
 
 # Local sigmoid function to avoid NNlib dependency
 @inline sigmoid(x) = 1 / (1 + exp(-x))
@@ -41,7 +42,39 @@ end
     isdefined(P, :Σ) &&
     isdefined(P, :y_dim) &&
     P.y_dim > 1
-const CSVAR_EVAL_SAMPLES = 512
+const CSVAR_GH_ORDER = 3
+
+function csvar_gauss_hermite_offsets(P; order::Int = CSVAR_GH_ORDER)
+    y_dim = size(P.A, 1)
+    y_dim > 0 || error("CSVAR Gauss-Hermite offsets require positive state dimension")
+    Σ = Matrix{Float64}(P.Σ)
+    nodes1d, weights1d = SolverIntegration._gauss_hermite_nodes_weights(order)
+    total = order^y_dim
+    offsets = Matrix{Float32}(undef, y_dim, total)
+    weights = Vector{Float64}(undef, total)
+    sqrt2 = sqrt(2.0)
+    chol = cholesky(Symmetric(Σ), check = false)
+    L = Matrix{Float64}(chol.L)
+    tmp = Vector{Float64}(undef, y_dim)
+    x = Vector{Float64}(undef, y_dim)
+    idx = 1
+    for combo in Iterators.product(ntuple(_ -> 1:order, y_dim)...)
+        weight = 1.0
+        for k = 1:y_dim
+            node_idx = combo[k]
+            weight *= weights1d[node_idx]
+            x[k] = nodes1d[node_idx]
+        end
+        mul!(tmp, L, x)
+        @inbounds for k = 1:y_dim
+            offsets[k, idx] = Float32(sqrt2 * tmp[k])
+        end
+        weights[idx] = weight
+        idx += 1
+    end
+    weight_norm = (SolverIntegration.SQRT_PI)^y_dim
+    return offsets, weights, weight_norm
+end
 
 @inline function denormalize_features(scaler::FeatureScaler, batch)
     feature_dim = size(batch, 1)
@@ -250,25 +283,23 @@ function evaluate_csvar(
     uprime = get_uprime(U, P)
     β = Float32(P.β)
 
-    Σ = Matrix{Float64}(P.Σ)
-    chol = cholesky(Symmetric(Σ), check = false)
-    L = Matrix{Float32}(chol.L)
+    offsets, gh_weights, gh_norm = csvar_gauss_hermite_offsets(P)
     A = Matrix{Float32}(P.A)
     μ_vec = A * y_state
-
-    innovations = Matrix{Float32}(undef, y_dim, CSVAR_EVAL_SAMPLES)
-    randn!(rng, innovations)
-    draws = Matrix{Float32}(undef, y_dim, CSVAR_EVAL_SAMPLES)
-    mul!(draws, L, innovations)
-    @. draws += μ_vec
+    draws = offsets .+ μ_vec
     income_draws = Float32.(csvar_income(draws))
 
     resid = Vector{Float32}(undef, Na)
-    uprime_c0 = uprime(Float32.(c_on_grid))
-    Rg64 = Float32(Rg)
+    uprime_c0_raw = uprime(Float32.(c_on_grid))
+    uprime_c0 = Float64.(uprime_c0_raw)
+    Rg32 = Rg
+    Rg64 = Float64(Rg)
+    β64 = Float64(β)
+    weight_norm = gh_norm
+
     for i = 1:Na
         a_next_i = Float32(a_next[i])
-        w_future = @. Rg64 * a_next_i + income_draws
+        w_future = @. Rg32 * a_next_i + income_draws
         X_future = build_feature_batch_from_states(scaler, draws, w_future)
         X_future_dev = maybe_to_device(X_future, settings)
         pred_next = run_model(model, params, states, X_future_dev)
@@ -285,11 +316,14 @@ function evaluate_csvar(
         end
         c1_vec = vec(permutedims(ensure_row(c1_raw)))
         c1_cpu = maybe_to_cpu(c1_vec, settings)
-        mean_uprime = mean(uprime(c1_cpu))
-        denom =
-            uprime_c0[i] <= 0 ? uprime(Float32(max(c_on_grid[i], EVAL_MIN_CONSUMPTION))) :
-            uprime_c0[i]
-        val = abs(1 - β * Rg64 * mean_uprime / denom)
+        uprime_vals = Float64.(uprime(c1_cpu))
+        exp_uprime = sum(gh_weights .* uprime_vals) / weight_norm
+        denom_val = uprime_c0[i]
+        if !(denom_val > 0)
+            fallback = Float64(uprime(Float32(max(c_on_grid[i], EVAL_MIN_CONSUMPTION))))
+            denom_val = fallback
+        end
+        val = abs(1 - β64 * Rg64 * exp_uprime / denom_val)
         resid[i] = Float32(val)
     end
 
@@ -568,6 +602,109 @@ function eval_euler_residuals_mc_csvar(
     )
 end
 
+function eval_euler_residuals_gh_csvar(
+    model,
+    ps,
+    st,
+    U,
+    scaler,
+    settings;
+    N = 4096,
+    rng::AbstractRNG,
+    G = nothing,
+    S = nothing,
+    P = nothing,
+    gh_order::Int = CSVAR_GH_ORDER,
+)
+    @assert !(G === nothing) "eval_euler_residuals_gh_csvar requires G to be provided"
+    @assert !(P === nothing) "eval_euler_residuals_gh_csvar requires P to be provided"
+    @assert !(S === nothing) "eval_euler_residuals_gh_csvar requires S to be provided"
+
+    # Sample a batch of states/wealth combinations from the training distribution
+    X_mc, _ = sample_training(
+        G,
+        S;
+        mode = :rand,
+        nsamples = N,
+        rng = rng,
+        settings = settings,
+        P = P,
+    )
+    normalize_samples!(scaler, X_mc)
+    batch = prepare_training_batch(X_mc, Val(settings.use_cuda))
+
+    batch_cpu = maybe_to_cpu(batch, settings)
+    mean_vals, comps, w0_cpu = denormalize_feature_batch(scaler, batch_cpu)
+    y_dim = size(comps, 1)
+    y_dim > 0 || error("CSVAR diagnostics require vector-valued income state")
+    nsamples = size(batch_cpu, 2)
+
+    w0_dev = maybe_to_device(w0_cpu, settings)
+    out, _ = Lux.apply(model, batch, ps, st)
+    c0 = vec(phi_to_consumption(out[:Φ], w0_dev; min_c = EVAL_MIN_CONSUMPTION))
+    h = vec(ensure_row(out[:h]))
+
+    c0_cpu = maybe_to_cpu(c0, settings)
+    h_cpu = maybe_to_cpu(h, settings)
+
+    β = Float32(P.β)
+    Rg32 = 1.0f0 + Float32(P.r)
+    uprime = U.u_prime
+    a0 = w0_cpu .- c0_cpu
+
+    offsets, weights, weight_norm = csvar_gauss_hermite_offsets(P; order = gh_order)
+    n_nodes = size(offsets, 2)
+    A = Matrix{Float32}(P.A)
+    μ_matrix = A * comps
+
+    uprime_acc = zeros(Float64, nsamples)
+
+    for node = 1:n_nodes
+        offset = view(offsets, :, node)
+        y_next = μ_matrix .+ offset
+        income_next = Float32.(csvar_income(y_next))
+        w1_cpu = @. Rg32 * a0 + income_next
+        X1 = build_feature_batch_from_states(scaler, y_next, Float32.(w1_cpu))
+        X1_dev = maybe_to_device(X1, settings)
+        out1, _ = Lux.apply(model, X1_dev, ps, st)
+        w1_dev = maybe_to_device(Float32.(w1_cpu), settings)
+        c1 = vec(phi_to_consumption(out1[:Φ], w1_dev; min_c = EVAL_MIN_CONSUMPTION))
+        c1_cpu = maybe_to_cpu(c1, settings)
+        uprime_vals = Float64.(uprime(c1_cpu))
+        uprime_acc .+= weights[node] .* uprime_vals
+    end
+
+    exp_uprime = uprime_acc ./ weight_norm
+    denom_vec = Float64.(uprime(Float32.(c0_cpu)))
+    for i = 1:nsamples
+        if !(denom_vec[i] > 0)
+            fallback = Float64(uprime(Float32(max(c0_cpu[i], EVAL_MIN_CONSUMPTION))))
+            denom_vec[i] = fallback
+        end
+    end
+
+    β64 = Float64(β)
+    Rg64 = Float64(Rg32)
+    ratio = β64 * Rg64 .* exp_uprime ./ denom_vec
+    resid = abs.(1 .- ratio)
+
+    resid_cpu = Float32.(resid)
+    w_cpu = Float32.(w0_cpu)
+    y_cpu = Float32.(mean_vals)
+    c_cpu = Float32.(c0_cpu)
+    h_cpu_f32 = Float32.(h_cpu)
+
+    stats = compute_residual_stats(resid_cpu)
+    return (
+        abs_resid = resid_cpu,
+        w = w_cpu,
+        y = y_cpu,
+        c = c_cpu,
+        stats = stats,
+        h = h_cpu_f32,
+    )
+end
+
 const GH10_X =
     Float32.([
         -3.436159,
@@ -610,7 +747,7 @@ function eval_euler_residuals_gh(
     P = nothing,
 )
     if P !== nothing && is_csvar_problem(P, S)
-        mc_res = eval_euler_residuals_mc_csvar(
+        gh_res = eval_euler_residuals_gh_csvar(
             model,
             ps,
             st,
@@ -624,11 +761,11 @@ function eval_euler_residuals_gh(
             P = P,
         )
         return (;
-            abs_resid = mc_res.abs_resid,
-            w = mc_res.w,
-            y = mc_res.y,
-            c = mc_res.c,
-            stats = mc_res.stats,
+            abs_resid = gh_res.abs_resid,
+            w = gh_res.w,
+            y = gh_res.y,
+            c = gh_res.c,
+            stats = gh_res.stats,
         )
     end
     @assert settings.has_shocks
