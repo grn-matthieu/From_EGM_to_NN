@@ -26,6 +26,9 @@ function build_nn_method(cfg::NamedTuple)
         hasproperty(nt, sym) ? getfield(nt, sym) :
         (nt isa AbstractDict ? get(nt, sym, default) : default)
 
+    samples_per_epoch = nn_cfg.samples_per_epoch
+    eval_samples = cfg_get(nn_cfg, :eval_samples, max(samples_per_epoch, 2048))
+
     return NNMethod((
         name = solver_cfg.method,
         tol = solver_cfg.tol,
@@ -41,7 +44,8 @@ function build_nn_method(cfg::NamedTuple)
         hid2 = nn_cfg.hid2,
 
         # samples per epoch: paper draws 64 random grid points per epoch
-        samples_per_epoch = nn_cfg.samples_per_epoch,
+        samples_per_epoch = samples_per_epoch,
+        eval_samples = eval_samples,
 
         # new: loss selector + stability knobs
         objective = nn_cfg.objective,
@@ -52,6 +56,7 @@ function build_nn_method(cfg::NamedTuple)
         # optional: pass shock std override for convenience
         sigma_shocks = nn_cfg.sigma_shocks,
         target_loss = nn_cfg.target_loss,
+        gh_mode = cfg_get(nn_cfg, :gh_mode, :rand),
 
         # device selection: allow config to explicitly request CUDA
         # pass-through so NNKernel.solver_settings can honor it
@@ -157,6 +162,8 @@ function solve(
         :mean_ee => ee_mean,
         :julia_version => string(VERSION),
         :rmse_history => hasproperty(sol, :rmse_history) ? sol.rmse_history : Float64[],
+        :v_h_history => hasproperty(sol, :v_h_history) ? sol.v_h_history : Any[],
+        :n_history => hasproperty(sol, :n_history) ? sol.n_history : Any[],
         :opts => sol.opts,
     )
 

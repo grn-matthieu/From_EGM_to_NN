@@ -1,0 +1,2 @@
+{"timestamp":"2025-11-01T17:33:34Z","scenario":"dimension","variant":"diag_1d","solver":"NN","repeat":1,"state_dim":1,"status":"ok","rmse_history":[],"v_h_history":[],"n_history":[]}
+{"timestamp":"2025-11-01T17:38:39Z","scenario":"dimension","variant":"diag_1d","solver":"NN","repeat":1,"state_dim":1,"status":"ok","rmse_history":[],"v_h_history":[],"n_history":[]}

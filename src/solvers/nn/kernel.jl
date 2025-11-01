@@ -21,6 +21,7 @@ using Random
 using Printf
 using Statistics: mean, quantile
 using LinearAlgebra: cholesky, mul!, Symmetric
+using ForwardDiff: value
 
 include("mixed_precision.jl")
 include("losses.jl")
@@ -46,6 +47,33 @@ export solve_nn, solver_settings
 
 const H_ALPHA = 1.0f0
 const EPS_VAR = 1e-12
+const BCMC_RESID_CAP = 1.0e9
+const BCMC_Q_CAP = 1.0e9
+const BCMC_ETA_CAP = 1.0e6
+
+@inline function sanitize_positive(val::Real, cap::Float64)
+    z = Float64(value(val))
+    if isnan(z)
+        return 0.0
+    elseif isfinite(z)
+        return clamp(z, 0.0, cap)
+    else
+        return cap
+    end
+end
+
+@inline function sanitize_signed(val::Real, cap::Float64)
+    z = Float64(value(val))
+    if isnan(z)
+        return 0.0
+    elseif isfinite(z)
+        return clamp(z, -cap, cap)
+    else
+        return copysign(cap, z)
+    end
+end
+
+@inline sanitize_eta_head(val) = sanitize_positive(exp(Float64(value(val))), BCMC_ETA_CAP)
 
 """Construct the dual-head Lux model used by the solver."""
 function build_dual_head_network(input_dim::Int, hidden::NTuple{2,Int})
@@ -165,6 +193,9 @@ function build_options_summary(settings, training_result, runtime)
         verbose = settings.verbose,
         batches_per_epoch = training_result.batches_per_epoch,
         device = settings.use_cuda ? :cuda : :cpu,
+        rmse_history = training_result.rmse_history,
+        v_h_history = training_result.v_h_history,
+        n_history = training_result.n_history,
     )
 end
 
@@ -265,6 +296,8 @@ function solve_nn(model; opts = nothing, settings = nothing, rng = nothing)
         eval_mc = eval_mc,
         eval_gh = eval_gh,
         rmse_history = training_result.rmse_history,
+        v_h_history = training_result.v_h_history,
+        n_history = training_result.n_history,
     )
 end
 
@@ -514,8 +547,10 @@ function loss_euler_fb_bcmc_ar1!(chain, ps, st, batch, model_cfg, rng; mode = :d
     ndims(batch) == 1 && (batch_mat = reshape(batch, :, 1))
     out, st1 = Lux.apply(chain, batch_mat, ps, st)
     c0 = vec(phi_to_consumption(out[:Φ], w0; min_c = C_MIN))
-    eta = T.(vec(ensure_row(out[:h])))
+    eta_head = vec(ensure_row(out[:h]))
+    eta64 = sanitize_eta_head.(eta_head)
     a_term = @. one(T) - c0 / w0
+    a_term64 = Float64.(a_term)
     a_curr = @. w0 - c0
 
     auto = isdefined(settings, :bcmc_auto_N) && settings.bcmc_auto_N
@@ -543,9 +578,10 @@ function loss_euler_fb_bcmc_ar1!(chain, ps, st, batch, model_cfg, rng; mode = :d
         outn, _ = Lux.apply(chain, Xn, ps, st1)
         cn = vec(phi_to_consumption(outn[:Φ], w_next; min_c = C_MIN))
         qn = β .* Rg .* uprime(cn) ./ uprime(c0)
-        residual = @. one(T) - qn - eta
-        residual_sq = residual .* residual
-        return residual_sq
+        qn64 = map(q -> sanitize_positive(q, BCMC_Q_CAP), qn)
+        residual64 =
+            map((qv, ev) -> sanitize_signed(1.0 - qv - ev, BCMC_RESID_CAP), qn64, eta64)
+        return residual64 .* residual64
     end
 
     baseN = settings.n_mc
@@ -560,17 +596,16 @@ function loss_euler_fb_bcmc_ar1!(chain, ps, st, batch, model_cfg, rng; mode = :d
     β = T(P.β)
     ρ = T(P.ρ_shock)
     σ_shocks = T(P.σ_shock)
-    v_h = isdefined(model_cfg, :v_h) ? T(model_cfg.v_h) : one(T)
+    v_h_val = isdefined(model_cfg, :v_h) ? Float64(model_cfg.v_h) : 1.0
 
-    fb_term = fb(a_term, eta)
-    kt = @. fb_term^2
+    fb_term64 = a_term64 .+ eta64 .- hypot.(a_term64, eta64)
+    kt64 = fb_term64 .* fb_term64
 
-    # Non-mutating accumulators (same shape as h)
-    g_sum = zero.(eta)        # accumulates (g^2) across draws
-    g_sumsq = zero.(eta)      # accumulates (g^2)^2 across draws
-    r_sum = zero.(eta)        # accumulates g across draws (for variance diagnostics)
-    r_sumsq = zero.(eta)      # accumulates g^2 across draws (for variance diagnostics)
-    max_abs_q = zero(T)
+    g_sum = zeros(Float64, length(eta64))   # accumulates (g^2) across draws
+    g_sumsq = zeros(Float64, length(eta64)) # accumulates (g^2)^2 across draws
+    r_sum = zeros(Float64, length(eta64))   # accumulates g across draws
+    r_sumsq = zeros(Float64, length(eta64)) # accumulates g^2 across draws
+    max_abs_q = 0.0
 
     component_levels =
         isdefined(P, :y) && P.y isa AbstractVector ? T.(exp.(collect(P.y))) : T[]
@@ -589,35 +624,37 @@ function loss_euler_fb_bcmc_ar1!(chain, ps, st, batch, model_cfg, rng; mode = :d
         outn, st1 = Lux.apply(chain, Xn, ps, st1)
         cn = vec(phi_to_consumption(outn[:Φ], w_next; min_c = C_MIN))
         qn = β .* Rg .* uprime(cn) ./ uprime(c0)
-        max_abs_q = max(max_abs_q, maximum(abs.(qn)))
+        qn64 = map(q -> sanitize_positive(q, BCMC_Q_CAP), qn)
+        max_abs_q = max(max_abs_q, maximum(abs.(qn64)))
 
-        residual = @. one(T) - qn - eta
-        residual_sq = residual .* residual
-        g_sum = g_sum .+ residual_sq
-        g_sumsq = g_sumsq .+ residual_sq .* residual_sq
-        r_sum = r_sum .+ residual
-        r_sumsq = r_sumsq .+ residual_sq
+        residual64 =
+            map((qv, ev) -> sanitize_signed(1.0 - qv - ev, BCMC_RESID_CAP), qn64, eta64)
+        residual_sq64 = residual64 .* residual64
+        g_sum = g_sum .+ residual_sq64
+        g_sumsq = g_sumsq .+ residual_sq64 .* residual_sq64
+        r_sum = r_sum .+ residual64
+        r_sumsq = r_sumsq .+ residual_sq64
     end
 
-    denom = T(N) * (T(N) - one(T))
-    bcmc = (g_sum .* g_sum .- g_sumsq) ./ denom
+    denom = Float64(N) * (Float64(N) - 1.0)
+    bcmc64 = (g_sum .* g_sum .- g_sumsq) ./ denom
 
     # Optional diagnostics: empirical variance of g across draws per state, averaged
-    invN = one(T) / T(N)
-    var_vec = clamp.(r_sumsq .* invN .- (r_sum .* invN) .* (r_sum .* invN), zero(T), T(Inf))
-    gvar_mean = mean(var_vec)
+    invN = 1.0 / Float64(N)
+    var_vec64 = clamp.(r_sumsq .* invN .- (r_sum .* invN) .* (r_sum .* invN), 0.0, Inf)
+    gvar_mean = mean(var_vec64)
 
-    loss_vec = kt .+ v_h .* bcmc
+    loss_vec64 = kt64 .+ v_h_val .* bcmc64
     proxy_state = isdefined(model_cfg, :bcmc_state) ? model_cfg.bcmc_state : nothing
     A_proxy = proxy_state === nothing ? NaN : Float64(proxy_state.A[])
     B_proxy = proxy_state === nothing ? NaN : Float64(proxy_state.B[])
     ratio_proxy = isnan(B_proxy) || abs(B_proxy) ≤ EPS_VAR ? Inf : A_proxy / B_proxy
-    return mean(loss_vec),
+    return mean(loss_vec64),
     (
         st1,
         (;
-            kt_mean = mean(kt),
-            bcmc_mean = mean(bcmc),
+            kt_mean = mean(kt64),
+            bcmc_mean = mean(bcmc64),
             gvar_mean = gvar_mean,
             n_eff = n_eff,
             max_abs_q = max_abs_q,
@@ -648,8 +685,10 @@ function loss_euler_fb_bcmc_csvar!(chain, ps, st, batch, model_cfg, rng; mode = 
     ndims(batch) == 1 && (batch_mat = reshape(batch, :, 1))
     out, st1 = Lux.apply(chain, batch_mat, ps, st)
     c0 = vec(phi_to_consumption(out[:Φ], w0; min_c = C_MIN))
-    eta = T.(vec(ensure_row(out[:h])))
+    eta_head = vec(ensure_row(out[:h]))
+    eta64 = sanitize_eta_head.(eta_head)
     a_term = @. one(T) - c0 / w0
+    a_term64 = Float64.(a_term)
     a_curr = @. w0 - c0
 
     auto = isdefined(settings, :bcmc_auto_N) && settings.bcmc_auto_N
@@ -683,9 +722,10 @@ function loss_euler_fb_bcmc_csvar!(chain, ps, st, batch, model_cfg, rng; mode = 
         outn, _ = Lux.apply(chain, Xn, ps, st1)
         c_next = vec(phi_to_consumption(outn[:Φ], w_next; min_c = C_MIN))
         q_next = β .* Rg .* uprime(c_next) ./ uprime(c0)
-        residual = @. one(T) - q_next - eta
-        residual_sq = residual .* residual
-        return residual_sq
+        qn64 = map(q -> sanitize_positive(q, BCMC_Q_CAP), q_next)
+        residual64 =
+            map((qv, ev) -> sanitize_signed(1.0 - qv - ev, BCMC_RESID_CAP), qn64, eta64)
+        return residual64 .* residual64
     end
 
     baseN = settings.n_mc
@@ -700,20 +740,21 @@ function loss_euler_fb_bcmc_csvar!(chain, ps, st, batch, model_cfg, rng; mode = 
     Rg = one(T) + T(P.r)
     β = T(P.β)
     v_h = isdefined(model_cfg, :v_h) ? T(model_cfg.v_h) : one(T)
+    v_h_val = Float64(v_h)
 
     A = Matrix{T}(P.A)
     Σ = Matrix{Float64}(P.Σ)
     chol = cholesky(Symmetric(Σ), check = false)
     L = Matrix{T}(chol.L)
 
-    fb_term = fb(a_term, eta)
-    kt = @. fb_term^2
+    fb_term64 = a_term64 .+ eta64 .- hypot.(a_term64, eta64)
+    kt64 = fb_term64 .* fb_term64
 
-    g_sum = zero.(eta)
-    g_sumsq = zero.(eta)
-    r_sum = zero.(eta)
-    r_sumsq = zero.(eta)
-    max_abs_q = zero(T)
+    g_sum = zeros(Float64, length(eta64))
+    g_sumsq = zeros(Float64, length(eta64))
+    r_sum = zeros(Float64, length(eta64))
+    r_sumsq = zeros(Float64, length(eta64))
+    max_abs_q = 0.0
 
     for draw = 1:N
         ε = randn(rng, T, y_dim, n)
@@ -731,34 +772,36 @@ function loss_euler_fb_bcmc_csvar!(chain, ps, st, batch, model_cfg, rng; mode = 
         outn, st1 = Lux.apply(chain, Xn, ps, st1)
         c_next = vec(phi_to_consumption(outn[:Φ], w_next; min_c = C_MIN))
         q_next = β .* Rg .* uprime(c_next) ./ uprime(c0)
-        max_abs_q = max(max_abs_q, maximum(abs.(q_next)))
+        qn64 = map(q -> sanitize_positive(q, BCMC_Q_CAP), q_next)
+        max_abs_q = max(max_abs_q, maximum(abs.(qn64)))
 
-        residual = @. one(T) - q_next - eta
-        residual_sq = residual .* residual
-        g_sum = g_sum .+ residual_sq
-        g_sumsq = g_sumsq .+ residual_sq .* residual_sq
-        r_sum = r_sum .+ residual
-        r_sumsq = r_sumsq .+ residual_sq
+        residual64 =
+            map((qv, ev) -> sanitize_signed(1.0 - qv - ev, BCMC_RESID_CAP), qn64, eta64)
+        residual_sq64 = residual64 .* residual64
+        g_sum = g_sum .+ residual_sq64
+        g_sumsq = g_sumsq .+ residual_sq64 .* residual_sq64
+        r_sum = r_sum .+ residual64
+        r_sumsq = r_sumsq .+ residual_sq64
     end
 
-    denom = T(N) * (T(N) - one(T))
-    bcmc = (g_sum .* g_sum .- g_sumsq) ./ denom
+    denom = Float64(N) * (Float64(N) - 1.0)
+    bcmc64 = (g_sum .* g_sum .- g_sumsq) ./ denom
 
-    invN = one(T) / T(N)
-    var_vec = clamp.(r_sumsq .* invN .- (r_sum .* invN) .* (r_sum .* invN), zero(T), T(Inf))
-    gvar_mean = mean(var_vec)
+    invN = 1.0 / Float64(N)
+    var_vec64 = clamp.(r_sumsq .* invN .- (r_sum .* invN) .* (r_sum .* invN), 0.0, Inf)
+    gvar_mean = mean(var_vec64)
 
-    loss_vec = kt .+ v_h .* bcmc
+    loss_vec64 = kt64 .+ v_h_val .* bcmc64
     proxy_state = isdefined(model_cfg, :bcmc_state) ? model_cfg.bcmc_state : nothing
     A_proxy = proxy_state === nothing ? NaN : Float64(proxy_state.A[])
     B_proxy = proxy_state === nothing ? NaN : Float64(proxy_state.B[])
     ratio_proxy = isnan(B_proxy) || abs(B_proxy) ≤ EPS_VAR ? Inf : A_proxy / B_proxy
-    return mean(loss_vec),
+    return mean(loss_vec64),
     (
         st1,
         (;
-            kt_mean = mean(kt),
-            bcmc_mean = mean(bcmc),
+            kt_mean = mean(kt64),
+            bcmc_mean = mean(bcmc64),
             gvar_mean = gvar_mean,
             n_eff = n_eff,
             max_abs_q = max_abs_q,

@@ -27,9 +27,11 @@ struct NNSolverSettings
     w_min::Float32
     w_max::Float32
     samples_per_epoch::Int
+    eval_samples::Int
     sigma_shocks::Union{Nothing,Float64}
     use_cuda::Bool
     n_mc::Int
+    gh_diagnostics_mode::Symbol
     bcmc_budget_T::Union{Nothing,Int}
     bcmc_auto_N::Bool
     bcmc_update_every::Int
@@ -122,9 +124,16 @@ function solver_settings(
     w_min = Float32(get_option(opts, :w_min, 0.1))
     w_max = Float32(get_option(opts, :w_max, 4.0))
     samples_per_epoch = max(Int(get_option(opts, :samples_per_epoch, 64)), 1)
+    eval_samples =
+        max(Int(get_option(opts, :eval_samples, max(samples_per_epoch, 2048))), 1)
     sigma_shocks = get_option(opts, :sigma_shocks, nothing)
     use_cuda = get_option(opts, :use_cuda, false)
     n_mc = max(Int(get_option(opts, :n_mc, 16)), 1)
+    gh_mode_raw = Symbol(get_option(opts, :gh_mode, :rand))
+    gh_mode = gh_mode_raw in (:rand, :grid, :full) ? gh_mode_raw : :rand
+    if gh_mode !== gh_mode_raw
+        @warn "Unknown gh_mode=$(gh_mode_raw); defaulting to :rand"
+    end
     bcmc_budget_T = let v = get_option(opts, :bcmc_budget_T, nothing)
         v === nothing ? nothing : Int(v)
     end
@@ -204,9 +213,11 @@ function solver_settings(
         w_min,
         w_max,
         samples_per_epoch,
+        eval_samples,
         sigma_shocks,
         use_cuda,
         n_mc,
+        gh_mode,
         bcmc_budget_T,
         bcmc_auto_N,
         bcmc_update_every,

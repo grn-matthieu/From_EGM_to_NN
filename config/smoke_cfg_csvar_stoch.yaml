@@ -58,6 +58,7 @@ solver:
     n_mc: 16
     resample_every: 1
     samples_per_epoch: 64
+    eval_samples: 8192
     objective: euler_fb_bcmc
     v_h: 0.5
     w_min: 0.1

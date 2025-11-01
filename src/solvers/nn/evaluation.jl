@@ -42,7 +42,7 @@ end
     isdefined(P, :Σ) &&
     isdefined(P, :y_dim) &&
     P.y_dim > 1
-const CSVAR_GH_ORDER = 3
+const CSVAR_GH_ORDER = 10
 
 function csvar_gauss_hermite_offsets(P; order::Int = CSVAR_GH_ORDER)
     y_dim = size(P.A, 1)
@@ -50,7 +50,7 @@ function csvar_gauss_hermite_offsets(P; order::Int = CSVAR_GH_ORDER)
     Σ = Matrix{Float64}(P.Σ)
     nodes1d, weights1d = SolverIntegration._gauss_hermite_nodes_weights(order)
     total = order^y_dim
-    offsets = Matrix{Float32}(undef, y_dim, total)
+    offsets = Matrix{Float64}(undef, y_dim, total)
     weights = Vector{Float64}(undef, total)
     sqrt2 = sqrt(2.0)
     chol = cholesky(Symmetric(Σ), check = false)
@@ -67,7 +67,7 @@ function csvar_gauss_hermite_offsets(P; order::Int = CSVAR_GH_ORDER)
         end
         mul!(tmp, L, x)
         @inbounds for k = 1:y_dim
-            offsets[k, idx] = Float32(sqrt2 * tmp[k])
+            offsets[k, idx] = sqrt2 * tmp[k]
         end
         weights[idx] = weight
         idx += 1
@@ -634,64 +634,67 @@ function eval_euler_residuals_gh_csvar(
     batch = prepare_training_batch(X_mc, Val(settings.use_cuda))
 
     batch_cpu = maybe_to_cpu(batch, settings)
-    mean_vals, comps, w0_cpu = denormalize_feature_batch(scaler, batch_cpu)
-    y_dim = size(comps, 1)
+    mean_vals32, comps32, w0_cpu32 = denormalize_feature_batch(scaler, batch_cpu)
+    y_dim = size(comps32, 1)
     y_dim > 0 || error("CSVAR diagnostics require vector-valued income state")
     nsamples = size(batch_cpu, 2)
 
-    w0_dev = maybe_to_device(w0_cpu, settings)
+    mean_vals64 = Float64.(mean_vals32)
+    comps64 = Float64.(comps32)
+    w0_cpu64 = Float64.(w0_cpu32)
+
+    w0_dev = maybe_to_device(Float32.(w0_cpu32), settings)
     out, _ = Lux.apply(model, batch, ps, st)
     c0 = vec(phi_to_consumption(out[:Φ], w0_dev; min_c = EVAL_MIN_CONSUMPTION))
     h = vec(ensure_row(out[:h]))
 
-    c0_cpu = maybe_to_cpu(c0, settings)
+    c0_cpu32 = maybe_to_cpu(c0, settings)
+    c0_cpu64 = Float64.(c0_cpu32)
     h_cpu = maybe_to_cpu(h, settings)
 
-    β = Float32(P.β)
-    Rg32 = 1.0f0 + Float32(P.r)
+    β64 = Float64(P.β)
+    Rg64 = 1.0 + Float64(P.r)
     uprime = U.u_prime
-    a0 = w0_cpu .- c0_cpu
+    a0 = w0_cpu64 .- c0_cpu64
 
     offsets, weights, weight_norm = csvar_gauss_hermite_offsets(P; order = gh_order)
     n_nodes = size(offsets, 2)
-    A = Matrix{Float32}(P.A)
-    μ_matrix = A * comps
+    A = Matrix{Float64}(P.A)
+    μ_matrix = A * comps64
 
     uprime_acc = zeros(Float64, nsamples)
 
     for node = 1:n_nodes
         offset = view(offsets, :, node)
         y_next = μ_matrix .+ offset
-        income_next = Float32.(csvar_income(y_next))
-        w1_cpu = @. Rg32 * a0 + income_next
-        X1 = build_feature_batch_from_states(scaler, y_next, Float32.(w1_cpu))
+        income_next = csvar_income(y_next)
+        w1_cpu64 = @. Rg64 * a0 + income_next
+        X1 = build_feature_batch_from_states(scaler, Float32.(y_next), Float32.(w1_cpu64))
         X1_dev = maybe_to_device(X1, settings)
         out1, _ = Lux.apply(model, X1_dev, ps, st)
-        w1_dev = maybe_to_device(Float32.(w1_cpu), settings)
+        w1_dev = maybe_to_device(Float32.(w1_cpu64), settings)
         c1 = vec(phi_to_consumption(out1[:Φ], w1_dev; min_c = EVAL_MIN_CONSUMPTION))
-        c1_cpu = maybe_to_cpu(c1, settings)
-        uprime_vals = Float64.(uprime(c1_cpu))
+        c1_cpu64 = Float64.(maybe_to_cpu(c1, settings))
+        uprime_vals = Float64.(uprime(c1_cpu64))
         uprime_acc .+= weights[node] .* uprime_vals
     end
 
     exp_uprime = uprime_acc ./ weight_norm
-    denom_vec = Float64.(uprime(Float32.(c0_cpu)))
+    denom_vec = Float64.(uprime(c0_cpu64))
     for i = 1:nsamples
         if !(denom_vec[i] > 0)
-            fallback = Float64(uprime(Float32(max(c0_cpu[i], EVAL_MIN_CONSUMPTION))))
+            fallback = Float64(uprime(max(c0_cpu64[i], Float64(EVAL_MIN_CONSUMPTION))))
             denom_vec[i] = fallback
         end
     end
 
-    β64 = Float64(β)
-    Rg64 = Float64(Rg32)
     ratio = β64 * Rg64 .* exp_uprime ./ denom_vec
     resid = abs.(1 .- ratio)
 
     resid_cpu = Float32.(resid)
-    w_cpu = Float32.(w0_cpu)
-    y_cpu = Float32.(mean_vals)
-    c_cpu = Float32.(c0_cpu)
+    w_cpu = Float32.(w0_cpu64)
+    y_cpu = Float32.(mean_vals32)
+    c_cpu = Float32.(c0_cpu64)
     h_cpu_f32 = Float32.(h_cpu)
 
     stats = compute_residual_stats(resid_cpu)
@@ -706,7 +709,7 @@ function eval_euler_residuals_gh_csvar(
 end
 
 const GH10_X =
-    Float32.([
+    Float64.([
         -3.436159,
         -2.532736,
         -1.756684,
@@ -719,7 +722,7 @@ const GH10_X =
         3.436159,
     ])
 const GH10_W =
-    Float32.([
+    Float64.([
         7.640433e-6,
         0.001343645,
         0.033874394,
@@ -731,7 +734,7 @@ const GH10_W =
         0.001343645,
         7.640433e-6,
     ])
-const GH_SQRT2 = Float32(sqrt(2.0))
+const GH_SQRT2 = sqrt(2.0)
 
 """Gauss–Hermite Euler residual diagnostics for stochastic problems."""
 function eval_euler_residuals_gh(
@@ -774,10 +777,15 @@ function eval_euler_residuals_gh(
     @assert !(S === nothing) "eval_euler_residuals_gh requires S to be provided"
     @assert !(P === nothing) "eval_euler_residuals_gh requires P to be provided"
 
+    gh_mode =
+        hasproperty(settings, :gh_diagnostics_mode) ?
+        getproperty(settings, :gh_diagnostics_mode) : :rand
+    sample_mode = gh_mode === :grid ? :full : gh_mode === :full ? :full : :rand
+
     X_gh, _ = sample_training(
         G,
         S;
-        mode = :rand,
+        mode = sample_mode,
         nsamples = N,
         rng = rng,
         settings = settings,
@@ -787,44 +795,55 @@ function eval_euler_residuals_gh(
     batch = prepare_training_batch(X_gh, Val(settings.use_cuda))
     mean_norm = batch[1, :]
     w_norm = batch[end, :]
-    y0 = ((mean_norm .+ 1.0f0) ./ 2.0f0) .* scaler.mean_range .+ scaler.mean_min
-    w0 = ((w_norm .+ 1.0f0) ./ 2.0f0) .* scaler.w_range .+ scaler.w_min
-    if settings.use_cuda
-        y0 = cu(y0)
-        w0 = cu(w0)
-    end
+    y0_f32 = ((mean_norm .+ 1.0f0) ./ 2.0f0) .* scaler.mean_range .+ scaler.mean_min
+    w0_f32 = ((w_norm .+ 1.0f0) ./ 2.0f0) .* scaler.w_range .+ scaler.w_min
+    y0_dev = settings.use_cuda ? cu(y0_f32) : y0_f32
+    w0_dev = settings.use_cuda ? cu(w0_f32) : w0_f32
     out, _ = Lux.apply(model, batch, ps, st)
-    c0 = vec(phi_to_consumption(out[:Φ], w0; min_c = EVAL_MIN_CONSUMPTION))
+    c0 = vec(phi_to_consumption(out[:Φ], w0_dev; min_c = EVAL_MIN_CONSUMPTION))
 
-    μ = Float32(
+    y0_cpu = Float64.(maybe_to_cpu(y0_dev, settings))
+    w0_cpu = Float64.(maybe_to_cpu(w0_dev, settings))
+    c0_cpu = Float64.(maybe_to_cpu(c0, settings))
+
+    μ64 =
         isdefined(P, :y) && P.y isa AbstractVector ? mean(Float64.(collect(P.y))) :
-        Float64(P.y),
-    )
-    z0 = log.(y0) .- μ
-    ρ = Float32(P.ρ_shock)
-    σϵ =
-        settings.sigma_shocks === nothing ? Float32(P.σ_shock) :
-        Float32(settings.sigma_shocks)
-    β = Float32(P.β)
-    Rg = 1.0f0 + Float32(P.r)
+        Float64(P.y)
+    z0 = log.(y0_cpu) .- μ64
+    ρ64 = Float64(P.ρ_shock)
+    σϵ64 =
+        settings.sigma_shocks === nothing ? Float64(P.σ_shock) :
+        Float64(settings.sigma_shocks)
+    β64 = Float64(P.β)
+    Rg64 = 1.0 + Float64(P.r)
     uprime = U.u_prime
 
-    EUprime =
-        settings.use_cuda ? cu(zeros(Float32, length(w0))) : zeros(Float32, length(w0))
+    EUprime = zeros(Float64, length(w0_cpu))
 
     component_levels =
         isdefined(P, :y) && P.y isa AbstractVector ? Float32.(collect(P.y)) : Float32[]
+    a1_base = w0_cpu .- c0_cpu
 
     @inbounds for k in eachindex(GH10_X)
         εk = GH10_X[k]
         wk = GH10_W[k] / sqrt(pi)
-        z1 = @. ρ * z0 + σϵ * GH_SQRT2 * εk
-        y1 = exp.(μ .+ z1)
-        a1 = @. w0 - c0
-        w1 = @. Rg * a1 + y1
+        z1 = @. ρ64 * z0 + σϵ64 * GH_SQRT2 * εk
+        y1 = exp.(μ64 .+ z1)
+        a1 = copy(a1_base)
+        if sample_mode === :full
+            try
+                a_min = Float64(getfield(G[:a], :min))
+                a_max = Float64(getfield(G[:a], :max))
+                a1 = clamp.(a1, a_min, a_max)
+            catch
+                # Fall back to unclamped values if grid bounds are unavailable
+                nothing
+            end
+        end
+        w1 = @. Rg64 * a1 + y1
 
-        y1_cpu = maybe_to_cpu(y1, settings)
-        w1_cpu = maybe_to_cpu(w1, settings)
+        y1_cpu = Float32.(y1)
+        w1_cpu = Float32.(w1)
         X1 = build_feature_matrix(y1_cpu, w1_cpu, component_levels)
         normalize_feature_batch!(scaler, X1)
 
@@ -833,23 +852,17 @@ function eval_euler_residuals_gh(
 
         w1_dev = maybe_to_device(w1_cpu, settings)
         c1 = vec(phi_to_consumption(out1[:Φ], w1_dev; min_c = EVAL_MIN_CONSUMPTION))
-        EUprime .+= wk .* uprime(c1)
+        c1_cpu = Float64.(maybe_to_cpu(c1, settings))
+        EUprime .+= wk .* uprime(c1_cpu)
     end
-    ratio = @. β * Rg * EUprime / uprime(c0)
-    resid = abs.(1.0f0 .- ratio)
+    denom = uprime(c0_cpu)
+    ratio = β64 * Rg64 .* EUprime ./ denom
+    resid = abs.(1 .- ratio)
 
-    # Move back to CPU for aggregation and returning results
-    if settings.use_cuda
-        resid_cpu = Array(resid)
-        w_cpu = Array(w0)
-        y_cpu = Array(y0)
-        c_cpu = Array(c0)
-    else
-        resid_cpu = resid
-        w_cpu = w0
-        y_cpu = y0
-        c_cpu = c0
-    end
+    resid_cpu = resid
+    w_cpu = w0_cpu
+    y_cpu = y0_cpu
+    c_cpu = c0_cpu
 
     stats = (
         mean = mean(resid_cpu),

@@ -1,0 +1,4 @@
+{"timestamp":"2025-11-01T16:45:48Z","scenario":"dimension","variant":"diag_1d","solver":"NN","repeat":1,"state_dim":1,"status":"ok","rmse_history":[],"v_h_history":[],"n_history":[]}
+{"timestamp":"2025-11-01T16:48:54Z","scenario":"dimension","variant":"diag_1d","solver":"NN","repeat":1,"state_dim":1,"status":"ok","rmse_history":[],"v_h_history":[],"n_history":[]}
+{"timestamp":"2025-11-01T16:50:32Z","scenario":"dimension","variant":"diag_1d","solver":"NN","repeat":1,"state_dim":1,"status":"ok","rmse_history":[],"v_h_history":[],"n_history":[]}
+{"timestamp":"2025-11-01T16:58:29Z","scenario":"dimension","variant":"diag_1d","solver":"NN","repeat":1,"state_dim":1,"status":"ok","rmse_history":[],"v_h_history":[],"n_history":[]}

@@ -38,9 +38,9 @@ function sample_training(
         amin, amax = Float32.(extrema(a_grid))
         Rg = 1.0f0 + Float32(base_P.r)
 
-        is_csvar = isdefined(base_P, :A) && isdefined(base_P, :Σ)
         y_vec = base_P.y isa AbstractVector ? Float64.(base_P.y) : [Float64(base_P.y)]
         y_dim = length(y_vec)
+        is_csvar = isdefined(base_P, :A) && isdefined(base_P, :Σ) && y_dim > 1
 
         is_gaussian =
             !isnothing(S) && isdefined(S, :process) && S.process == :gaussian_linear
@@ -122,7 +122,8 @@ function sample_training(
     w_hi = Float32(getproperty(settings, :w_max))
 
     Rg = 1.0f0 + Float32(base_P.r)
-    is_csvar = size(base_P.y, 1) > 1
+    y_dim = hasproperty(base_P, :y) && base_P.y isa AbstractVector ? length(base_P.y) : 1
+    is_csvar = isdefined(base_P, :A) && isdefined(base_P, :Σ) && y_dim > 1
 
     if is_csvar
         log_means = csvar_component_log_means(base_P)

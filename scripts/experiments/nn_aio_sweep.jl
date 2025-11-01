@@ -3,16 +3,16 @@
 module NNAIOSweep
 
 """
-Evaluate NN solver configurations (AiO objective) on the baseline scalar model.
+Evaluate NN solver configurations (AiO objective) on the stochastic smoke setup.
 
-This script sweeps a curated set of neural-network hyperparameters while keeping
-the underlying economic model fixed. It records convergence diagnostics, writes
-a tidy CSV/JSON, and produces plots plus a Markdown summary that highlight the
-best-performing configuration for the simple model.
+This script sweeps a curated set of neural-network hyperparameters against the
+`smoke_cfg_stoch.yaml` baseline. It records convergence diagnostics, writes tidy
+CSV/JSON/Markdown artifacts, and produces production-ready plots that highlight
+the most reliable configurations for the stochastic consumption-saving model.
 
 Usage (defaults shown):
   julia --project scripts/experiments/nn_aio_sweep.jl \
-        --base=config/scalar_ar1_baseline.yaml \
+        --base=config/smoke_cfg_stoch.yaml \
         --outdir=outputs/experiments/nn_aio_sweep
 
 Additional flags:
@@ -37,6 +37,35 @@ using ThesisProject
 include(joinpath(@__DIR__, "..", "utils", "config_helpers.jl"))
 using .ScriptConfigHelpers
 
+const PLOT_SIZE = (960, 640)
+const PLOT_DPI = 180
+const BASE_PALETTE = palette(:viridis, 8)
+const PlotArtifact = NamedTuple{(:png, :pdf),Tuple{String,String}}
+
+Plots.default(;
+    size = PLOT_SIZE,
+    dpi = PLOT_DPI,
+    background_color = :white,
+    foreground_color = :black,
+    grid = true,
+    gridalpha = 0.25,
+    gridlinewidth = 0.6,
+    legendfontsize = 10,
+    guidefontsize = 13,
+    tickfontsize = 11,
+    titlefontsize = 16,
+    linewidth = 2,
+)
+
+save_plot_all(plt, out_dir::AbstractString, name::AbstractString) = begin
+    base = joinpath(out_dir, name)
+    png_path = base * ".png"
+    pdf_path = base * ".pdf"
+    savefig(plt, png_path)
+    savefig(plt, pdf_path)
+    (png = png_path, pdf = pdf_path)
+end
+
 # ---------------------------------------------------------------------------
 # CLI parsing
 # ---------------------------------------------------------------------------
@@ -49,7 +78,7 @@ struct SweepOptions
 end
 
 function parse_cli(args)::SweepOptions
-    base_path = joinpath(ROOT, "config", "scalar_ar1_baseline.yaml")
+    base_path = joinpath(ROOT, "config", "smoke_cfg_stoch.yaml")
     out_dir = joinpath(ROOT, "outputs", "experiments", "nn_aio_sweep")
     repeats = 1
     summary_only = false
@@ -82,8 +111,8 @@ end
 
 const VARIANTS = Variant[
     Variant(
-        :stability_baseline,
-        "120k epochs, lr=2e-4, sigma_shocks off",
+        :baseline_control,
+        "120k epochs, 64-sample batches, conservative LR schedule",
         (; method = :NN, verbose = false),
         (
             optimizer = :adamW,
@@ -94,67 +123,95 @@ const VARIANTS = Variant[
             lr_max = 2.0e-4,
             lr_decay_horizon = 60_000,
             warmup_epochs = 1_000,
-            samples_per_epoch = 512,
-            resample_every = 6,
+            samples_per_epoch = 64,
+            eval_samples = 8_192,
+            resample_every = 5,
             n_mc = 64,
             sigma_shocks = nothing,
         ),
     ),
     Variant(
-        :moderate_lr,
-        "100k epochs, lr=3e-4, moderate sampling",
+        :precision_highmc,
+        "160k epochs, wider 96×96 net, dense sampling, n_mc=96",
         (; method = :NN, verbose = false),
         (
             optimizer = :adamW,
-            epochs = 100_000,
-            batch = 2_048,
-            lr = 3.0e-4,
-            lr_min = 5.0e-6,
-            lr_max = 3.0e-4,
-            lr_decay_horizon = 40_000,
-            warmup_epochs = 800,
-            samples_per_epoch = 256,
-            resample_every = 8,
-            n_mc = 64,
-            sigma_shocks = nothing,
-        ),
-    ),
-    Variant(
-        :large_samples,
-        "Larger sample cloud (192) with shock jitter",
-        (; method = :NN, verbose = false),
-        (
-            optimizer = :adamW,
-            epochs = 120_000,
-            batch = 4096,
-            lr = 2.5e-4,
-            lr_min = 5.0e-6,
-            lr_max = 2.5e-4,
-            lr_decay_horizon = 30_000,
-            warmup_epochs = 900,
+            epochs = 160_000,
+            batch = 4_096,
+            lr = 1.5e-4,
+            lr_min = 1.0e-5,
+            lr_max = 1.5e-4,
+            lr_decay_horizon = 90_000,
+            warmup_epochs = 1_600,
+            hid1 = 96,
+            hid2 = 96,
             samples_per_epoch = 192,
+            eval_samples = 16_384,
             resample_every = 6,
-            n_mc = 64,
+            n_mc = 96,
+            sigma_shocks = nothing,
+        ),
+    ),
+    Variant(
+        :aggressive_schedule,
+        "90k epochs, higher LR, jittered shocks, rapid resampling",
+        (; method = :NN, verbose = false),
+        (
+            optimizer = :adamW,
+            epochs = 90_000,
+            batch = 2_048,
+            lr = 3.5e-4,
+            lr_min = 5.0e-5,
+            lr_max = 3.5e-4,
+            lr_decay_horizon = 35_000,
+            warmup_epochs = 700,
+            samples_per_epoch = 96,
+            eval_samples = 8_192,
+            resample_every = 4,
+            n_mc = 48,
             sigma_shocks = 0.05,
         ),
     ),
     Variant(
-        :low_lr,
-        "150k epochs, lr=1.5e-4, heavy smoothing",
+        :wide_network,
+        "130k epochs, 128×128 net, large batches, eval grid 12k",
         (; method = :NN, verbose = false),
         (
             optimizer = :adamW,
-            epochs = 150_000,
-            batch = 4096,
-            lr = 1.5e-4,
+            epochs = 130_000,
+            batch = 6_144,
+            lr = 2.5e-4,
             lr_min = 5.0e-6,
-            lr_max = 1.5e-4,
-            lr_decay_horizon = 80_000,
+            lr_max = 2.5e-4,
+            lr_decay_horizon = 70_000,
             warmup_epochs = 1_200,
-            samples_per_epoch = 384,
-            resample_every = 10,
-            n_mc = 64,
+            hid1 = 128,
+            hid2 = 128,
+            samples_per_epoch = 160,
+            eval_samples = 12_288,
+            resample_every = 6,
+            n_mc = 80,
             sigma_shocks = nothing,
+        ),
+    ),
+    Variant(
+        :curriculum_resampling,
+        "140k epochs, slow LR decay, resample every epoch, mild shock noise",
+        (; method = :NN, verbose = false),
+        (
+            optimizer = :adamW,
+            epochs = 140_000,
+            batch = 4_096,
+            lr = 2.2e-4,
+            lr_min = 5.0e-6,
+            lr_max = 2.2e-4,
+            lr_decay_horizon = 70_000,
+            warmup_epochs = 2_000,
+            samples_per_epoch = 128,
+            eval_samples = 8_192,
+            resample_every = 1,
+            n_mc = 64,
+            sigma_shocks = 0.08,
         ),
     ),
 ]
@@ -243,17 +300,63 @@ function aggregate_results(results)
     end
     df = DataFrame(rows)
     ok_df = filter(row -> row.status == "ok", df)
-    grouped = combine(
-        groupby(ok_df, :variant),
-        :runtime => mean => :runtime_mean,
-        :runtime => std => :runtime_std,
-        :final_rmse => mean => :rmse_mean,
-        :final_rmse => std => :rmse_std,
-        :mean_ee => mean => :mean_ee_mean,
-        :converged => x -> mean(Float64.(x)) => :convergence_rate,
-    )
-    sort!(grouped, :rmse_mean)
+    grouped = if nrow(ok_df) == 0
+        DataFrame()
+    else
+        combine(
+            groupby(ok_df, :variant),
+            nrow => :runs,
+            :runtime => mean => :runtime_mean,
+            :runtime => std => :runtime_std,
+            :runtime => x -> quantile(x, 0.9) => :runtime_p90,
+            :final_rmse => mean => :rmse_mean,
+            :final_rmse => std => :rmse_std,
+            :final_rmse => median => :rmse_median,
+            :final_rmse => x -> quantile(x, 0.9) => :rmse_p90,
+            :mean_ee => mean => :mean_ee_mean,
+            :mean_ee => std => :mean_ee_std,
+            :converged => x -> mean(Float64.(x)) => :convergence_rate,
+        )
+    end
+    if !isempty(grouped)
+        for col in (:runtime_std, :rmse_std, :mean_ee_std)
+            hasproperty(grouped, col) || continue
+            grouped[!, col] = map(x -> isnan(x) ? 0.0 : x, grouped[!, col])
+        end
+        sort!(grouped, :rmse_mean)
+    end
     return df, grouped
+end
+
+function tidy_summary(summary::DataFrame)
+    isempty(summary) && return summary
+    fmt = deepcopy(summary)
+    if :convergence_rate in names(fmt)
+        fmt[!, :convergence_rate] .= fmt[!, :convergence_rate] .* 100
+        rename!(fmt, :convergence_rate => :convergence_pct)
+    end
+    two_digit_cols = Set([:convergence_pct])
+    for col in names(fmt)
+        data = fmt[!, col]
+        if data isa AbstractVector{<:Real} && !(eltype(data) <: Integer)
+            digits = col in two_digit_cols ? 2 : 4
+            fmt[!, col] = round.(Float64.(data); digits = digits)
+        end
+    end
+    return fmt
+end
+
+function markdown_table(df::DataFrame)
+    isempty(df) && return "No successful runs."
+    header = names(df)
+    buf = IOBuffer()
+    println(buf, "|" * join(string.(header), " | ") * "|")
+    println(buf, "|" * join(fill("---", length(header)), " | ") * "|")
+    for row in eachrow(df)
+        vals = [string(row[h]) for h in header]
+        println(buf, "|" * join(vals, " | ") * "|")
+    end
+    return String(take!(buf))
 end
 
 function write_results(
@@ -291,58 +394,90 @@ function write_results(
     return csv_path, summary_path, json_path
 end
 
-function plot_rmse_bar(summary::DataFrame, out_dir::AbstractString)
-    bar(
-        summary.variant,
-        summary.rmse_mean;
-        yerror = summary.rmse_std,
+function plot_rmse_bar(summary::DataFrame, out_dir::AbstractString)::PlotArtifact
+    if nrow(summary) == 0
+        return (png = "", pdf = "")
+    end
+    order = summary.variant
+    colors = BASE_PALETTE[1:nrow(summary)]
+    values = summary.rmse_mean
+    errs = summary.rmse_std
+    plt = bar(
+        order,
+        values;
+        yerror = errs,
         xlabel = "Variant",
         ylabel = "Final Euler RMSE",
         legend = false,
-        rotation = 15,
-        title = "Final Euler RMSE by NN configuration",
+        rotation = 20,
+        fillcolor = colors,
+        linecolor = :black,
+        bar_width = 0.6,
+        title = "Final Euler RMSE by NN Configuration",
     )
-    png_path = joinpath(out_dir, "rmse_bar.png")
-    savefig(png_path)
-    return png_path
+    for (idx, val) in enumerate(values)
+        annotate!(plt, idx, val, text(@sprintf("%.4f", val), :center, 10))
+    end
+    return save_plot_all(plt, out_dir, "rmse_bar")
 end
 
-function plot_runtime_vs_rmse(summary::DataFrame, out_dir::AbstractString)
-    ann = collect(zip(summary.runtime_mean, summary.rmse_mean, summary.variant))
-    scatter(
+function plot_runtime_vs_rmse(summary::DataFrame, out_dir::AbstractString)::PlotArtifact
+    if nrow(summary) == 0
+        return (png = "", pdf = "")
+    end
+    colors = BASE_PALETTE[1:nrow(summary)]
+    best_idx = argmin(summary.rmse_mean)
+    plt = scatter(
         summary.runtime_mean,
         summary.rmse_mean;
         xlabel = "Runtime (s)",
         ylabel = "Final Euler RMSE",
-        title = "Runtime vs Residual",
+        title = "Runtime–Accuracy Frontier",
         legend = false,
         marker = :circle,
-        ms = 8,
-        annotations = ann,
+        markersize = 9,
+        color = colors,
+        framestyle = :box,
     )
-    png_path = joinpath(out_dir, "runtime_vs_rmse.png")
-    savefig(png_path)
-    return png_path
+    for i = 1:nrow(summary)
+        lbl = string(summary.variant[i])
+        annotate!(plt, summary.runtime_mean[i], summary.rmse_mean[i], text(lbl, :left, 9))
+    end
+    scatter!(
+        plt,
+        [summary.runtime_mean[best_idx]],
+        [summary.rmse_mean[best_idx]];
+        marker = (:star5, 14),
+        color = :orange,
+        label = "",
+    )
+    return save_plot_all(plt, out_dir, "runtime_vs_rmse")
 end
 
-function plot_rmse_history(detailed_results, out_dir::AbstractString)
-    plt = plot(;
+function plot_rmse_history(detailed_results, out_dir::AbstractString)::PlotArtifact
+    traces =
+        filter(res -> res.status == :ok && !isempty(res.rmse_history), detailed_results)
+    if isempty(traces)
+        return (png = "", pdf = "")
+    end
+    plt = plot(
         xlabel = "Epoch",
         ylabel = "Euler RMSE",
-        title = "RMSE trajectories",
+        title = "Euler RMSE Trajectories",
         yscale = :log10,
+        legend = :topright,
     )
-    for res in detailed_results
-        isempty(res.rmse_history) && continue
-        label = string(res.variant, "_r", res.repeat)
-        plot!(plt, res.rmse_history; label = label)
+    step = 100
+    for (idx, res) in enumerate(traces)
+        epochs = collect(step:step:step*length(res.rmse_history))
+        color = BASE_PALETTE[1+mod(idx - 1, length(BASE_PALETTE))]
+        label = string(res.variant, " (repeat ", res.repeat, ")")
+        plot!(plt, epochs, res.rmse_history; label = label, color = color, alpha = 0.9)
     end
-    png_path = joinpath(out_dir, "rmse_history.png")
-    savefig(png_path)
-    return png_path
+    return save_plot_all(plt, out_dir, "rmse_history")
 end
 
-function write_report(out_dir, summary::DataFrame, plots::Dict{Symbol,String})
+function write_report(out_dir, summary::DataFrame, plots::Dict{Symbol,PlotArtifact})
     report_path = joinpath(out_dir, "report.md")
     open(report_path, "w") do io
         println(io, "# NN AiO Sweep Report")
@@ -358,12 +493,14 @@ function write_report(out_dir, summary::DataFrame, plots::Dict{Symbol,String})
             println(io)
             println(io, "## Summary Table")
             println(io)
-            show(io, MIME("text/plain"), summary)
+            tidy = tidy_summary(summary)
+            println(io, markdown_table(tidy))
             println(io)
         end
         println(io, "\n## Plots")
-        for (label, path) in plots
-            println(io, "- $(label): ![]($(basename(path)))")
+        for (label, artifact) in plots
+            isempty(artifact.png) && continue
+            println(io, "- $(label): ![]($(basename(artifact.png)))")
         end
     end
     return report_path
@@ -395,20 +532,27 @@ function run()
         return
     end
 
-    ensure_output_dir(opts.out_dir)
-    csv_path, summary_path, json_path = write_results(opts.out_dir, df, summary, results)
-    plots = Dict{Symbol,String}()
-    plots[:rmse_bar] = plot_rmse_bar(summary, opts.out_dir)
-    plots[:runtime_vs_rmse] = plot_runtime_vs_rmse(summary, opts.out_dir)
-    plots[:rmse_history] = plot_rmse_history(results, opts.out_dir)
-    report_path = write_report(opts.out_dir, summary, plots)
+    out_root = ensure_output_dir(opts.out_dir)
+    run_dir = joinpath(out_root, Dates.format(now(), "yyyymmdd_HHMMSS"))
+    ensure_output_dir(run_dir)
 
-    println("\nArtifacts written to $(opts.out_dir):")
+    csv_path, summary_path, json_path = write_results(run_dir, df, summary, results)
+    plots = Dict{Symbol,PlotArtifact}()
+    if nrow(summary) > 0
+        plots[:rmse_bar] = plot_rmse_bar(summary, run_dir)
+        plots[:runtime_vs_rmse] = plot_runtime_vs_rmse(summary, run_dir)
+    end
+    plots[:rmse_history] = plot_rmse_history(results, run_dir)
+    report_path = write_report(run_dir, summary, plots)
+
+    println("\nArtifacts written to $(run_dir):")
     println("  - runs CSV: $(csv_path)")
     println("  - summary CSV: $(summary_path)")
     println("  - raw JSON: $(json_path)")
-    for (label, path) in plots
-        println("  - $(label) plot: $(path)")
+    for (label, artifact) in plots
+        isempty(artifact.png) && continue
+        println("  - $(label) plot (png): $(artifact.png)")
+        println("    $(label) plot (pdf): $(artifact.pdf)")
     end
     println("  - report: $(report_path)")
 end

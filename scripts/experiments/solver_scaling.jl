@@ -17,12 +17,19 @@ import Pkg
 Pkg.activate(normpath(joinpath(@__DIR__, "..", "..")); io = devnull)
 
 using Dates
-using JSON3
 using LinearAlgebra
+using JSON3
 using Printf
 using Random
 using Statistics
 using ThesisProject
+
+const DEFAULT_BLAS_THREADS = parse(Int, get(ENV, "SOLVER_SCALING_BLAS_THREADS", "20"))
+try
+    LinearAlgebra.BLAS.set_num_threads(DEFAULT_BLAS_THREADS)
+catch err
+    @warn "Failed to set BLAS threads" threads = DEFAULT_BLAS_THREADS err = err
+end
 
 const ROOT = normpath(joinpath(@__DIR__, "..", ".."))
 const DEFAULT_BASE_CFG = joinpath(ROOT, "config", "csvar_template.yaml")
@@ -110,6 +117,9 @@ function parse_cli(args)::ExperimentOptions
                 key = lowercase(entry)
                 push!(scenarios, get(_SCENARIO_ALIASES, key, Symbol(entry)))
             end
+        elseif startswith(arg, "--dim=")
+            value = split(arg, "=", limit = 2)[2]
+            dims = [parse(Int, value)]
         elseif startswith(arg, "--dims=")
             entries = _split_list(split(arg, "=", limit = 2)[2])
             dims = [parse(Int, entry) for entry in entries]
@@ -348,7 +358,95 @@ function _collect_failure(
     )
 end
 
-function _write_csv(path::AbstractString, rows)
+function _normalize_v_h_history(history)
+    result = NamedTuple{
+        (:epoch, :old_v_h, :new_v_h, :scale_factor),
+        Tuple{Int,Float64,Float64,Float64},
+    }[]
+    for entry in history
+        if !(hasproperty(entry, :epoch) && hasproperty(entry, :new_v_h))
+            continue
+        end
+        epoch = Int(getproperty(entry, :epoch))
+        new_v = Float64(getproperty(entry, :new_v_h))
+        old_v = hasproperty(entry, :old_v_h) ? Float64(getproperty(entry, :old_v_h)) : new_v
+        scale =
+            hasproperty(entry, :scale_factor) ? Float64(getproperty(entry, :scale_factor)) :
+            (old_v ≈ 0.0 ? 1.0 : new_v / max(old_v, eps(Float64)))
+        push!(
+            result,
+            (; epoch = epoch, old_v_h = old_v, new_v_h = new_v, scale_factor = scale),
+        )
+    end
+    return result
+end
+
+function _normalize_n_history(history)
+    result = NamedTuple{(:step, :epoch, :N),Tuple{Int,Int,Int}}[]
+    for entry in history
+        if !(hasproperty(entry, :step) && hasproperty(entry, :N))
+            continue
+        end
+        step = Int(getproperty(entry, :step))
+        epoch = hasproperty(entry, :epoch) ? Int(getproperty(entry, :epoch)) : 0
+        N = Int(getproperty(entry, :N))
+        push!(result, (; step = step, epoch = epoch, N = N))
+    end
+    return result
+end
+
+function _collect_history_success(
+    scenario::Symbol,
+    label::Symbol,
+    solver::Symbol,
+    rep::Int,
+    cfg::NamedTuple,
+    sol::ThesisProject.Solution,
+)
+    meta = sol.metadata
+    rmse_hist = Float64.(get(meta, :rmse_history, Float64[]))
+    vh_hist = _normalize_v_h_history(get(meta, :v_h_history, Any[]))
+    n_hist = _normalize_n_history(get(meta, :n_history, Any[]))
+    state_dim = length(cfg.params.y)
+    return (
+        timestamp = Dates.format(now(UTC), dateformat"yyyy-mm-ddTHH:MM:SSZ"),
+        scenario = String(scenario),
+        variant = String(label),
+        solver = String(solver),
+        repeat = rep,
+        state_dim = state_dim,
+        status = "ok",
+        rmse_history = rmse_hist,
+        v_h_history = vh_hist,
+        n_history = n_hist,
+    )
+end
+
+function _collect_history_failure(
+    scenario::Symbol,
+    label::Symbol,
+    solver::Symbol,
+    rep::Int,
+    cfg::NamedTuple,
+    err,
+)
+    state_dim = length(cfg.params.y)
+    return (
+        timestamp = Dates.format(now(UTC), dateformat"yyyy-mm-ddTHH:MM:SSZ"),
+        scenario = String(scenario),
+        variant = String(label),
+        solver = String(solver),
+        repeat = rep,
+        state_dim = state_dim,
+        status = "exception",
+        message = sprint(showerror, err),
+        rmse_history = Float64[],
+        v_h_history = _normalize_v_h_history(Any[]),
+        n_history = _normalize_n_history(Any[]),
+    )
+end
+
+function _write_csv(path::AbstractString, rows; append::Bool = false)
     header = [
         "timestamp",
         "scenario",
@@ -366,8 +464,17 @@ function _write_csv(path::AbstractString, rows)
         "message",
     ]
 
-    open(path, "w") do io
-        println(io, join(header, ","))
+    write_header = true
+    if append && isfile(path)
+        write_header = filesize(path) == 0
+    else
+        append = false
+    end
+
+    open(path, append ? "a" : "w") do io
+        if write_header
+            println(io, join(header, ","))
+        end
         for row in rows
             fields = (
                 row.timestamp,
@@ -391,9 +498,13 @@ function _write_csv(path::AbstractString, rows)
     return path
 end
 
-function _write_json(path::AbstractString, rows)
-    open(path, "w") do io
-        JSON3.write(io, rows; indent = 2)
+function _write_history(path::AbstractString, rows; append::Bool = false)
+    isempty(rows) && return path
+    open(path, append ? "a" : "w") do io
+        for row in rows
+            JSON3.write(io, row)
+            write(io, '\n')
+        end
     end
     return path
 end
@@ -442,6 +553,7 @@ function run()
     isempty(scenarios) && error("No scenarios selected; adjust --scenarios")
 
     rows = NamedTuple[]
+    history_rows = NamedTuple[]
 
     for scenario_info in scenarios
         scenario = scenario_info.scenario
@@ -457,10 +569,32 @@ function run()
                     metrics =
                         _collect_metrics(scenario, label, solver, rep, cfg_solver, sol)
                     push!(rows, metrics)
+                    push!(
+                        history_rows,
+                        _collect_history_success(
+                            scenario,
+                            label,
+                            solver,
+                            rep,
+                            cfg_solver,
+                            sol,
+                        ),
+                    )
                 catch err
                     push!(
                         rows,
                         _collect_failure(scenario, label, solver, rep, cfg_solver, err),
+                    )
+                    push!(
+                        history_rows,
+                        _collect_history_failure(
+                            scenario,
+                            label,
+                            solver,
+                            rep,
+                            cfg_solver,
+                            err,
+                        ),
                     )
                 end
             end
@@ -472,12 +606,25 @@ function run()
     opts.summary_only && return
 
     _ensure_output_dir(opts.out_dir)
-    out_csv = joinpath(opts.out_dir, opts.out_file)
-    out_json = replace(out_csv, ".csv" => ".json")
-    _write_csv(out_csv, rows)
-    _write_json(out_json, rows)
+    out_csv = if isabspath(opts.out_file)
+        normpath(opts.out_file)
+    elseif occursin("/", opts.out_file) || occursin("\\", opts.out_file)
+        normpath(joinpath(ROOT, opts.out_file))
+    else
+        joinpath(opts.out_dir, opts.out_file)
+    end
+    _ensure_output_dir(dirname(out_csv))
+    append = isfile(out_csv)
+    append ? println("Appending results to existing CSV: $(out_csv)") :
+    println("Writing new CSV: $(out_csv)")
+    _write_csv(out_csv, rows; append = append)
+    out_history =
+        endswith(lowercase(out_csv), ".csv") ?
+        replace(out_csv, r"\.csv$" => "_history.jsonl") : out_csv * "_history.jsonl"
+    append_history = isfile(out_history)
+    _write_history(out_history, history_rows; append = append_history)
     println()
-    println("Wrote results to:\n  CSV : $(out_csv)\n  JSON: $(out_json)")
+    println("Wrote results to:\n  CSV : $(out_csv)\n  Hist: $(out_history)")
 end
 
 run()
