@@ -421,12 +421,10 @@ function loss_euler_fb_aio_csvar!(chain, ps, st, batch, model_cfg, rng)
     out, st1 = Lux.apply(chain, batch, ps, st)
     c0 = vec(phi_to_consumption(out[:Φ], w0; min_c = C_MIN))
     eta = T.(vec(ensure_row(out[:h])))
-    a_term = @. one(T) - c0 / w0
     a_curr = @. w0 - c0
 
     Rg = one(T) + T(P.r)
     β = T(P.β)
-    v_h = isdefined(model_cfg, :v_h) ? T(model_cfg.v_h) : one(T)
 
     A = Matrix{T}(P.A)
     Σ = Matrix{Float64}(P.Σ)
@@ -465,10 +463,12 @@ function loss_euler_fb_aio_csvar!(chain, ps, st, batch, model_cfg, rng)
     q1 = @. β * Rg * uprime(c1) / uprime(c0)
     q2 = @. β * Rg * uprime(c2) / uprime(c0)
 
-    fb_term = fb(a_term, eta)
+    fb_a_term = @. one(T) - c0 / max(w0, eps(T))
+    fb_h_term = one(T) .- eta
+    fb_term = fb(fb_a_term, fb_h_term)
     kt = @. fb_term^2
-    r1 = @. one(T) - q1 - eta
-    r2 = @. one(T) - q2 - eta
+    r1 = @. q1 - eta
+    r2 = @. q2 - eta
     # Paper (eq. 30): AiO term is the product r1*r2, NOT squared
     aio_pen = r1 .* r2
 
