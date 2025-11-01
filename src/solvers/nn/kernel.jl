@@ -248,6 +248,9 @@ function solve_nn(model; opts = nothing, settings = nothing, rng = nothing)
 
     _, w_grid = grid_forward_inputs(G, P)
 
+    resid_array = evaluation.resid
+    rmse_val = sqrt(mean(abs2, vec(resid_array)))
+
     return (;
         w_grid = w_grid,
         c = evaluation.c,
@@ -255,7 +258,7 @@ function solve_nn(model; opts = nothing, settings = nothing, rng = nothing)
         resid = evaluation.resid,
         iters = training_result.epochs_run,
         converged = converged,
-        euler_rmse = evaluation.max_resid,
+        euler_rmse = rmse_val,
         max_resid = evaluation.max_resid,
         model_params = P,
         opts = opts_summary,
@@ -317,78 +320,86 @@ function loss_euler_fb_aio_ar1!(chain, ps, st, batch, model_cfg, rng)
     T = eltype(batch)
     C_MIN = T(1e-12)
 
-    Rg = one(T) + T(P.r)
-    if isdefined(P, :y) && P.y isa AbstractVector
-        μ = T(mean(Float64.(collect(P.y))))
+    ρ = T(P.ρ_shock)
+    σ_shocks = T(P.σ_shock)
+    R = one(T) + T(P.r)
+    β = T(P.β)
+    component_levels = T[]
+    if P.y isa AbstractVector
+        μ = T(mean(T.(collect(P.y))))
+        component_levels = T.(exp.(collect(P.y)))
     else
         μ = T(P.y)
+        component_levels = Float32[]
     end
+
     feature_dim = size(batch, 1)
     mean_norm = batch[1, :]
     w_norm = batch[end, :]
+
+    # First pass to retrieve first-period values
     y0 = ((mean_norm .+ one(T)) ./ T(2)) .* T(scaler.mean_range) .+ T(scaler.mean_min)
     w0 = ((w_norm .+ one(T)) ./ T(2)) .* T(scaler.w_range) .+ T(scaler.w_min)
     z0 = log.(y0) .- μ
-    out, st1 = Lux.apply(chain, batch, ps, st)
-    c0 = vec(phi_to_consumption(out[:Φ], w0; min_c = C_MIN))
-    # eta is a non-negative, dimensionless scaled multiplier proxy (≈ h/u'(c0))
-    eta = T.(vec(ensure_row(out[:h])))
-    a_term = @. one(T) - c0 / w0
 
-    ρ = T(P.ρ_shock)
-    σ_shocks = T(P.σ_shock)
+    # Network outputs
+    out, st1 = Lux.apply(chain, batch, ps, st)
+    Φ_out = vec(ensure_row(out[:Φ]))
+    h_out = T.(vec(ensure_row(out[:h])))
+
+    # Implies first period consumption
+    c0 = vec(phi_to_consumption(Φ_out, w0; min_c = C_MIN))
+    a0 = @. w0 - c0 # that yields the current period asset level
+
+    # Draw two future independent shocks per state
     ε1 = randn_like(rng, z0)
     ε2 = randn_like(rng, z0)
-    z1 = @. ρ * z0 + σ_shocks * ε1
-    z2 = @. ρ * z0 + σ_shocks * ε2
 
-    y1 = exp.(μ .+ z1)
-    y2 = exp.(μ .+ z2)
-    a1 = @. w0 - c0
-    w1 = @. Rg * a1 + y1
-    w2 = @. Rg * a1 + y2
+    # implies second period incomes and wealths
+    y_next_1 = @. exp.(ρ * z0 + σ_shocks * ε1)
+    y_next_2 = @. exp.(ρ * z0 + σ_shocks * ε2)
+    w_next_1 = @. R * a0 + y_next_1
+    w_next_2 = @. R * a0 + y_next_2
 
-    component_levels =
-        isdefined(P, :y) && P.y isa AbstractVector ? Float32.(exp.(collect(P.y))) :
-        Float32[]
-
-    X1n, X2n = ignore_derivatives() do
-        X1 = build_ar1_features(y1, w1, feature_dim, component_levels, μ)
-        X2 = build_ar1_features(y2, w2, feature_dim, component_levels, μ)
+    # Build both normalized input features matrixs
+    X_next_1, X_next_2 = ignore_derivatives() do
+        X1 = build_ar1_features(y_next_1, w_next_1, feature_dim, component_levels, μ)
+        X2 = build_ar1_features(y_next_2, w_next_2, feature_dim, component_levels, μ)
         normalize_feature_batch(scaler, X1), normalize_feature_batch(scaler, X2)
     end
 
-    out1, st1 = Lux.apply(chain, X1n, ps, st1)
-    out2, st2 = Lux.apply(chain, X2n, ps, st1)
+    # Second pass to get next period outputs for both shock draws
+    out_next_1, _ = Lux.apply(chain, X_next_1, ps, st1)
+    out_next_2, _ = Lux.apply(chain, X_next_2, ps, st1)
+    # and convert to next period consumption
+    c_next_1 = vec(phi_to_consumption(out_next_1[:Φ], w_next_1; min_c = C_MIN))
+    c_next_2 = vec(phi_to_consumption(out_next_2[:Φ], w_next_2; min_c = C_MIN))
 
-    c1 = vec(phi_to_consumption(out1[:Φ], w1; min_c = C_MIN))
-    c2 = vec(phi_to_consumption(out2[:Φ], w2; min_c = C_MIN))
+    u_ratio_1 = @. β * R * uprime(c_next_1) / uprime(c0)
+    u_ratio_2 = @. β * R * uprime(c_next_2) / uprime(c0)
 
-    β = T(P.β)
-    q1 = @. β * Rg * uprime(c1) / uprime(c0)
-    q2 = @. β * Rg * uprime(c2) / uprime(c0)
+    # first part of the loss is the squared FB function
+    fb_a_term = @. one(T) - c0 / max(w0, eps(T))
+    fb_h_term = one(T) .- h_out
+    fb_term = fb(fb_a_term, fb_h_term)
+    fb_term_sq = @. fb_term^2
 
-    # Complementarity between non-negativity (a_term >= 0) and multiplier eta >= 0
-    fb_term = fb(a_term, eta)
-    kt = @. fb_term^2
-    # Euler-KKT residuals r = 1 - q - eta
-    r1 = @. one(T) - q1 - eta
-    r2 = @. one(T) - q2 - eta
-    # Paper (eq. 30): AiO term is the product r1*r2, NOT squared
+    # second term compares h to the u_ratio
+    r1 = @. u_ratio_1 - h_out
+    r2 = @. u_ratio_2 - h_out
     aio_pen = r1 .* r2
 
-    # Use adaptive v_h if available, otherwise fall back to static value
+    # v_h to weight the AiO penalty, may be adaptive
     v_h = if isdefined(model_cfg, :adaptive_v_h_state)
         T(model_cfg.adaptive_v_h_state.v_h[])
     else
         isdefined(model_cfg, :v_h) ? T(model_cfg.v_h) : one(T)
     end
-    loss_vec = kt .+ v_h .* aio_pen
 
-    max_abs_q = maximum(abs.(vcat(q1, q2)))
+    loss_vec = fb_term_sq .+ v_h .* aio_pen
 
     return mean(loss_vec),
-    (st1, (; kt_mean = mean(kt), aio_mean = mean(aio_pen), max_abs_q = max_abs_q))
+    (st1, (; mean_fb_term_sq = mean(fb_term_sq), mean_aio = mean(aio_pen)))
 end
 
 function loss_euler_fb_aio_csvar!(chain, ps, st, batch, model_cfg, rng)

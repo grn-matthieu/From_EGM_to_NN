@@ -94,9 +94,11 @@ function stoch_residual_inputs(c_predicted, G, S)
     total_needed = Na * Nz
 
     c_mat = if len == total_needed
-        reshape(vec_cp, Na, Nz)
+        # Samples are ordered with shocks varying fastest, so reshape Nz×Na
+        # and swap axes to recover an Na×Nz matrix (rows = asset levels).
+        Matrix(permutedims(reshape(vec_cp, Nz, Na), (2, 1)))
     elseif len == Na
-        repeat(reshape(vec_cp, Na, 1), 1, Nz)  # Tile across z
+        repeat(reshape(vec_cp, Na, 1), 1, Nz)  # Tile across shocks
     elseif len == Nz
         repeat(reshape(vec_cp, 1, Nz), Na, 1)  # Tile across assets
     else

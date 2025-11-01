@@ -158,28 +158,13 @@ function sample_training(
         σ = base_P.σ_shock
         μ = Float32(log(base_income))
 
-        filled = 0
-        while filled < nsamples
-            remaining = nsamples - filled
-            a_draw = rand(rng, Float32, remaining) .* (amax - amin) .+ amin
-            z_draw =
-                σ == 0.0f0 ? fill(0.0f0, remaining) : σ .* randn(rng, Float32, remaining)
-            y_tmp = exp.(μ .+ z_draw)
-            W_tmp = @. Rg * a_draw + y_tmp
-            keep = (W_tmp .>= w_lo) .& (W_tmp .<= w_hi)
-            k = count(keep)
-            if k == 0
-                continue
-            end
-            take = min(k, remaining)
-            idx = findall(keep)
-            select_idx = idx[1:take]
-            range = filled+1:filled+take
-            W[range] .= W_tmp[select_idx]
-            mean_vec[range] .= y_tmp[select_idx]
-            component_mat[1, range] .= y_tmp[select_idx]
-            filled += take
-        end
+        rand!(rng, W)
+        @. W = w_lo + W * (w_hi - w_lo)
+
+        eps = randn(rng, Float32, nsamples)
+        component_mat[1, :] .= eps
+        @. component_mat[1, :] = exp(μ + σ * component_mat[1, :])
+        mean_vec .= component_mat[1, :]
     end
 
     X = Matrix{Float32}(undef, nsamples, feature_dim)

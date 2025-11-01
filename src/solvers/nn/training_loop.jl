@@ -313,10 +313,10 @@ function train_consumption_network!(
                 end
                 prev_policy = copy(current_c)
 
-                # Unified Euler residual evaluation: prefer GH-based evaluation
-                # (works for specs that include stochastic fields and for grid-
-                # based evaluations). Fall back to grid residuals if GH
-                # evaluation isn't possible.
+                # Unified Euler residual evaluation: use the same grid-based
+                # evaluator employed during the final solution pass so that
+                # convergence diagnostics and reported residuals remain
+                # comparable across solvers.
                 euler_rmse = Inf
                 if model_cfg !== nothing &&
                    G !== nothing &&
@@ -324,48 +324,30 @@ function train_consumption_network!(
                    isdefined(model_cfg, :P) &&
                    model_cfg.P !== nothing
                     try
-                        gh_result = eval_euler_residuals_gh(
+                        eval_rng = derive_rng(rng, (:conv_check, epoch))
+                        eval_result = evaluate_stochastic(
                             current_model,
                             current_ps,
                             current_st,
-                            model_cfg.U,
+                            model_cfg.P,
+                            G,
+                            S,
                             scaler,
-                            settings;
-                            N = min(2048, samples_per_epoch),
-                            rng = rng,
-                            G = G,
-                            S = S,
-                            P = model_cfg.P,
+                            settings,
+                            model_cfg.U,
+                            eval_rng,
                         )
-                        # Compute RMSE from returned diagnostics
-                        if isdefined(gh_result, :abs_resid)
-                            euler_rmse = sqrt(mean(Float64.(gh_result.abs_resid) .^ 2))
-                        elseif isdefined(gh_result, :stats) &&
-                               isdefined(gh_result.stats, :rmse)
-                            euler_rmse = Float64(gh_result.stats.rmse)
-                        else
-                            # Keep Inf if diagnostics missing
-                            euler_rmse = Inf
-                        end
+                        resid_vals = vec(Float64.(eval_result.resid))
+                        euler_rmse = sqrt(mean(abs2, resid_vals))
                     catch err
-                        # If GH evaluation fails for any reason, fall back to
-                        # grid residuals when possible.
-                        if isdefined(model_cfg.P, :a) && isdefined(model_cfg.G, :a)
-                            a_grid_f32 = Float32.(model_cfg.G.a.grid)
-                            c_pred_vec_f32 = current_c[1:length(a_grid_f32)]
-                            residuals =
-                                euler_resid_grid(model_cfg.P, a_grid_f32, c_pred_vec_f32)
-                            euler_rmse = sqrt(mean(Float64.(residuals) .^ 2))
+                        if settings.verbose
+                            @warn "Grid evaluation failed in convergence check" err = err
                         end
                     end
                 else
-                    # Fallback for older configs that may not provide full
-                    # stochastic fields: use grid residuals when available.
-                    if isdefined(model_cfg.P, :a) &&
-                       model_cfg !== nothing &&
-                       isdefined(model_cfg, :G) &&
-                       isdefined(model_cfg.G, :a)
-                        a_grid_f32 = Float32.(model_cfg.G.a.grid)
+                    # Deterministic fallback: compute grid residuals directly.
+                    if model_cfg !== nothing && G !== nothing && isdefined(model_cfg, :P)
+                        a_grid_f32 = Float32.(G[:a].grid)
                         c_pred_vec_f32 = current_c[1:length(a_grid_f32)]
                         residuals =
                             euler_resid_grid(model_cfg.P, a_grid_f32, c_pred_vec_f32)
@@ -408,8 +390,8 @@ function train_consumption_network!(
             end
         end
 
-        # periodic validation logging every 100 epochs
-        if settings.verbose && epoch % 100 == 0
+        # periodic validation logging every 100000   epochs
+        if settings.verbose && epoch % 100000 == 0
             try
                 # loss_function returns (loss, st_out, diag) for the outer training API
                 val_loss, val_st, val_diag = loss_function(

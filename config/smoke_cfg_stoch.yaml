@@ -12,7 +12,7 @@ params:
 grids:
   Na: 50
   a_min: 0.0
-  a_max: 4.0
+  a_max: 2.4
   type: dense
   dense: null
 
@@ -44,29 +44,30 @@ solver:
     tol_fit: 1e-8
     maxit_fit: 25
   nn:
-    epochs: 1000
+    epochs: 100000
     batch: 2048
-    optimizer: adam
+    optimizer: adamW
     lr: 1e-3
-    lr_min: 5.0e-5
+    lr_min: 5.0e-6
     lr_max: 1.0e-3
-    lr_decay_horizon: 900
-    warmup_epochs: 50
+    lr_decay_horizon: 9000
+    warmup_epochs: 500
     hid1: 64
     hid2: 64
-    samples_per_epoch: 128
+    samples_per_epoch: 64
     objective: euler_fb_aio
-    v_h: 2.0
+    v_h: 1.0
+    # Match grid-implied cash-on-hand window to sampling range: w ∈ [0.1, 3.5]
     w_min: 0.1
     w_max: 3.5
     sigma_shocks: 0.1
-    target_loss: 1.0e-4
+    target_loss: 1.0e-7
     use_cuda: false
-    n_mc: 16
+    n_mc: 64
     bcmc_auto_N: false
     bcmc_budget_T: null
     bcmc_update_every: 10
-    resample_every: 1
+    resample_every: 10
 
 shocks:
   active: true

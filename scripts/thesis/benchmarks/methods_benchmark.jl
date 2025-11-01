@@ -208,7 +208,7 @@ function expected_income_level(params, shocks_info)
     end
     π = Float64.(getproperty(shocks_info, :π))
     if hasproperty(params, :y) && !(params.y isa AbstractVector)
-        μ = Float64(getfield(params, :y))
+        μ = Float64(log(getfield(params, :y)))
         if hasproperty(shocks_info, :zgrid)
             z = Float64.(getproperty(shocks_info, :zgrid))
             income_states = exp.(μ .+ z)
@@ -891,7 +891,7 @@ function generate_comparison_plots(
             title = "All Methods: Convergence Comparison",
             size = (800, 600),
             dpi = 150,
-            legend = :topright,
+            legend = :bottomright,
             grid = true,
             gridstyle = :solid,
             gridalpha = 0.3,

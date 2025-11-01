@@ -188,7 +188,7 @@ function evaluate_stochastic(
 
     residuals = euler_resid_grid(P, a_grid_f32, z_grid_f32, Pz_f32, c_matrix_f32)
     c_on_grid = convert_to_grid_eltype(G[:a].grid, c_matrix)
-    w_matrix = reshape(W, Na, Nz)
+    w_matrix = permutedims(reshape(W, Nz, Na), (2, 1))
     a_next = next_assets_from_cash(w_matrix, c_on_grid)
     a_next = clamp_to_asset_bounds(a_next, G[:a])
     max_resid = maximum(abs.(residuals))
