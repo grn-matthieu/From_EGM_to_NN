@@ -731,6 +731,7 @@ const GH10_W =
         0.001343645,
         7.640433e-6,
     ])
+const GH_SQRT2 = Float32(sqrt(2.0))
 
 """Gauss–Hermite Euler residual diagnostics for stochastic problems."""
 function eval_euler_residuals_gh(
@@ -817,7 +818,7 @@ function eval_euler_residuals_gh(
     @inbounds for k in eachindex(GH10_X)
         εk = GH10_X[k]
         wk = GH10_W[k] / sqrt(pi)
-        z1 = @. ρ * z0 + σϵ * εk
+        z1 = @. ρ * z0 + σϵ * GH_SQRT2 * εk
         y1 = exp.(μ .+ z1)
         a1 = @. w0 - c0
         w1 = @. Rg * a1 + y1
