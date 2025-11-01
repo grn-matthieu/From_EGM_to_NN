@@ -8,7 +8,6 @@ existing `methods` adapter.
 """
 module TimeIterationKernel
 
-using Base.Threads: @threads
 using ..CommonInterp:
     interp_linear,
     interp_linear!,
@@ -179,7 +178,7 @@ function solve_ti_det_impl(
             backend_cold = fit_values_on_backend!(a_info, a_grid, reshape(cold, :, 1))
         end
 
-        @threads for i in eachindex(a_grid)
+        for i in eachindex(a_grid)
             a = a_grid[i]
             resources = model_params.y + R * a
             c_hi = max(cmin, resources - a_min)
@@ -401,7 +400,7 @@ function solve_ti_det_impl(
             backend_cold = fit_values_on_backend!(a_info, a_grid, cold)
         end
 
-        @threads for i in eachindex(a_grid)
+        for i in eachindex(a_grid)
             a = a_grid[i]
             resources = model_params.y + R * a
             c_hi = max(cmin, resources - a_min)
@@ -606,7 +605,7 @@ function solve_ti_stoch_impl(
             column_new = view(cnew, :, j)
             @. cmax = y + R * a_grid - a_min
 
-            @threads for i in eachindex(a_grid)
+            for i in eachindex(a_grid)
                 a = a_grid[i]
                 resources = R * a + y
                 c_hi = max(cmin, resources - a_min)

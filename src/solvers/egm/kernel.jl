@@ -6,7 +6,6 @@ Exports helpers and the main projection-based policy iteration.
 """
 module EGMKernel
 
-using Base.Threads: @threads
 using ..CommonInterp: interpolate, InterpKind, LinearInterp, MonotoneCubicInterp
 using ..EulerResiduals: euler_resid!, euler_resid_stoch_interp!
 using ..PolicyUtils:
@@ -104,7 +103,7 @@ function solve_egm(
         copyto!(cold, c)
         @. pow = max(cold, cmin)^(-γ)
 
-        @threads for j = 1:Nz
+        for j = 1:Nz
             z = z_grid[j]
             y = exp(z)
             weights = Π[j, :]
