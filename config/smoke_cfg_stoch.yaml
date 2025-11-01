@@ -62,7 +62,6 @@ solver:
     w_max: 3.5
     sigma_shocks: 0.1
     target_loss: 1.0e-7
-    use_cuda: false
     n_mc: 64
     bcmc_auto_N: false
     bcmc_budget_T: null

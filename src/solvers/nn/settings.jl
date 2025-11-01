@@ -28,7 +28,6 @@ struct NNSolverSettings
     w_max::Float32
     samples_per_epoch::Int
     sigma_shocks::Union{Nothing,Float64}
-    use_cuda::Bool
     n_mc::Int
     bcmc_budget_T::Union{Nothing,Int}
     bcmc_auto_N::Bool
@@ -123,7 +122,6 @@ function solver_settings(
     w_max = Float32(get_option(opts, :w_max, 4.0))
     samples_per_epoch = max(Int(get_option(opts, :samples_per_epoch, 64)), 1)
     sigma_shocks = get_option(opts, :sigma_shocks, nothing)
-    use_cuda = get_option(opts, :use_cuda, false)
     n_mc = max(Int(get_option(opts, :n_mc, 16)), 1)
     bcmc_budget_T = let v = get_option(opts, :bcmc_budget_T, nothing)
         v === nothing ? nothing : Int(v)
@@ -205,7 +203,6 @@ function solver_settings(
         w_max,
         samples_per_epoch,
         sigma_shocks,
-        use_cuda,
         n_mc,
         bcmc_budget_T,
         bcmc_auto_N,

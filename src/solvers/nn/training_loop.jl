@@ -1,8 +1,4 @@
-import CUDA
-import Adapt
 import Zygote
-import Adapt
-using Lux: fmap
 using ChainRulesCore: ignore_derivatives, AbstractZero
 using LinearAlgebra: diag, dot, I
 using Optimisers
@@ -52,10 +48,6 @@ function train_consumption_network!(
     model_cfg = nothing,
 )
     ps, st = Lux.setup(rng, chain)
-    if settings.use_cuda
-        ps = fmap(cu, ps)
-        st = fmap(cu, st)
-    end
     opt = create_optimizer(settings)
     train_state = Lux.Training.TrainState(chain, ps, st, opt)
     # build loss with scaler so we can compute cash-on-hand inside the loss
@@ -72,7 +64,7 @@ function train_consumption_network!(
         P = model_cfg === nothing ? nothing : model_cfg.P,
     )
     normalize_samples!(scaler, X_train)
-    batch = prepare_training_batch(X_train, Val(settings.use_cuda))
+    batch = prepare_training_batch(X_train)
     # create a fixed validation batch for periodic diagnostics (held out)
     val_nsamples = min(4096, sample_count)
     validation_rng = derive_rng(rng, settings.epochs + 1)
@@ -86,13 +78,9 @@ function train_consumption_network!(
         P = model_cfg === nothing ? nothing : model_cfg.P,
     )
     normalize_samples!(scaler, X_val)
-    val_batch = prepare_training_batch(X_val, Val(settings.use_cuda))
+    val_batch = prepare_training_batch(X_val)
     total_samples = size(batch, 2)
     batch_size = compute_batch_size(total_samples, settings.batch_choice)
-    if settings.use_cuda
-        batch_size = total_samples        # 100% batch
-        batches_per_epoch = 1
-    end
     # For stochastic problems we require predictions on the full grid
     # (Na * Nz) so force full-batch training when shocks are present.
     if !isnothing(S) && batch_size < total_samples
@@ -132,7 +120,7 @@ function train_consumption_network!(
                 P = model_cfg === nothing ? nothing : model_cfg.P,
             )
             normalize_samples!(scaler, X_epoch)
-            batch = prepare_training_batch(X_epoch, Val(settings.use_cuda))
+            batch = prepare_training_batch(X_epoch)
             total_samples = size(batch, 2)
             batch_size = compute_batch_size(total_samples, settings.batch_choice)
             # same rule: force full-batch when stochastic
@@ -141,7 +129,7 @@ function train_consumption_network!(
             end
             batches_per_epoch = cld(total_samples, batch_size)
         end
-        shuffled = settings.use_cuda ? batch : batch[:, randperm(rng, total_samples)]
+        shuffled = batch[:, randperm(rng, total_samples)]
         epoch_loss = 0.0
         seen = 0
         gradient_norm = NaN
@@ -159,13 +147,10 @@ function train_consumption_network!(
             loss_value = Float64(loss)
             epoch_loss += Float64(loss_value) * nb
             seen += nb
-            if !settings.use_cuda
-                try
-                    # on CPU we can compute gradient norm exactly
-                    gradient_norm = sqrt(flatten_sum_squares(ginfo))
-                catch
-                    gradient_norm = NaN
-                end
+            try
+                gradient_norm = sqrt(flatten_sum_squares(ginfo))
+            catch
+                gradient_norm = NaN
             end
 
             if settings.objective === :euler_fb_bcmc &&
@@ -283,8 +268,7 @@ function train_consumption_network!(
                         P = model_cfg === nothing ? nothing : model_cfg.P,
                     )
                     normalize_samples!(scaler, X_check)
-                    convergence_check_batch =
-                        prepare_training_batch(X_check, Val(settings.use_cuda))
+                    convergence_check_batch = prepare_training_batch(X_check)
                 end
 
                 # Evaluate current policy on held-out grid
@@ -300,9 +284,6 @@ function train_consumption_network!(
                     current_st,
                 )
                 w_batch = convergence_check_batch[end, :]
-                if settings.use_cuda
-                    w_batch = cu(w_batch)
-                end
                 w_denorm = ((w_batch .+ 1.0f0) ./ 2.0f0) .* scaler.w_range .+ scaler.w_min
                 current_c = vec(phi_to_consumption(out[:Φ], w_denorm; min_c = 1.0f-12))
 

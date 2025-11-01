@@ -164,7 +164,7 @@ function build_options_summary(settings, training_result, runtime)
         runtime = runtime,
         verbose = settings.verbose,
         batches_per_epoch = training_result.batches_per_epoch,
-        device = settings.use_cuda ? :cuda : :cpu,
+        device = :cpu,
     )
 end
 
@@ -210,11 +210,8 @@ function solve_nn(model; opts = nothing, settings = nothing, rng = nothing)
 
     best_state = training_result.best_state
     trained_model = select_model(chain, best_state)
-    params =
-        settings.use_cuda ? fmap(cu, state_parameters(best_state)) :
-        state_parameters(best_state)
-    states =
-        settings.use_cuda ? fmap(cu, state_states(best_state)) : state_states(best_state)
+    params = state_parameters(best_state)
+    states = state_states(best_state)
 
     evaluation = evaluate_solution(
         trained_model,

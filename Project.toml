@@ -4,8 +4,6 @@ authors = ["Matthieu Grenier <matthieu.grenier@ensae.fr>"]
 version = "0.8.0"
 
 [deps]
-Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
-CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
 JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
@@ -31,8 +29,6 @@ Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
 ThesisProjectPlotsExt = ["Plots", "StatsBase"]
 
 [compat]
-Adapt = "4"
-CUDA = "5.8.3"
 ChainRulesCore = "1.26.0"
 Coverage = "1"
 ForwardDiff = "0.10"

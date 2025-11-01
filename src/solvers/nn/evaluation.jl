@@ -8,7 +8,6 @@ common diagnostic bundles.
 
 using Random
 using Random: randn!
-using Lux: fmap
 using LinearAlgebra: cholesky, mul!, Symmetric
 using ..CSVarUtils: csvar_income, csvar_component_log_means
 using ..GridHelpers: fit_values_on_backend!, grid_backend_available
@@ -196,7 +195,7 @@ function evaluate_stochastic(
 )
     X_eval, _ = sample_training(G, S; mode = :full, rng = rng, P = P)
     normalize_samples!(scaler, X_eval)
-    batch = prepare_training_batch(X_eval, Val(settings.use_cuda))
+    batch = prepare_training_batch(X_eval)
     prediction = run_model(model, params, states, batch)
 
     a_f32 = float32_vector(G[:a].grid)
@@ -208,7 +207,7 @@ function evaluate_stochastic(
     # Z contains log income deviations from 0, so exp.(Z) gives actual income with mean 1.0
     Rg = 1.0f0 + Float32(P.r)
     Y = exp.(Z)
-    W = settings.use_cuda ? fmap(cu, Rg * A + Y) : Rg * A + Y
+    W = Rg * A + Y
 
     if prediction isa NamedTuple
         c_row = phi_to_consumption(prediction[:Φ], W; scaler = scaler)
@@ -433,18 +432,12 @@ function eval_euler_residuals_mc(
         P = P,
     )
     normalize_samples!(scaler, X_mc)
-    batch = prepare_training_batch(X_mc, Val(settings.use_cuda))
+    batch = prepare_training_batch(X_mc)
 
     mean_norm = batch[1, :]
     w_norm = batch[end, :]
     y0 = ((mean_norm .+ 1.0f0) ./ 2.0f0) .* scaler.mean_range .+ scaler.mean_min
     w0 = ((w_norm .+ 1.0f0) ./ 2.0f0) .* scaler.w_range .+ scaler.w_min
-
-    # Ensure y0/w0 live on the same device as model outputs when using CUDA
-    if settings.use_cuda
-        y0 = cu(y0)
-        w0 = cu(w0)
-    end
 
     out, _ = Lux.apply(model, batch, ps, st)
     c0 = vec(phi_to_consumption(out[:Φ], w0; min_c = EVAL_MIN_CONSUMPTION))
@@ -464,9 +457,6 @@ function eval_euler_residuals_mc(
     Rg = 1.0f0 + Float32(P.r)
 
     ε = randn(rng, Float32, N)
-    if settings.use_cuda
-        ε = cu(ε)
-    end
     z1 = @. ρ * z0 + σϵ * ε
     y1 = exp.(μ .+ z1)
     a1 = @. w0 - c0
@@ -493,20 +483,11 @@ function eval_euler_residuals_mc(
     ratio = @. β * Rg * uprime(c1) / uprime(c0)
     resid = abs.(1.0f0 .- ratio)
 
-    # Move diagnostics to CPU for aggregation (sorting, quantiles) and return
-    if settings.use_cuda
-        resid_cpu = Array(resid)
-        w_cpu = Array(w0)
-        y_cpu = Array(y0)
-        c_cpu = Array(c0)
-        h_cpu = Array(h)
-    else
-        resid_cpu = resid
-        w_cpu = w0
-        y_cpu = y0
-        c_cpu = c0
-        h_cpu = h
-    end
+    resid_cpu = resid
+    w_cpu = w0
+    y_cpu = y0
+    c_cpu = c0
+    h_cpu = h
 
     stats = compute_residual_stats(resid_cpu)
     return (
@@ -546,7 +527,7 @@ function eval_euler_residuals_mc_csvar(
         P = P,
     )
     normalize_samples!(scaler, X_mc)
-    batch = prepare_training_batch(X_mc, Val(settings.use_cuda))
+    batch = prepare_training_batch(X_mc)
 
     batch_cpu = maybe_to_cpu(batch, settings)
     mean_vals, comps, w0_cpu = denormalize_feature_batch(scaler, batch_cpu)
@@ -631,7 +612,7 @@ function eval_euler_residuals_gh_csvar(
         P = P,
     )
     normalize_samples!(scaler, X_mc)
-    batch = prepare_training_batch(X_mc, Val(settings.use_cuda))
+    batch = prepare_training_batch(X_mc)
 
     batch_cpu = maybe_to_cpu(batch, settings)
     mean_vals, comps, w0_cpu = denormalize_feature_batch(scaler, batch_cpu)
@@ -784,15 +765,11 @@ function eval_euler_residuals_gh(
         P = P,
     )
     normalize_samples!(scaler, X_gh)
-    batch = prepare_training_batch(X_gh, Val(settings.use_cuda))
+    batch = prepare_training_batch(X_gh)
     mean_norm = batch[1, :]
     w_norm = batch[end, :]
     y0 = ((mean_norm .+ 1.0f0) ./ 2.0f0) .* scaler.mean_range .+ scaler.mean_min
     w0 = ((w_norm .+ 1.0f0) ./ 2.0f0) .* scaler.w_range .+ scaler.w_min
-    if settings.use_cuda
-        y0 = cu(y0)
-        w0 = cu(w0)
-    end
     out, _ = Lux.apply(model, batch, ps, st)
     c0 = vec(phi_to_consumption(out[:Φ], w0; min_c = EVAL_MIN_CONSUMPTION))
 
@@ -809,8 +786,7 @@ function eval_euler_residuals_gh(
     Rg = 1.0f0 + Float32(P.r)
     uprime = U.u_prime
 
-    EUprime =
-        settings.use_cuda ? cu(zeros(Float32, length(w0))) : zeros(Float32, length(w0))
+    EUprime = zeros(Float32, length(w0))
 
     component_levels =
         isdefined(P, :y) && P.y isa AbstractVector ? Float32.(collect(P.y)) : Float32[]
@@ -839,17 +815,10 @@ function eval_euler_residuals_gh(
     resid = abs.(1.0f0 .- ratio)
 
     # Move back to CPU for aggregation and returning results
-    if settings.use_cuda
-        resid_cpu = Array(resid)
-        w_cpu = Array(w0)
-        y_cpu = Array(y0)
-        c_cpu = Array(c0)
-    else
-        resid_cpu = resid
-        w_cpu = w0
-        y_cpu = y0
-        c_cpu = c0
-    end
+    resid_cpu = resid
+    w_cpu = w0
+    y_cpu = y0
+    c_cpu = c0
 
     stats = (
         mean = mean(resid_cpu),

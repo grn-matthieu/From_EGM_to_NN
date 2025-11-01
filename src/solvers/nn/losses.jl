@@ -1,6 +1,5 @@
 module NNLosses
 
-import CUDA
 import Zygote
 using Random
 const PARENT = parentmodule(@__MODULE__)
@@ -25,15 +24,7 @@ export build_loss_function,
 # from that central location when they need to move data between host and
 # device.
 
-function randn_like(rng, ref::CUDA.AbstractGPUArray)
-    # GPU gaussian noise
-    return ignore_derivatives() do
-        CUDA.randn(eltype(ref), size(ref)...)
-    end
-end
-
 function randn_like(rng, ref)
-    # CPU gaussian noise
     return ignore_derivatives() do
         out = similar(ref)
         randn!(rng, out)
@@ -42,13 +33,7 @@ function randn_like(rng, ref)
 end
 
 function fill_like(value, ref)
-    if ref isa CUDA.AbstractGPUArray
-        out = similar(ref)
-        fill!(out, value)
-        return out
-    else
-        return fill(value, size(ref))
-    end
+    return fill(value, size(ref))
 end
 
 function build_loss_function(G, S, scaler, settings, rng::AbstractRNG, model_cfg = nothing)

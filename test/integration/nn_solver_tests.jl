@@ -7,7 +7,6 @@
             hid1 = 4,
             hid2 = 4,
             target_loss = 1.0,
-            use_cuda = false,
             n_mc = 4,
         ),
         maxit = 50,

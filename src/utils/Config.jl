@@ -510,9 +510,6 @@ function validate_solver_section(solver::NamedTuple, inputs::SolverValidationInp
             hasproperty(block_cfg, :target_loss) || error("missing solver.nn.target_loss")
             block_cfg.target_loss isa Real && block_cfg.target_loss > 0 ||
                 error("target_loss > 0 required")
-            hasproperty(block_cfg, :use_cuda) || error("missing solver.nn.use_cuda")
-            uc = block_cfg.use_cuda
-            (uc === nothing || uc isa Bool) || error("use_cuda invalid")
         end
     end
 

@@ -10,7 +10,6 @@ using .TestUtils
             batch = 16,
             samples_per_epoch = 32,
             n_mc = 4,
-            use_cuda = false,
             verbose = false,
         ),
     )
@@ -32,7 +31,6 @@ end
             batch = 16,
             samples_per_epoch = 32,
             n_mc = 4,
-            use_cuda = false,
             verbose = false,
         ),
     )
@@ -46,14 +44,7 @@ end
 end
 
 @testset "bc-MC equals AiO at N=2 (AR1)" begin
-    base_nn = (
-        epochs = 2,
-        batch = 16,
-        samples_per_epoch = 32,
-        n_mc = 2,
-        use_cuda = false,
-        verbose = false,
-    )
+    base_nn = (epochs = 2, batch = 16, samples_per_epoch = 32, n_mc = 2, verbose = false)
     cfg_aio = stochastic_config(
         method = "NN",
         solver_overrides = (nn = merge(base_nn, (objective = :euler_fb_aio,)),),

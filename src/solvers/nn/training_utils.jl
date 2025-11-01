@@ -1,7 +1,6 @@
 module NNTrainUtils
 
 import Optimisers
-import Adapt
 import Lux
 import LinearAlgebra: diag, dot, I
 using Printf
@@ -22,30 +21,14 @@ function maybe_to_host(state::Lux.Training.TrainState, settings)
     st = state_states(state)
     return (
         model = mdl,
-        parameters = maybe_to_host(ps, settings),
-        states = maybe_to_host(st, settings),
+        parameters = PARENT.maybe_to_host(ps, settings),
+        states = PARENT.maybe_to_host(st, settings),
     )
 end
 
 
 get_option(opts, key::Symbol, default) =
     isdefined(opts, key) ? getfield(opts, key) : default
-
-const CUDA_OBJECTIVES = (:euler_fb_aio, :euler_fb_bcmc)
-
-function detect_cuda_preference(objective, opts)
-    requested = opts[:use_cuda]
-    if requested
-        try
-            CUDA.functional()
-        catch
-            @warn "CUDA requested but CUDA.jl is not functional. Falling back to CPU." use_cuda =
-                false
-            return false
-        end
-        return requested
-    end
-end
 
 function compute_batch_size(total_samples::Int, choice::Union{Nothing,Int})
     return isnothing(choice) ? max(total_samples, 1) :
@@ -422,7 +405,7 @@ function bcmc_auto_update!(
     sqrt_cols = sqrt(Float64(size(cur_batch, 2)))
     probe_cols = min(size(cur_batch, 2), max(64, max(Int(floor(sqrt_cols)), 1)))
     X_probe = @view cur_batch[:, 1:probe_cols]
-    Xp = settings.use_cuda ? Adapt.adapt(Array, X_probe) : X_probe
+    Xp = X_probe
 
     base_model = PARENT.select_model(chain, train_state)
     ps_cur = PARENT.state_parameters(train_state)

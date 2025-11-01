@@ -62,7 +62,6 @@ solver:
     w_max: 4.0
     sigma_shocks: null
     target_loss: 1.0e-4
-    use_cuda: false
 
 shocks:
   # For deterministic smoke config, shocks are disabled but fields are present

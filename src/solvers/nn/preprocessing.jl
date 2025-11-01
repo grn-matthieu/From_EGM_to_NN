@@ -1,5 +1,4 @@
 import ChainRulesCore: @non_differentiable
-using CUDA: cu, CuArray, CUDA
 using Statistics: mean
 using LinearAlgebra: diag
 using ..CSVarUtils: csvar_component_log_means
@@ -190,41 +189,6 @@ function denormalize_feature_batch(scaler::FeatureScaler, batch::AbstractMatrix)
     w_vals = ((batch[end, :] .+ one(T)) ./ T(2)) .* T(scaler.w_range) .+ T(scaler.w_min)
 
     return mean_vals, comps, w_vals
-end
-
-# GPU in-place version without views nor scalar indexing
-function normalize_feature_batch!(
-    sc::FeatureScaler,
-    X::CUDA.CuArray{T,2},
-) where {T<:AbstractFloat}
-    nrows = size(X, 1)
-    y_dim = length(sc.y_min)
-    if y_dim == 0 && nrows == 2
-        mins = reshape(cu(T.([sc.mean_min, sc.w_min])), 2, 1)
-        ranges = reshape(cu(T.([sc.mean_range, sc.w_range])), 2, 1)
-        @. X = 2.0f0 * (X - mins) / ranges - 1.0f0
-    elseif y_dim > 0 && nrows == y_dim + 2
-        mins_vec = Vector{T}(undef, y_dim + 2)
-        ranges_vec = Vector{T}(undef, y_dim + 2)
-        mins_vec[1] = T(sc.mean_min)
-        ranges_vec[1] = T(sc.mean_range)
-        for j = 1:y_dim
-            mins_vec[1+j] = T(sc.y_min[j])
-            ranges_vec[1+j] = T(sc.y_range[j])
-        end
-        mins_vec[end] = T(sc.w_min)
-        ranges_vec[end] = T(sc.w_range)
-        mins = reshape(cu(mins_vec), length(mins_vec), 1)
-        ranges = reshape(cu(ranges_vec), length(ranges_vec), 1)
-        @. X = 2.0f0 * (X - mins) / ranges - 1.0f0
-    else
-        throw(
-            ArgumentError(
-                "normalize_feature_batch! expects 1 or 2 feature rows, got $nrows",
-            ),
-        )
-    end
-    return X
 end
 
 @non_differentiable normalize_feature_batch!(::FeatureScaler, ::Any)

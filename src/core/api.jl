@@ -238,18 +238,8 @@ function solve(
     cfg = load_config(cfg_path)
     # allow callers to programmatically override top-level config fields by
     # passing a NamedTuple `opts`. When `opts` is `nothing` behavior is
-    # unchanged. If `opts` contains `use_cuda` propagate it into the
-    # nested `cfg.solver.nn.use_cuda` so solver-level device preferences are
-    # honored even when the override is provided at top-level.
+    # unchanged.
     if opts !== nothing
-        if hasproperty(opts, :use_cuda)
-            usecuda = getfield(opts, :use_cuda)
-            solver_nt = cfg.solver
-            nn_nt = hasproperty(solver_nt, :nn) ? solver_nt.nn : NamedTuple()
-            nn_nt = merge(nn_nt, (use_cuda = usecuda,))
-            solver_nt = merge(solver_nt, (nn = nn_nt,))
-            cfg = merge(cfg, (solver = solver_nt,))
-        end
         # Merge opts into cfg without erasing nested data not mentioned in opts
         if opts isa NamedTuple
             cfg = deep_merge(cfg, opts)

@@ -52,10 +52,6 @@ function build_nn_method(cfg::NamedTuple)
         # optional: pass shock std override for convenience
         sigma_shocks = nn_cfg.sigma_shocks,
         target_loss = nn_cfg.target_loss,
-
-        # device selection: allow config to explicitly request CUDA
-        # pass-through so NNKernel.solver_settings can honor it
-        use_cuda = nn_cfg.use_cuda,
         n_mc = nn_cfg.n_mc,
         bcmc_auto_N = cfg_get(nn_cfg, :bcmc_auto_N, false),
         bcmc_budget_T = cfg_get(nn_cfg, :bcmc_budget_T, nothing),

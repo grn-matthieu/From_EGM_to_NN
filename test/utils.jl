@@ -72,7 +72,6 @@ function _base_solver_block(; method = :EGM)
             w_max = 4.0,
             sigma_shocks = nothing,
             target_loss = 1.0e-2,
-            use_cuda = false,
             n_mc = 16,
         ),
     )
