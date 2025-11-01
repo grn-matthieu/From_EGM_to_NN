@@ -490,10 +490,6 @@ function validate_solver_section(solver::NamedTuple, inputs::SolverValidationInp
                 error("missing solver.nn.samples_per_epoch")
             block_cfg.samples_per_epoch isa Integer && block_cfg.samples_per_epoch ≥ 1 ||
                 error("samples_per_epoch ≥ 1 required")
-            if hasproperty(block_cfg, :eval_samples) && block_cfg.eval_samples !== nothing
-                block_cfg.eval_samples isa Integer && block_cfg.eval_samples ≥ 1 ||
-                    error("eval_samples ≥ 1 required")
-            end
             hasproperty(block_cfg, :objective) || error("missing solver.nn.objective")
             obj = block_cfg.objective
             obj isa Symbol || obj isa AbstractString || error("objective wrong type")

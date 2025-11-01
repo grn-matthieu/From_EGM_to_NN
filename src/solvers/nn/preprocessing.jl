@@ -24,10 +24,7 @@ struct FeatureScaler
 end
 
 function _income_bounds(P, S)
-    y_dim =
-        isdefined(P, :y) && P.y isa AbstractVector ? length(P.y) :
-        (isdefined(P, :y_dim) ? Int(P.y_dim) : 1)
-    is_csvar = isdefined(P, :A) && isdefined(P, :Σ) && y_dim > 1
+    is_csvar = isdefined(P, :A) && isdefined(P, :Σ)
     μ_vec =
         is_csvar ? csvar_component_log_means(P) :
         (
@@ -68,7 +65,7 @@ end
 function FeatureScaler(P, G, S, settings)
     lower, upper = _income_bounds(P, S)
     y_dim = length(lower)
-    is_csvar = isdefined(P, :A) && isdefined(P, :Σ) && y_dim > 1
+    is_csvar = isdefined(P, :A) && isdefined(P, :Σ)
 
     # Compute income bounds based on model type
     income_lower, income_upper = if is_csvar

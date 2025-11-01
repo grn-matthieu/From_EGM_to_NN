@@ -433,21 +433,7 @@ function bcmc_auto_update!(
     scalar_forward = function (x, ps_, st_; mode = :default)
         Xmat = ndims(x) == 1 ? reshape(x, :, 1) : x
         if mode === :fb_scalar
-            is_csvar =
-                scaler.csvar_mode || (
-                    isdefined(model_cfg.P, :A) &&
-                    isdefined(model_cfg.P, :Σ) &&
-                    (
-                        (
-                            isdefined(model_cfg.P, :y) &&
-                            model_cfg.P.y isa AbstractVector &&
-                            length(model_cfg.P.y) > 1
-                        ) ||
-                        (isdefined(model_cfg.P, :y_dim) && model_cfg.P.y_dim > 1) ||
-                        (size(model_cfg.P.A, 1) > 1)
-                    )
-                )
-            if is_csvar
+            if isdefined(model_cfg.P, :Σ) && isdefined(model_cfg.P, :A)
                 vals = PARENT.loss_euler_fb_bcmc_csvar!(
                     base_model,
                     ps_,
@@ -487,21 +473,18 @@ function bcmc_auto_update!(
     sigma2_f, rho_f, A_lin, B_lin =
         estimate_linearized_components(scalar_forward, ps_cpu, st_cpu, Xp, scaler, Σs, Σε)
 
-    sigma2_val = Float32(sigma2_f)
-    rho_val = Float32(rho_f)
-
-    rho_eps = max(rho_val, eps(Float32))
-    A_eps = max(Float32(A_lin), eps(Float32))
+    rho_eps = max(rho_f, eps(Float32))
+    A_eps = max(A_lin, eps(Float32))
     if rho_eps ≤ 10 * eps(Float32)
         N_star = min(max(Int(round(2 * Tbudget)), 2), 1024)
-        V_star = _var_bcmc_given_N(sigma2_val, rho_eps, N_star, Tbudget)
+        V_star = _var_bcmc_given_N(sigma2_f, rho_eps, N_star, Tbudget)
     elseif A_eps ≤ 10 * eps(Float32)
         N_star = 2
-        V_star = _var_bcmc_given_N(sigma2_val, rho_eps, N_star, Tbudget)
+        V_star = _var_bcmc_given_N(sigma2_f, rho_eps, N_star, Tbudget)
     else
-        N_star, V_star = suggest_bcmc_N(sigma2_val, rho_eps, Tbudget; N_cap = 1024)
+        N_star, V_star = suggest_bcmc_N(sigma2_f, rho_eps, Tbudget; N_cap = 1024)
     end
-    curV = _var_bcmc_given_N(sigma2_val, rho_eps, curN, Tbudget)
+    curV = _var_bcmc_given_N(sigma2_f, rho_eps, curN, Tbudget)
 
     st_auto.sigma2[] = sigma2_f
     st_auto.rho[] = rho_f

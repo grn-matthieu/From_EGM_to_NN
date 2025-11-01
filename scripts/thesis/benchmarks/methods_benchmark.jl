@@ -197,24 +197,6 @@ end
     return hasproperty(params, name) ? Float64(getfield(params, name)) : default
 end
 
-function rmse_iteration_axis(meta)
-    rmse_hist = get(meta, :rmse_history, Float64[])
-    n = length(rmse_hist)
-    n == 0 && return Int[]
-
-    total_iters = Int(get(meta, :iters, n))
-    total_iters = total_iters > 0 ? total_iters : n
-
-    if total_iters == n
-        return collect(1:n)
-    end
-
-    stride = max(1, Int(ceil(total_iters / n)))
-    axis = [stride * i for i = 1:n]
-    axis[end] = total_iters
-    return axis
-end
-
 function expected_income_level(params, shocks_info)
     if shocks_info === nothing
         if hasproperty(params, :y) && params.y isa AbstractVector
@@ -352,13 +334,10 @@ function compute_statistics(solution, runtime, grids_info, shocks_info)
     converged = get(meta, :converged, false)
     iters = get(meta, :iters, 0)
 
-    maxit_val = get(meta, :max_it, get(meta, :epochs, iters))
-
     println("Convergence:")
     println("  Status:       $(converged ? "✓ Converged" : "✗ Not converged")")
     println("  Iterations:   $iters")
     println("  Runtime:      $(format_duration(runtime))")
-    println("  Max iter:     $maxit_val")
 
     # Euler errors
     euler_rmse = get(meta, :rmse, get(meta, :max_resid, NaN))
@@ -432,7 +411,6 @@ function compute_statistics(solution, runtime, grids_info, shocks_info)
         a_mean = mean(a_policy),
         a_std = std(a_policy),
         binding_share = binding_share,
-        maxit = maxit_val,
     )
 end
 
@@ -451,7 +429,7 @@ function save_report(config::BenchmarkConfig, stats, output_dir::String)
         println(io, "Nz,$(config.Nz)")
         println(io, "tol,$(config.tol)")
         println(io, "tol_pol,$(config.tol_pol)")
-        println(io, "maxit,$(stats.maxit)")
+        println(io, "maxit,$(config.maxit)")
         if lowercase(config.method) in ["timeiteration", "ti"]
             println(io, "interp_kind,$(config.interp_kind)")
         end
@@ -610,57 +588,57 @@ function generate_plots(
     if haskey(solution.metadata, :rmse_history)
         rmse_hist = solution.metadata[:rmse_history]
         if !isempty(rmse_hist)
-            iters_axis = rmse_iteration_axis(solution.metadata)
-            if length(iters_axis) == length(rmse_hist)
-                valid_idx = findall(x -> isfinite(x) && x > 0, rmse_hist)
+            @eval begin
+                using Plots
+                gr()
+
+                # Filter out any Inf or invalid values and take log10
+                valid_idx = findall(x -> isfinite(x) && x > 0, $rmse_hist)
                 if !isempty(valid_idx)
-                    axis_vals = iters_axis[valid_idx]
-                    log_rmse = log10.(rmse_hist[valid_idx])
-                    @eval begin
-                        using Plots
-                        gr()
+                    iters_plot = collect(1:length($rmse_hist))[valid_idx]
+                    log_rmse = log10.($rmse_hist[valid_idx])
 
-                        p_conv = plot(
-                            $axis_vals,
-                            $log_rmse,
-                            xlabel = "Iteration / Epoch (log scale)",
-                            ylabel = "log₁₀(RMSE)",
-                            title = "$($(config.method)): Convergence History",
-                            legend = false,
-                            size = (800, 600),
-                            dpi = 150,
-                            color = :black,
-                            linewidth = 1.5,
-                            grid = true,
-                            gridstyle = :solid,
-                            gridalpha = 0.3,
-                            gridlinewidth = 0.5,
-                            framestyle = :box,
-                            marker = :circle,
-                            markersize = 2,
-                            markeralpha = 0.6,
-                            xscale = :log10,
+                    p_conv = plot(
+                        iters_plot,
+                        log_rmse,
+                        xlabel = "Iteration (log scale)",
+                        ylabel = "log₁₀(RMSE)",
+                        title = "$($(config.method)): Convergence History",
+                        legend = false,
+                        size = (800, 600),
+                        dpi = 150,
+                        color = :black,
+                        linewidth = 1.5,
+                        grid = true,
+                        gridstyle = :solid,
+                        gridalpha = 0.3,
+                        gridlinewidth = 0.5,
+                        framestyle = :box,
+                        marker = :circle,
+                        markersize = 2,
+                        markeralpha = 0.6,
+                        xscale = :log10,
+                    )
+
+                    # Add tolerance line if available
+                    tol_val = get(get($solution.metadata, :opts, (;)), :tol, nothing)
+                    if tol_val !== nothing && isfinite(tol_val) && tol_val > 0
+                        hline!(
+                            p_conv,
+                            [log10(tol_val)],
+                            linestyle = :dash,
+                            color = :red,
+                            linewidth = 1,
+                            label = "Tolerance",
                         )
-
-                        tol_val = get(get($solution.metadata, :opts, (;)), :tol, nothing)
-                        if tol_val !== nothing && isfinite(tol_val) && tol_val > 0
-                            hline!(
-                                p_conv,
-                                [log10(tol_val)],
-                                linestyle = :dash,
-                                color = :red,
-                                linewidth = 1,
-                                label = "Tolerance",
-                            )
-                        end
-
-                        conv_path = joinpath(
-                            $output_dir,
-                            "$($(method_slug))_convergence_$($(timestamp)).png",
-                        )
-                        savefig(p_conv, conv_path)
-                        push!($plot_files, conv_path)
                     end
+
+                    conv_path = joinpath(
+                        $output_dir,
+                        "$($(method_slug))_convergence_$($(timestamp)).png",
+                    )
+                    savefig(p_conv, conv_path)
+                    push!($plot_files, conv_path)
                 end
             end
         end
@@ -711,11 +689,10 @@ function save_comparison_report(
         println(io, "Nz,", join([config.Nz for _ in methods], ","))
         println(io, "tol,", join([config.tol for _ in methods], ","))
         println(io, "tol_pol,", join([config.tol_pol for _ in methods], ","))
-        println(io, "maxit,", join([all_stats[method].maxit for method in methods], ","))
+        println(io, "maxit,", join([config.maxit for _ in methods], ","))
 
         # Data rows
         for metric in metrics
-            metric === :maxit && continue
             print(io, metric)
             for method in methods
                 print(io, ",", all_stats[method][metric])
@@ -745,10 +722,6 @@ function generate_comparison_plots(
     plot_files = String[]
 
     methods = sort(collect(keys(all_solutions)))
-    rmse_axes = Dict{String,Vector{Int}}()
-    for method in methods
-        rmse_axes[method] = rmse_iteration_axis(all_solutions[method].metadata)
-    end
 
     # Get reference values from first method
     first_method = methods[1]
@@ -906,12 +879,14 @@ function generate_comparison_plots(
     end
 
     # Convergence comparison plot
+    has_convergence_data = false
+
     @eval begin
         using Plots
         gr()
 
         p_conv = plot(
-            xlabel = "Iteration / Epoch (log scale)",
+            xlabel = "Iteration/Epoch (log scale)",
             ylabel = "log₁₀(RMSE)",
             title = "All Methods: Convergence Comparison",
             size = (800, 600),
@@ -934,17 +909,15 @@ function generate_comparison_plots(
         )
 
         local has_conv_data = false
-        rmse_axes_local = $(rmse_axes)
 
         for method in $methods
             sol = $all_solutions[method]
             if haskey(sol.metadata, :rmse_history)
                 rmse_hist = sol.metadata[:rmse_history]
-                axis_vals = get(rmse_axes_local, method, Int[])
-                if !isempty(rmse_hist) && length(axis_vals) == length(rmse_hist)
+                if !isempty(rmse_hist)
                     valid_idx = findall(x -> isfinite(x) && x > 0, rmse_hist)
                     if !isempty(valid_idx)
-                        iters_plot = axis_vals[valid_idx]
+                        iters_plot = collect(1:length(rmse_hist))[valid_idx]
                         log_rmse = log10.(rmse_hist[valid_idx])
                         color = get(method_colors, method, :black)
 

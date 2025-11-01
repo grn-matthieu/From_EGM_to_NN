@@ -27,12 +27,6 @@ using .NNTrainUtils:
     state_parameters,
     state_states,
     run_model
-const VHistoryEntry = NamedTuple{
-    (:epoch, :old_v_h, :new_v_h, :scale_factor),
-    Tuple{Int,Float64,Float64,Float64},
-}
-const NHistoryEntry = NamedTuple{(:step, :epoch, :N),Tuple{Int,Int,Int}}
-
 struct TrainingResult
     best_state::Any
     best_loss::Float64
@@ -40,8 +34,6 @@ struct TrainingResult
     batch_size::Int
     batches_per_epoch::Int
     rmse_history::Vector{Float64}
-    v_h_history::Vector{VHistoryEntry}
-    n_history::Vector{NHistoryEntry}
 end
 
 
@@ -70,8 +62,7 @@ function train_consumption_network!(
     loss_function = build_loss_function(G, S, scaler, settings, rng, model_cfg)
     # draw uniform cash-on-hand samples for the initial training batch
     samples_per_epoch = settings.samples_per_epoch
-    eval_samples = settings.eval_samples
-    X_train, _ = sample_training(
+    X_train, sample_count = sample_training(
         G,
         S;
         mode = :rand,
@@ -83,7 +74,7 @@ function train_consumption_network!(
     normalize_samples!(scaler, X_train)
     batch = prepare_training_batch(X_train, Val(settings.use_cuda))
     # create a fixed validation batch for periodic diagnostics (held out)
-    val_nsamples = eval_samples
+    val_nsamples = min(4096, sample_count)
     validation_rng = derive_rng(rng, settings.epochs + 1)
     X_val, _ = sample_training(
         G,
@@ -117,14 +108,6 @@ function train_consumption_network!(
     prev_policy = nothing
     convergence_check_batch = nothing
     rmse_history = Float64[]
-    vh_history = VHistoryEntry[]
-    n_history = NHistoryEntry[]
-    if model_cfg !== nothing && isdefined(model_cfg, :adaptive_v_h_state)
-        v0 = Float64(model_cfg.adaptive_v_h_state.v_h[])
-        push!(vh_history, (; epoch = 0, old_v_h = v0, new_v_h = v0, scale_factor = 1.0))
-    end
-    N0 = Int(clamp(round(Float64(settings.n_mc)), 2, typemax(Int)))
-    push!(n_history, (; step = 0, epoch = 0, N = N0))
 
     for epoch = 1:settings.epochs
         new_lr = learning_rate_for_epoch(settings, epoch)
@@ -203,17 +186,6 @@ function train_consumption_network!(
                         step_id,
                         settings.samples_per_epoch,
                     )
-                    curN = Int(
-                        clamp(
-                            round(Float64(model_cfg.bcmc_state.n_eff[])),
-                            2,
-                            typemax(Int),
-                        ),
-                    )
-                    last_entry = isempty(n_history) ? nothing : n_history[end]
-                    if last_entry === nothing || last_entry.N != curN
-                        push!(n_history, (; step = step_id, epoch = epoch, N = curN))
-                    end
                 catch err
                     if settings.verbose
                         @warn "BCMC auto-N probe failed" err = err
@@ -281,15 +253,6 @@ function train_consumption_network!(
                         # Update if changed significantly (>10%)
                         if abs(new_v_h - old_v_h) > 0.1 * old_v_h
                             vh_state.v_h[] = new_v_h
-                            push!(
-                                vh_history,
-                                (
-                                    epoch = epoch,
-                                    old_v_h = Float64(old_v_h),
-                                    new_v_h = Float64(new_v_h),
-                                    scale_factor = Float64(scale_factor),
-                                ),
-                            )
                             if settings.verbose
                                 @printf "[ADAPT_V_H] Epoch %4d: kt_ema=%.2e → v_h: %.3f→%.3f (×%.2f)\n" epoch kt_ema old_v_h new_v_h scale_factor
                             end
@@ -314,7 +277,7 @@ function train_consumption_network!(
                         G,
                         S;
                         mode = :rand,
-                        nsamples = eval_samples,
+                        nsamples = min(2048, samples_per_epoch),
                         rng = rng,
                         settings = settings,
                         P = model_cfg === nothing ? nothing : model_cfg.P,
@@ -362,37 +325,18 @@ function train_consumption_network!(
                    model_cfg.P !== nothing
                     try
                         eval_rng = derive_rng(rng, (:conv_check, epoch))
-                        eval_result =
-                            if model_cfg !== nothing &&
-                               isdefined(model_cfg, :P) &&
-                               model_cfg.P !== nothing &&
-                               is_csvar_problem(model_cfg.P, S)
-                                evaluate_csvar(
-                                    current_model,
-                                    current_ps,
-                                    current_st,
-                                    model_cfg.P,
-                                    G,
-                                    S,
-                                    scaler,
-                                    settings,
-                                    model_cfg.U,
-                                    eval_rng,
-                                )
-                            else
-                                evaluate_stochastic(
-                                    current_model,
-                                    current_ps,
-                                    current_st,
-                                    model_cfg.P,
-                                    G,
-                                    S,
-                                    scaler,
-                                    settings,
-                                    model_cfg.U,
-                                    eval_rng,
-                                )
-                            end
+                        eval_result = evaluate_stochastic(
+                            current_model,
+                            current_ps,
+                            current_st,
+                            model_cfg.P,
+                            G,
+                            S,
+                            scaler,
+                            settings,
+                            model_cfg.U,
+                            eval_rng,
+                        )
                         resid_vals = vec(Float64.(eval_result.resid))
                         euler_rmse = sqrt(mean(abs2, resid_vals))
                     catch err
@@ -413,19 +357,6 @@ function train_consumption_network!(
 
                 # Track RMSE history
                 push!(rmse_history, euler_rmse)
-                current_N = if model_cfg !== nothing && isdefined(model_cfg, :bcmc_state)
-                    Int(clamp(round(Float64(model_cfg.bcmc_state.n_eff[])), 2, typemax(Int)))
-                else
-                    Int(clamp(round(Float64(settings.n_mc)), 2, typemax(Int)))
-                end
-                step_marker = epoch * batches_per_epoch
-                last_entry = isempty(n_history) ? nothing : n_history[end]
-                if last_entry === nothing ||
-                   last_entry.step != step_marker ||
-                   last_entry.N != current_N ||
-                   last_entry.epoch != epoch
-                    push!(n_history, (; step = step_marker, epoch = epoch, N = current_N))
-                end
 
                 # Check dual convergence criteria
                 converged = (euler_rmse < 1e-4) && (Δ_pol < 1e-6)
@@ -448,8 +379,6 @@ function train_consumption_network!(
                         batch_size,
                         batches_per_epoch,
                         rmse_history,
-                        vh_history,
-                        n_history,
                     )
                 end
             catch err
@@ -501,8 +430,6 @@ function train_consumption_network!(
                 batch_size,
                 batches_per_epoch,
                 rmse_history,
-                vh_history,
-                n_history,
             )
         end
     end
@@ -514,7 +441,5 @@ function train_consumption_network!(
         batch_size,
         batches_per_epoch,
         rmse_history,
-        vh_history,
-        n_history,
     )
 end
