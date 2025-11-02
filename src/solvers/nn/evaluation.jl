@@ -191,7 +191,8 @@ function evaluate_stochastic(
     scaler,
     settings,
     U,
-    rng::AbstractRNG,
+    rng::AbstractRNG;
+    skip_residuals::Bool = false,
 )
     X_eval, _ = sample_training(G, S; mode = :full, rng = rng, P = P)
     normalize_samples!(scaler, X_eval)
@@ -218,12 +219,19 @@ function evaluate_stochastic(
             stoch_residual_inputs(prediction, G, S)
     end
 
-    residuals = euler_resid_grid(P, a_grid_f32, z_grid_f32, Pz_f32, c_matrix_f32)
+    raw_residuals = euler_resid_grid(P, a_grid_f32, z_grid_f32, Pz_f32, c_matrix_f32)
     c_on_grid = convert_to_grid_eltype(G[:a].grid, c_matrix)
     w_matrix = permutedims(reshape(W, Nz, Na), (2, 1))
     a_next = next_assets_from_cash(w_matrix, c_on_grid)
     a_next = clamp_to_asset_bounds(a_next, G[:a])
-    max_resid = maximum(abs.(residuals))
+    if skip_residuals
+        residuals = similar(raw_residuals)
+        fill!(residuals, Float32(NaN))
+        max_resid = Float64(NaN)
+    else
+        residuals = raw_residuals
+        max_resid = Float64(maximum(abs.(residuals)))
+    end
     maybe_fit_backend!(G[:a], G[:a].grid, c_on_grid)
 
     return EvaluationResult(c_on_grid, a_next, residuals, max_resid)
@@ -239,7 +247,8 @@ function evaluate_csvar(
     scaler,
     settings,
     U,
-    rng::AbstractRNG,
+    rng::AbstractRNG;
+    skip_residuals::Bool = false,
 )
     y_state = Float32.(csvar_component_log_means(P))
     y_dim = length(y_state)
@@ -278,6 +287,12 @@ function evaluate_csvar(
     a_next = next_assets_from_cash(w_grid, Float32.(c_on_grid))
     a_next = clamp_to_asset_bounds(a_next, G[:a])
     maybe_fit_backend!(G[:a], G[:a].grid, reshape(c_on_grid, :, 1))
+
+    if skip_residuals
+        a_next_out = convert.(eltype(G[:a].grid), a_next)
+        resid = fill(Float32(NaN), Na)
+        return EvaluationResult(c_on_grid, a_next_out, resid, Float64(NaN))
+    end
 
     uprime = get_uprime(U, P)
     β = Float32(P.β)
@@ -343,6 +358,7 @@ function evaluate_solution(
     settings::Union{NNSolverSettings,Nothing} = nothing,
     U = nothing,
     rng = nothing,
+    skip_residuals::Bool = false,
 )
     local_settings =
         settings === nothing ?
@@ -366,7 +382,8 @@ function evaluate_solution(
             scaler,
             local_settings,
             U,
-            local_rng,
+            local_rng;
+            skip_residuals = skip_residuals,
         )
     else
         # Non-CSVAR problems use the general full-grid/stochastic evaluator.
@@ -383,7 +400,8 @@ function evaluate_solution(
             scaler,
             local_settings,
             U,
-            local_rng,
+            local_rng;
+            skip_residuals = skip_residuals,
         )
     end
 end

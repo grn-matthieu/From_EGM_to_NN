@@ -174,6 +174,7 @@ function build_options_summary(
         total_runtime = total_runtime,
         verbose = settings.verbose,
         batches_per_epoch = training_result.batches_per_epoch,
+        skip_final_eval = settings.skip_final_eval,
         device = :cpu,
     )
 end
@@ -236,28 +237,34 @@ function solve_nn(model; opts = nothing, settings = nothing, rng = nothing)
         settings = settings,
         U = U,
         rng = eval_rng,
+        skip_residuals = settings.skip_final_eval,
     )
 
     evaluation_end = time_ns()
 
-    eval_mc, eval_gh = maybe_dense_diagnostics(
-        trained_model,
-        params,
-        states,
-        U,
-        scaler,
-        settings;
-        G = G,
-        S = S,
-        P = P,
-        rng = diag_rng,
-    )
-
-    diagnostics_end = time_ns()
+    eval_mc = nothing
+    eval_gh = nothing
+    diagnostics_runtime = 0.0
+    diagnostics_end = evaluation_end
+    if !settings.skip_final_eval
+        eval_mc, eval_gh = maybe_dense_diagnostics(
+            trained_model,
+            params,
+            states,
+            U,
+            scaler,
+            settings;
+            G = G,
+            S = S,
+            P = P,
+            rng = diag_rng,
+        )
+        diagnostics_end = time_ns()
+        diagnostics_runtime = (diagnostics_end - evaluation_end) / 1e9
+    end
 
     training_runtime = (training_end - start_time) / 1e9
     evaluation_runtime = (evaluation_end - training_end) / 1e9
-    diagnostics_runtime = (diagnostics_end - evaluation_end) / 1e9
     total_runtime = training_runtime + evaluation_runtime + diagnostics_runtime
 
     opts_summary = build_options_summary(
@@ -291,6 +298,10 @@ function solve_nn(model; opts = nothing, settings = nothing, rng = nothing)
         rmse_history = training_result.rmse_history,
         N_history = training_result.N_history,
         v_h_history = training_result.v_h_history,
+        loss_history = training_result.loss_history,
+        best_loss = training_result.best_loss,
+        final_loss = isempty(training_result.loss_history) ? NaN :
+                     training_result.loss_history[end],
     )
 end
 

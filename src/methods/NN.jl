@@ -167,6 +167,18 @@ function solve(
     if hasproperty(sol.opts, :diagnostics_runtime)
         metadata[:diagnostics_runtime] = sol.opts.diagnostics_runtime
     end
+    loss_hist = hasproperty(sol, :loss_history) ? Float64.(sol.loss_history) : Float64[]
+    metadata[:loss_history] = loss_hist
+    metadata[:best_loss] =
+        hasproperty(sol, :best_loss) ? Float64(sol.best_loss) :
+        (isempty(loss_hist) ? NaN : minimum(loss_hist))
+    metadata[:final_loss] =
+        hasproperty(sol, :final_loss) ? Float64(sol.final_loss) :
+        (isempty(loss_hist) ? NaN : loss_hist[end])
+    metadata[:min_loss] = metadata[:best_loss]
+    metadata[:objective] = settings.objective
+    metadata[:bcmc_auto_N] = settings.bcmc_auto_N
+    metadata[:skip_final_eval] = settings.skip_final_eval
 
     return Solution(
         policy = policy,

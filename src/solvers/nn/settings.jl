@@ -32,6 +32,7 @@ struct NNSolverSettings
     bcmc_budget_T::Union{Nothing,Int}
     bcmc_auto_N::Bool
     bcmc_update_every::Int
+    skip_final_eval::Bool
 end
 
 
@@ -128,6 +129,7 @@ function solver_settings(
     end
     bcmc_auto_N = Bool(get_option(opts, :bcmc_auto_N, false))
     bcmc_update_every = max(Int(get_option(opts, :bcmc_update_every, 10)), 1)
+    skip_final_eval = Bool(get_option(opts, :skip_final_eval, false))
 
     # If Auto-N is requested but no explicit budget provided, derive a
     # default pairwise budget from the initial configuration to keep total
@@ -207,5 +209,6 @@ function solver_settings(
         bcmc_budget_T,
         bcmc_auto_N,
         bcmc_update_every,
+        skip_final_eval,
     )
 end

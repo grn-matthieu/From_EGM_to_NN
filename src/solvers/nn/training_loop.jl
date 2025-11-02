@@ -29,6 +29,7 @@ struct TrainingResult
     epochs_run::Int
     batch_size::Int
     batches_per_epoch::Int
+    loss_history::Vector{Float64}
     rmse_history::Vector{Float64}
     N_history::Vector{Int}
     v_h_history::Vector{Float64}
@@ -100,6 +101,7 @@ function train_consumption_network!(
     rmse_history = Float64[]
     N_history = Int[]
     v_h_history = Float64[]
+    loss_history = Float64[]
 
     for epoch = 1:settings.epochs
         new_lr = learning_rate_for_epoch(settings, epoch)
@@ -187,6 +189,7 @@ function train_consumption_network!(
             end
         end
         average_loss = epoch_loss / max(seen, 1)
+        push!(loss_history, average_loss)
         if average_loss < best_loss
             best_loss = average_loss
             best_state = train_state
@@ -384,6 +387,7 @@ function train_consumption_network!(
                         epoch,
                         batch_size,
                         batches_per_epoch,
+                        loss_history,
                         rmse_history,
                         N_history,
                         v_h_history,
@@ -437,6 +441,7 @@ function train_consumption_network!(
                 epoch,
                 batch_size,
                 batches_per_epoch,
+                loss_history,
                 rmse_history,
                 N_history,
                 v_h_history,
@@ -450,6 +455,7 @@ function train_consumption_network!(
         settings.epochs,
         batch_size,
         batches_per_epoch,
+        loss_history,
         rmse_history,
         N_history,
         v_h_history,

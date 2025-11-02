@@ -25,6 +25,8 @@ Options:
   --verbose             Enable verbose solver output
   --correlation=TYPE    Correlation structure: diagonal, single, toeplitz, dense (for correlation scenario)
   --rotation=TYPE       Rotation type: pca, cholesky (for rotation scenario)
+  --nn-modes=LIST       NN objectives to sweep (aio,bcmc_fixed,bcmc_auto,config,all)
+  --nn-modes=LIST       NN objectives to sweep (aio,bcmc_fixed,bcmc_auto,config,all)
 
 Scenarios:
   baseline      - Run base config with specified method(s)
@@ -89,6 +91,44 @@ struct BenchmarkConfig
     verbose::Bool
     correlation_type::Symbol
     rotation_type::Symbol
+    nn_modes::Vector{Symbol}
+end
+
+function normalize_nn_mode(token::AbstractString)
+    mode = lowercase(strip(token))
+    isempty(mode) && return nothing
+    if mode == "all"
+        return :all
+    elseif mode in ("aio", "ai0", "ai-o")
+        return :aio
+    elseif mode in ("bcmc", "bcmc_fixed", "bcmc-fixed", "fixed")
+        return :bcmc_fixed
+    elseif mode in ("bcmc_auto", "bcmc-auto", "auto", "adaptive")
+        return :bcmc_auto
+    elseif mode in ("config", "base", "default")
+        return :config
+    else
+        @warn "Unknown nn mode '$token'; ignoring"
+        return nothing
+    end
+end
+
+function parse_nn_modes_arg(arg::AbstractString)
+    tokens = split(arg, ",")
+    modes = Symbol[]
+    for tok in tokens
+        normalized = normalize_nn_mode(tok)
+        if normalized === :all
+            return [:aio, :bcmc_fixed, :bcmc_auto]
+        elseif normalized !== nothing
+            push!(modes, normalized)
+        end
+    end
+    if isempty(modes)
+        return [:config]
+    end
+    unique!(modes)
+    return modes
 end
 
 function parse_cli_args()
@@ -109,6 +149,8 @@ function parse_cli_args()
     verbose = false
     correlation_type = :diagonal
     rotation_type = :pca
+    nn_modes = [:config]
+    dims_specified = false
 
     for arg in args
         if startswith(arg, "--method=")
@@ -118,6 +160,7 @@ function parse_cli_args()
         elseif startswith(arg, "--dims=")
             dims_str = split(arg, "=")[2]
             dims = parse.(Int, split(dims_str, ","))
+            dims_specified = true
         elseif startswith(arg, "--Na=")
             Na = parse(Int, split(arg, "=")[2])
         elseif startswith(arg, "--tol=")
@@ -140,12 +183,19 @@ function parse_cli_args()
             correlation_type = Symbol(lowercase(split(arg, "=")[2]))
         elseif startswith(arg, "--rotation=")
             rotation_type = Symbol(lowercase(split(arg, "=")[2]))
+        elseif startswith(arg, "--nn-modes=")
+            modes_str = split(arg, "=", limit = 2)[2]
+            nn_modes = parse_nn_modes_arg(modes_str)
         elseif arg == "--help" || arg == "-h"
             print_help()
             exit(0)
         else
             @warn "Unknown argument: $arg (use --help for usage)"
         end
+    end
+
+    if nn_modes != [:config] && !dims_specified
+        dims = collect(2:5)
     end
 
     return BenchmarkConfig(
@@ -163,6 +213,7 @@ function parse_cli_args()
         verbose,
         correlation_type,
         rotation_type,
+        nn_modes,
     )
 end
 
@@ -279,6 +330,41 @@ end
 # Scenario generators
 # ============================================================================
 
+function apply_nn_mode_overrides(cfg::NamedTuple, mode::Symbol)
+    mode == :config && return cfg
+    overrides = if mode == :aio
+        (; objective = :euler_fb_aio, bcmc_auto_N = false)
+    elseif mode == :bcmc_fixed
+        (; objective = :euler_fb_bcmc, bcmc_auto_N = false)
+    elseif mode == :bcmc_auto
+        (; objective = :euler_fb_bcmc, bcmc_auto_N = true)
+    else
+        error("Unknown NN mode: $mode")
+    end
+    nn_block = get_nested(cfg, (:solver, :nn), NamedTuple())
+    new_nn = merge_config(nn_block, overrides)
+    return merge_section(cfg, :solver, (nn = new_nn,))
+end
+
+function maybe_set_skip_eval(cfg::NamedTuple, y_dim::Int)
+    if y_dim ≥ 4
+        nn_block = get_nested(cfg, (:solver, :nn), NamedTuple())
+        new_nn = merge_config(nn_block, (; skip_final_eval = true))
+        return merge_section(cfg, :solver, (nn = new_nn,))
+    end
+    return cfg
+end
+
+function classify_nn_mode(objective::Symbol, bcmc_auto::Bool)
+    if objective == :euler_fb_aio
+        return :aio
+    elseif objective == :euler_fb_bcmc
+        return bcmc_auto ? :bcmc_auto : :bcmc_fixed
+    else
+        return objective
+    end
+end
+
 function build_baseline_variants(base_cfg::NamedTuple, config::BenchmarkConfig)
     variants = Dict{Symbol,NamedTuple}()
     variants[:baseline] = base_cfg
@@ -298,15 +384,31 @@ function build_dimension_variants(base_cfg::NamedTuple, config::BenchmarkConfig)
         @warn "Excluding dimension(s) $excluded from CSVAR benchmark (known issue: NN training produces NaNs)"
     end
 
-    variants = build_dimensional_overrides(
+    base_variants = build_dimensional_overrides(
         base_cfg;
         dims = dims_to_use,
         total_income = total_income,
         persistence = persistence,
         variance = variance,
     )
+    combined = Dict{Symbol,NamedTuple}()
+    modes = isempty(config.nn_modes) ? [:config] : config.nn_modes
+    for (dim_key, cfg_dim) in base_variants
+        params_dim = get_nested(cfg_dim, (:params,))
+        y_dim = params_dim === nothing ? 0 : length(params_dim.y)
+        for mode in modes
+            cfg_mode = apply_nn_mode_overrides(cfg_dim, mode)
+            cfg_mode = maybe_set_skip_eval(cfg_mode, y_dim)
+            variant_label = if mode == :config
+                dim_key
+            else
+                Symbol(string(dim_key) * "_" * lowercase(String(mode)))
+            end
+            combined[variant_label] = cfg_mode
+        end
+    end
 
-    return variants
+    return combined
 end
 
 function build_correlation_variants(base_cfg::NamedTuple, config::BenchmarkConfig)
@@ -455,6 +557,33 @@ function run_single_variant(
             haskey(meta, :rmse_history) ? Float64.(meta[:rmse_history]) : Float64[]
         N_history = haskey(meta, :N_history) ? Int.(meta[:N_history]) : Int[]
         v_h_history = haskey(meta, :v_h_history) ? Float64.(meta[:v_h_history]) : Float64[]
+        loss_history =
+            haskey(meta, :loss_history) ? Float64.(meta[:loss_history]) : Float64[]
+        best_loss =
+            haskey(meta, :best_loss) ? Float64(meta[:best_loss]) :
+            (isempty(loss_history) ? NaN : minimum(loss_history))
+        final_loss =
+            haskey(meta, :final_loss) ? Float64(meta[:final_loss]) :
+            (isempty(loss_history) ? NaN : loss_history[end])
+        objective_sym = if haskey(meta, :objective)
+            Symbol(meta[:objective])
+        else
+            obj_cfg = get_nested(cfg, (:solver, :nn, :objective), nothing)
+            obj_cfg === nothing ? :unknown : Symbol(obj_cfg)
+        end
+        bcmc_auto = if haskey(meta, :bcmc_auto_N)
+            Bool(meta[:bcmc_auto_N])
+        else
+            val = get_nested(cfg, (:solver, :nn, :bcmc_auto_N), false)
+            val === nothing ? false : Bool(val)
+        end
+        nn_mode = classify_nn_mode(objective_sym, bcmc_auto)
+        skip_final_eval = if haskey(meta, :skip_final_eval)
+            Bool(meta[:skip_final_eval])
+        else
+            val = get_nested(cfg, (:solver, :nn, :skip_final_eval), false)
+            val === nothing ? false : Bool(val)
+        end
 
         # Policy statistics
         c_policy = solution.policy[:c].value
@@ -474,6 +603,12 @@ function run_single_variant(
         rmse_history = Float64[]
         N_history = Int[]
         v_h_history = Float64[]
+        loss_history = Float64[]
+        best_loss = NaN
+        final_loss = NaN
+        objective_sym = :unknown
+        nn_mode = :unknown
+        skip_final_eval = false
         c_mean = NaN
         c_std = NaN
         c_min = NaN
@@ -505,6 +640,12 @@ function run_single_variant(
         rmse_history = rmse_history,
         N_history = N_history,
         v_h_history = v_h_history,
+        loss_history = loss_history,
+        best_loss = best_loss,
+        final_loss = final_loss,
+        objective = objective_sym,
+        nn_mode = nn_mode,
+        skip_final_eval = skip_final_eval,
         status = status,
         message = message,
         solution = solution,
@@ -548,6 +689,7 @@ function run_benchmark(config::BenchmarkConfig)
         config.verbose,
         config.correlation_type,
         config.rotation_type,
+        config.nn_modes,
     )
 
     println("Configuration:")
@@ -557,6 +699,10 @@ function run_benchmark(config::BenchmarkConfig)
     println("  Tolerance:        $(config.tol)")
     if lowercase(config.method) == "nn" || config.method == "all"
         println("  NN Epochs:        $(config.epochs)")
+        if config.nn_modes != [:config]
+            mode_labels = join(String.(config.nn_modes), ", ")
+            println("  NN Modes:        $(mode_labels)")
+        end
     end
     println("  Repeats:          $(config.repeats)")
     println("  Base config:      $(basename(config.config_path))")
@@ -643,6 +789,18 @@ function aggregate_results(results)
                 converged = res.converged,
                 c_mean = res.c_mean,
                 c_std = res.c_std,
+                c_min = res.c_min,
+                c_max = res.c_max,
+                rmse_history = res.rmse_history,
+                objective = String(res.objective),
+                nn_mode = String(res.nn_mode),
+                best_loss = res.best_loss,
+                final_loss = res.final_loss,
+                min_loss = res.best_loss,
+                loss_history = res.loss_history,
+                N_history = res.N_history,
+                v_h_history = res.v_h_history,
+                skip_final_eval = res.skip_final_eval,
                 status = String(res.status),
             ),
         )
@@ -668,6 +826,8 @@ function aggregate_results(results)
         :runtime => std => :runtime_std,
         :final_rmse => mean => :rmse_mean,
         :final_rmse => std => :rmse_std,
+        :best_loss => mean => :best_loss_mean,
+        :final_loss => mean => :final_loss_mean,
         :mean_ee => mean => :mean_ee_avg,
         :converged => (x -> mean(Float64.(x))) => :convergence_rate,
         nrow => :n_runs,
@@ -768,11 +928,19 @@ function save_results(
             :converged => res.converged,
             :c_mean => res.c_mean,
             :c_std => res.c_std,
+            :c_min => res.c_min,
+            :c_max => res.c_max,
+            :objective => String(res.objective),
+            :nn_mode => String(res.nn_mode),
+            :best_loss => res.best_loss,
+            :final_loss => res.final_loss,
+            :loss_history => res.loss_history,
             :status => String(res.status),
             :message => res.message,
             :rmse_history => res.rmse_history,
             :N_history => res.N_history,
             :v_h_history => res.v_h_history,
+            :skip_final_eval => res.skip_final_eval,
         ) for res in results
     ]
     open(json_path, "w") do io
