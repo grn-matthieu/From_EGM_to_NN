@@ -41,7 +41,7 @@ end
     isdefined(P, :Σ) &&
     isdefined(P, :y_dim) &&
     P.y_dim > 1
-const CSVAR_GH_ORDER = 3
+const CSVAR_GH_ORDER = 10
 
 function csvar_gauss_hermite_offsets(P; order::Int = CSVAR_GH_ORDER)
     y_dim = size(P.A, 1)

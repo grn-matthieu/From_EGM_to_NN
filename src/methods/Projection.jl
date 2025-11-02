@@ -27,7 +27,7 @@ function build_projection_method(cfg::NamedTuple)
     integration_raw = maybe(projection_cfg, :integration, :gh)
     integration_sym = Symbol(lowercase(string(integration_raw)))
     # Optional integration tuning for CSVAR
-    gh_order = maybe(projection_cfg, :gh_order, 3)
+    gh_order = maybe(projection_cfg, :gh_order, 10)
     nsamples = maybe(projection_cfg, :nsamples, 128)
     return ProjectionMethod((
         name = solver_cfg.method,
@@ -77,7 +77,7 @@ function solve(
             orders = method.opts.orders,
             Nval = method.opts.Nval,
             integration_method = method.opts.integration,
-            gh_order = get(method.opts, :gh_order, 3),
+            gh_order = get(method.opts, :gh_order, 10),
             nsamples = get(method.opts, :nsamples, 128),
             rng = rng,
         )

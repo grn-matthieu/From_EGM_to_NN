@@ -282,7 +282,7 @@ function solve_projection_stoch(
     lm_verbose::Bool = false,
     patience::Int = 50,
     integration_method::Symbol = :gh,
-    gh_order::Int = 3,
+    gh_order::Int = 10,
     nsamples::Int = 128,
     rng = nothing,
 )::NamedTuple
@@ -541,7 +541,7 @@ function solve_projection_csvar(
     lm_verbose::Bool = false,
     patience::Int = 50,
     integration_method::Symbol = :gh,
-    gh_order::Int = 3,
+    gh_order::Int = 10,
     nsamples::Int = 128,
     rng = nothing,
 )::NamedTuple
