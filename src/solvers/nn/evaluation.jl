@@ -41,7 +41,7 @@ end
     isdefined(P, :Σ) &&
     isdefined(P, :y_dim) &&
     P.y_dim > 1
-const CSVAR_GH_ORDER = 10
+const CSVAR_GH_ORDER = 5
 
 function csvar_gauss_hermite_offsets(P; order::Int = CSVAR_GH_ORDER)
     y_dim = size(P.A, 1)
@@ -686,32 +686,8 @@ function eval_euler_residuals_gh_csvar(
     )
 end
 
-const GH10_X =
-    Float32.([
-        -3.436159,
-        -2.532736,
-        -1.756684,
-        -1.036611,
-        -0.342901,
-        0.342901,
-        1.036611,
-        1.756684,
-        2.532736,
-        3.436159,
-    ])
-const GH10_W =
-    Float32.([
-        7.640433e-6,
-        0.001343645,
-        0.033874394,
-        0.24013861,
-        0.61086263,
-        0.61086263,
-        0.24013861,
-        0.033874394,
-        0.001343645,
-        7.640433e-6,
-    ])
+const GH5_X = Float32.([-2.0201829, -0.95857245, 0.0, 0.95857245, 2.0201829])
+const GH5_W = Float32.([0.019953242, 0.39361933, 0.9453087, 0.39361933, 0.019953242])
 const GH_SQRT2 = Float32(sqrt(2.0))
 
 """Gauss–Hermite Euler residual diagnostics for stochastic problems."""
@@ -791,9 +767,9 @@ function eval_euler_residuals_gh(
     component_levels =
         isdefined(P, :y) && P.y isa AbstractVector ? Float32.(collect(P.y)) : Float32[]
 
-    @inbounds for k in eachindex(GH10_X)
-        εk = GH10_X[k]
-        wk = GH10_W[k] / sqrt(pi)
+    @inbounds for k in eachindex(GH5_X)
+        εk = GH5_X[k]
+        wk = GH5_W[k] / sqrt(pi)
         z1 = @. ρ * z0 + σϵ * GH_SQRT2 * εk
         y1 = exp.(μ .+ z1)
         a1 = @. w0 - c0

@@ -147,7 +147,14 @@ function maybe_dense_diagnostics(
     return mc_diag, gh_diag
 end
 
-function build_options_summary(settings, training_result, runtime)
+function build_options_summary(
+    settings,
+    training_result,
+    runtime;
+    evaluation_runtime = nothing,
+    diagnostics_runtime = nothing,
+    total_runtime = nothing,
+)
     return (;
         epochs = settings.epochs,
         epochs_run = training_result.epochs_run,
@@ -162,6 +169,9 @@ function build_options_summary(settings, training_result, runtime)
         lr_milestones = settings.lr_milestones,
         warmup_epochs = settings.warmup_epochs,
         runtime = runtime,
+        evaluation_runtime = evaluation_runtime,
+        diagnostics_runtime = diagnostics_runtime,
+        total_runtime = total_runtime,
         verbose = settings.verbose,
         batches_per_epoch = training_result.batches_per_epoch,
         device = :cpu,
@@ -208,6 +218,8 @@ function solve_nn(model; opts = nothing, settings = nothing, rng = nothing)
     training_result =
         train_consumption_network!(chain, settings, scaler, G, S, train_rng, model_cfg)
 
+    training_end = time_ns()
+
     best_state = training_result.best_state
     trained_model = select_model(chain, best_state)
     params = state_parameters(best_state)
@@ -226,9 +238,7 @@ function solve_nn(model; opts = nothing, settings = nothing, rng = nothing)
         rng = eval_rng,
     )
 
-    runtime = (time_ns() - start_time) / 1e9
-    opts_summary = build_options_summary(settings, training_result, runtime)
-    converged = training_result.best_loss ≤ settings.target_loss
+    evaluation_end = time_ns()
 
     eval_mc, eval_gh = maybe_dense_diagnostics(
         trained_model,
@@ -242,6 +252,23 @@ function solve_nn(model; opts = nothing, settings = nothing, rng = nothing)
         P = P,
         rng = diag_rng,
     )
+
+    diagnostics_end = time_ns()
+
+    training_runtime = (training_end - start_time) / 1e9
+    evaluation_runtime = (evaluation_end - training_end) / 1e9
+    diagnostics_runtime = (diagnostics_end - evaluation_end) / 1e9
+    total_runtime = training_runtime + evaluation_runtime + diagnostics_runtime
+
+    opts_summary = build_options_summary(
+        settings,
+        training_result,
+        training_runtime;
+        evaluation_runtime = evaluation_runtime,
+        diagnostics_runtime = diagnostics_runtime,
+        total_runtime = total_runtime,
+    )
+    converged = training_result.best_loss ≤ settings.target_loss
 
     _, w_grid = grid_forward_inputs(G, P)
 

@@ -43,7 +43,7 @@ solver:
     interp_kind: linear
   nn:
     optimizer: adamW
-    epochs: 25000
+    epochs: 15000
     batch: 2048
     lr: 3.5e-4
     lr_min: 5.0e-5

@@ -100,7 +100,7 @@ function parse_cli_args()
     dims = [2, 3, 4]
     Na = 60
     tol = 1e-4
-    epochs = 25000
+    epochs = -1  # -1 means "use config file value or default to 25000"
     config_path = joinpath(ROOT, "config", "csvar_template.yaml")
     output_dir = joinpath(ROOT, "outputs", "benchmarks")
     repeats = 1
@@ -417,11 +417,32 @@ function run_single_variant(
         @warn "Solver failed: $method on $variant_name (repeat $repeat_id)" exception =
             (e, catch_backtrace())
     end
-    runtime = time() - t_start
+    wall_runtime = time() - t_start
+    runtime = wall_runtime
+    evaluation_runtime = NaN
+    diagnostics_runtime = NaN
+    total_runtime = wall_runtime
 
     if status == :ok && solution !== nothing
         meta = solution.metadata
         diagnostics = solution.diagnostics
+
+        runtime_val = hasproperty(diagnostics, :runtime) ? diagnostics.runtime : nothing
+        if runtime_val isa Real
+            runtime = Float64(runtime_val)
+        end
+        eval_val = haskey(meta, :evaluation_runtime) ? meta[:evaluation_runtime] : nothing
+        if eval_val isa Real
+            evaluation_runtime = Float64(eval_val)
+        end
+        diag_val = haskey(meta, :diagnostics_runtime) ? meta[:diagnostics_runtime] : nothing
+        if diag_val isa Real
+            diagnostics_runtime = Float64(diag_val)
+        end
+        total_val = haskey(meta, :total_runtime) ? meta[:total_runtime] : nothing
+        if total_val isa Real
+            total_runtime = Float64(total_val)
+        end
 
         converged = get(meta, :converged, false)
         iterations =
@@ -470,6 +491,9 @@ function run_single_variant(
         avg_variance = param_desc.avg_variance,
         off_diagonal_corr = param_desc.off_diagonal_corr,
         runtime = runtime,
+        evaluation_runtime = evaluation_runtime,
+        diagnostics_runtime = diagnostics_runtime,
+        total_runtime = total_runtime,
         iterations = iterations,
         mean_ee = mean_ee,
         final_rmse = max_resid,
@@ -493,6 +517,39 @@ function run_benchmark(config::BenchmarkConfig)
     println("CSVAR Benchmark")
     println("="^70)
     println()
+
+    # Load base config
+    base_cfg = ThesisProject.load_config(config.config_path)
+
+    # Resolve epochs: use CLI arg if provided (>0), otherwise use config file value, otherwise default to 25000
+    epochs = if config.epochs > 0
+        config.epochs
+    elseif hasproperty(base_cfg, :solver) &&
+           hasproperty(base_cfg.solver, :nn) &&
+           hasproperty(base_cfg.solver.nn, :epochs)
+        base_cfg.solver.nn.epochs
+    else
+        25000
+    end
+
+    # Update config with resolved epochs
+    config = BenchmarkConfig(
+        config.method,
+        config.scenario,
+        config.dims,
+        config.Na,
+        config.tol,
+        epochs,
+        config.config_path,
+        config.output_dir,
+        config.repeats,
+        config.generate_plots,
+        config.summary_only,
+        config.verbose,
+        config.correlation_type,
+        config.rotation_type,
+    )
+
     println("Configuration:")
     println("  Scenario:         $(config.scenario)")
     println("  Method(s):        $(config.method)")
@@ -504,9 +561,6 @@ function run_benchmark(config::BenchmarkConfig)
     println("  Repeats:          $(config.repeats)")
     println("  Base config:      $(basename(config.config_path))")
     println()
-
-    # Load base config
-    base_cfg = ThesisProject.load_config(config.config_path)
 
     # Build variants
     println("Building variants for scenario: $(config.scenario)")
@@ -577,6 +631,12 @@ function aggregate_results(results)
                 avg_variance = res.avg_variance,
                 off_diagonal_corr = res.off_diagonal_corr,
                 runtime = res.runtime,
+                evaluation_runtime = hasproperty(res, :evaluation_runtime) ?
+                                     res.evaluation_runtime : NaN,
+                diagnostics_runtime = hasproperty(res, :diagnostics_runtime) ?
+                                      res.diagnostics_runtime : NaN,
+                total_runtime = hasproperty(res, :total_runtime) ? res.total_runtime :
+                                res.runtime,
                 iterations = res.iterations,
                 mean_ee = res.mean_ee,
                 final_rmse = res.final_rmse,

@@ -158,6 +158,16 @@ function solve(
         :opts => sol.opts,
     )
 
+    if hasproperty(sol.opts, :total_runtime)
+        metadata[:total_runtime] = sol.opts.total_runtime
+    end
+    if hasproperty(sol.opts, :evaluation_runtime)
+        metadata[:evaluation_runtime] = sol.opts.evaluation_runtime
+    end
+    if hasproperty(sol.opts, :diagnostics_runtime)
+        metadata[:diagnostics_runtime] = sol.opts.diagnostics_runtime
+    end
+
     return Solution(
         policy = policy,
         value = value,

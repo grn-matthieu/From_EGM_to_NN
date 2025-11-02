@@ -264,7 +264,7 @@ function train_consumption_network!(
         end
 
         # Check convergence every 100 epochs: evaluate Euler errors and policy updates
-        if epoch % 100 == 0
+        if epoch % 100000 == 0
             try
                 # Create/reuse held-out batch for convergence check
                 if convergence_check_batch === nothing
