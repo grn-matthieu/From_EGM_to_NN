@@ -684,10 +684,31 @@ function save_results(
         JSON3.write(io, json_payload; indent = 2)
     end
 
+    # Append to consolidated runs CSV (single file accumulating all runs)
+    consolidated_path = joinpath(output_dir, "csvar_benchmark_runs.csv")
+    df2 = deepcopy(df)
+    n = nrow(df2)
+    if n > 0
+        df2[!, :timestamp] = fill(Dates.format(now(), "yyyy-mm-dd HH:MM:SS"), n)
+        df2[!, :scenario] = fill(String(config.scenario), n)
+        df2[!, :Na] = fill(config.Na, n)
+        df2[!, :tol] = fill(config.tol, n)
+        df2[!, :epochs] = fill(config.epochs, n)
+        df2[!, :base_config] = fill(basename(config.config_path), n)
+        if isfile(consolidated_path)
+            open(consolidated_path, "a") do io
+                CSV.write(io, df2; header = false)
+            end
+        else
+            CSV.write(consolidated_path, df2)
+        end
+    end
+
     println("Results saved:")
     println("  - Runs CSV:     $csv_path")
     println("  - Summary CSV:  $summary_path")
     println("  - Detail JSON:  $json_path")
+    println("  - Consolidated: $consolidated_path (appended)")
     println()
 
     return csv_path, summary_path, json_path
