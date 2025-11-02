@@ -262,6 +262,8 @@ function solve_nn(model; opts = nothing, settings = nothing, rng = nothing)
         eval_mc = eval_mc,
         eval_gh = eval_gh,
         rmse_history = training_result.rmse_history,
+        N_history = training_result.N_history,
+        v_h_history = training_result.v_h_history,
     )
 end
 

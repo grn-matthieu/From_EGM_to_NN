@@ -153,6 +153,8 @@ function solve(
         :mean_ee => ee_mean,
         :julia_version => string(VERSION),
         :rmse_history => hasproperty(sol, :rmse_history) ? sol.rmse_history : Float64[],
+        :N_history => hasproperty(sol, :N_history) ? sol.N_history : Int[],
+        :v_h_history => hasproperty(sol, :v_h_history) ? sol.v_h_history : Float64[],
         :opts => sol.opts,
     )
 

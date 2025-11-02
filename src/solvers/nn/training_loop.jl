@@ -30,6 +30,8 @@ struct TrainingResult
     batch_size::Int
     batches_per_epoch::Int
     rmse_history::Vector{Float64}
+    N_history::Vector{Int}
+    v_h_history::Vector{Float64}
 end
 
 
@@ -96,6 +98,8 @@ function train_consumption_network!(
     prev_policy = nothing
     convergence_check_batch = nothing
     rmse_history = Float64[]
+    N_history = Int[]
+    v_h_history = Float64[]
 
     for epoch = 1:settings.epochs
         new_lr = learning_rate_for_epoch(settings, epoch)
@@ -171,6 +175,10 @@ function train_consumption_network!(
                         step_id,
                         settings.samples_per_epoch,
                     )
+                    # Track current N after update
+                    current_N =
+                        Int(clamp(round(model_cfg.bcmc_state.n_eff[]), 2, typemax(Int)))
+                    push!(N_history, current_N)
                 catch err
                     if settings.verbose
                         @warn "BCMC auto-N probe failed" err = err
@@ -242,6 +250,8 @@ function train_consumption_network!(
                                 @printf "[ADAPT_V_H] Epoch %4d: kt_ema=%.2e → v_h: %.3f→%.3f (×%.2f)\n" epoch kt_ema old_v_h new_v_h scale_factor
                             end
                         end
+                        # Track v_h at this epoch
+                        push!(v_h_history, Float64(vh_state.v_h[]))
                     end
                 end
             catch err
@@ -375,6 +385,8 @@ function train_consumption_network!(
                         batch_size,
                         batches_per_epoch,
                         rmse_history,
+                        N_history,
+                        v_h_history,
                     )
                 end
             catch err
@@ -426,6 +438,8 @@ function train_consumption_network!(
                 batch_size,
                 batches_per_epoch,
                 rmse_history,
+                N_history,
+                v_h_history,
             )
         end
     end
@@ -437,5 +451,7 @@ function train_consumption_network!(
         batch_size,
         batches_per_epoch,
         rmse_history,
+        N_history,
+        v_h_history,
     )
 end
