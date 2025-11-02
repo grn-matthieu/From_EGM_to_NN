@@ -713,18 +713,45 @@ function save_results(
     summary::DataFrame,
     output_dir::String,
 )
-    timestamp = Dates.format(now(), "yyyymmdd_HHMMSS")
+    ts_now = now()
+    timestamp_slug = Dates.format(ts_now, "yyyymmdd_HHMMSS")
+    readable_timestamp = Dates.format(ts_now, "yyyy-mm-dd HH:MM:SS")
     scenario_slug = String(config.scenario)
 
-    # CSV files
-    csv_path = joinpath(output_dir, "csvar_$(scenario_slug)_runs_$(timestamp).csv")
-    CSV.write(csv_path, df)
+    # Scenario-specific CSV files (append across runs)
+    csv_path = joinpath(output_dir, "csvar_$(scenario_slug)_runs.csv")
+    if nrow(df) > 0
+        runs_df = copy(df)
+        n = nrow(runs_df)
+        runs_df[!, :run_timestamp] = fill(readable_timestamp, n)
+        runs_df[!, :scenario] = fill(String(config.scenario), n)
+        runs_df[!, :Na] = fill(config.Na, n)
+        runs_df[!, :tol] = fill(config.tol, n)
+        runs_df[!, :epochs] = fill(config.epochs, n)
+        append_runs = isfile(csv_path)
+        open(csv_path, append_runs ? "a" : "w") do io
+            CSV.write(io, runs_df; header = !append_runs)
+        end
+    end
 
-    summary_path = joinpath(output_dir, "csvar_$(scenario_slug)_summary_$(timestamp).csv")
-    CSV.write(summary_path, summary)
+    summary_path = joinpath(output_dir, "csvar_$(scenario_slug)_summary.csv")
+    if nrow(summary) > 0
+        summary_df = copy(summary)
+        m = nrow(summary_df)
+        summary_df[!, :run_timestamp] = fill(readable_timestamp, m)
+        summary_df[!, :scenario] = fill(String(config.scenario), m)
+        summary_df[!, :Na] = fill(config.Na, m)
+        summary_df[!, :tol] = fill(config.tol, m)
+        summary_df[!, :epochs] = fill(config.epochs, m)
+        append_summary = isfile(summary_path)
+        open(summary_path, append_summary ? "a" : "w") do io
+            CSV.write(io, summary_df; header = !append_summary)
+        end
+    end
 
     # JSON with detailed diagnostics
-    json_path = joinpath(output_dir, "csvar_$(scenario_slug)_detailed_$(timestamp).json")
+    json_path =
+        joinpath(output_dir, "csvar_$(scenario_slug)_detailed_$(timestamp_slug).json")
     json_payload = [
         Dict(
             :variant => String(res.variant),
@@ -757,7 +784,7 @@ function save_results(
     df2 = deepcopy(df)
     n = nrow(df2)
     if n > 0
-        df2[!, :timestamp] = fill(Dates.format(now(), "yyyy-mm-dd HH:MM:SS"), n)
+        df2[!, :timestamp] = fill(readable_timestamp, n)
         df2[!, :scenario] = fill(String(config.scenario), n)
         df2[!, :Na] = fill(config.Na, n)
         df2[!, :tol] = fill(config.tol, n)
@@ -773,8 +800,8 @@ function save_results(
     end
 
     println("Results saved:")
-    println("  - Runs CSV:     $csv_path")
-    println("  - Summary CSV:  $summary_path")
+    println("  - Runs CSV:     $csv_path (appended)")
+    println("  - Summary CSV:  $summary_path (appended)")
     println("  - Detail JSON:  $json_path")
     println("  - Consolidated: $consolidated_path (appended)")
     println()
@@ -800,7 +827,16 @@ function generate_plots(
 
     timestamp = Dates.format(now(), "yyyymmdd_HHMMSS")
     scenario_slug = String(config.scenario)
+    scenario_label = string(config.scenario)
     plot_files = String[]
+    scatter_title = "Runtime vs Accuracy: $(scenario_label)"
+    bar_title = "RMSE by Variant: $(scenario_label)"
+    convergence_title = "Convergence Histories: $(scenario_label)"
+    scatter_path =
+        joinpath(output_dir, "csvar_$(scenario_slug)_runtime_vs_rmse_$(timestamp).png")
+    bar_path = joinpath(output_dir, "csvar_$(scenario_slug)_rmse_bar_$(timestamp).png")
+    conv_path = joinpath(output_dir, "csvar_$(scenario_slug)_convergence_$(timestamp).png")
+    scaling_path = joinpath(output_dir, "csvar_$(scenario_slug)_scaling_$(timestamp).png")
 
     # Filter successful results
     success_results = filter(r -> r.status == :ok, results)
@@ -822,7 +858,7 @@ function generate_plots(
                 $summary.rmse_mean;
                 xlabel = "Runtime (s)",
                 ylabel = "Final Euler RMSE",
-                title = "Runtime vs Accuracy: $($(config.scenario))",
+                title = $scatter_title,
                 legend = false,
                 marker = :circle,
                 ms = 8,
@@ -842,12 +878,8 @@ function generate_plots(
                 )
             end
 
-            scatter_path = joinpath(
-                $output_dir,
-                "csvar_$($(scenario_slug))_runtime_vs_rmse_$($(timestamp)).png",
-            )
-            savefig(p_scatter, scatter_path)
-            push!($plot_files, scatter_path)
+            savefig(p_scatter, $scatter_path)
+            push!($plot_files, $scatter_path)
         end
     end
 
@@ -859,7 +891,7 @@ function generate_plots(
             yerror = $summary.rmse_std,
             xlabel = "Variant",
             ylabel = "Final Euler RMSE",
-            title = "RMSE by Variant: $($(config.scenario))",
+            title = $bar_title,
             legend = false,
             rotation = 15,
             color = :steelblue,
@@ -867,10 +899,8 @@ function generate_plots(
             dpi = 150,
         )
 
-        bar_path =
-            joinpath($output_dir, "csvar_$($(scenario_slug))_rmse_bar_$($(timestamp)).png")
-        savefig(p_bar, bar_path)
-        push!($plot_files, bar_path)
+        savefig(p_bar, $bar_path)
+        push!($plot_files, $bar_path)
     end
 
     # Plot 3: RMSE convergence histories
@@ -880,7 +910,7 @@ function generate_plots(
             p_conv = plot(;
                 xlabel = "Iteration/Epoch",
                 ylabel = "Euler RMSE",
-                title = "Convergence Histories: $($(config.scenario))",
+                title = $convergence_title,
                 yscale = :log10,
                 legend = :topright,
                 size = (800, 600),
@@ -904,12 +934,8 @@ function generate_plots(
                 label = "Tolerance",
             )
 
-            conv_path = joinpath(
-                $output_dir,
-                "csvar_$($(scenario_slug))_convergence_$($(timestamp)).png",
-            )
-            savefig(p_conv, conv_path)
-            push!($plot_files, conv_path)
+            savefig(p_conv, $conv_path)
+            push!($plot_files, $conv_path)
         end
     end
 
@@ -941,12 +967,8 @@ function generate_plots(
                 end
             end
 
-            scaling_path = joinpath(
-                $output_dir,
-                "csvar_$($(scenario_slug))_scaling_$($(timestamp)).png",
-            )
-            savefig(p_scaling, scaling_path)
-            push!($plot_files, scaling_path)
+            savefig(p_scaling, $scaling_path)
+            push!($plot_files, $scaling_path)
         end
     end
 

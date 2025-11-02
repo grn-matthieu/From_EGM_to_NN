@@ -121,7 +121,7 @@ function flatten_sum_squares(x)
     end
 end
 
-@inline function _var_bcmc_given_N(sigma2_f::Float32, rho_f::Float32, N::Int, T::Int)
+@inline function _var_bcmc_given_N(sigma2_f::Real, rho_f::Real, N::Int, T::Int)
     N ≤ 1 && return Inf
     denom = max(N - 1, 1)
     const_term = ((N - 2)^2 + N - 1) * (rho_f^2)
@@ -133,7 +133,15 @@ end
     isempty(idxs) && return collect(xj)
     T = eltype(xj)
     n = length(xj)
-    return [xj[i] + sum(T(v) for (idx, v) in zip(idxs, vals) if idx == i) for i = 1:n]
+    return [
+        begin
+            bump = zero(T)
+            @inbounds for (idx, v) in zip(idxs, vals)
+                idx == i && (bump += T(v))
+            end
+            xj[i] + bump
+        end for i = 1:n
+    ]
 end
 
 function _shift_eps_state(xj, scaler::Any, ε)
