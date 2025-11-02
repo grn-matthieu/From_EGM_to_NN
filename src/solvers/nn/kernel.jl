@@ -559,16 +559,19 @@ function loss_euler_fb_bcmc_ar1!(chain, ps, st, batch, model_cfg, rng; mode = :d
     β = T(P.β)
     ρ = T(P.ρ_shock)
     σ_shocks = T(P.σ_shock)
-    v_h = isdefined(model_cfg, :v_h) ? T(model_cfg.v_h) : one(T)
+    # Use adaptive v_h if available, otherwise fall back to static value
+    v_h = if isdefined(model_cfg, :adaptive_v_h_state)
+        T(model_cfg.adaptive_v_h_state.v_h[])
+    else
+        isdefined(model_cfg, :v_h) ? T(model_cfg.v_h) : one(T)
+    end
 
     fb_term = fb(a_term, eta)
     kt = @. fb_term^2
 
     # Non-mutating accumulators (same shape as h)
-    g_sum = zero.(eta)        # accumulates (g^2) across draws
-    g_sumsq = zero.(eta)      # accumulates (g^2)^2 across draws
-    r_sum = zero.(eta)        # accumulates g across draws (for variance diagnostics)
-    r_sumsq = zero.(eta)      # accumulates g^2 across draws (for variance diagnostics)
+    r_sum = zero.(eta)        # accumulates r across draws, r = q - eta
+    r_sumsq = zero.(eta)      # accumulates r^2 across draws
     max_abs_q = zero(T)
 
     component_levels =
@@ -590,16 +593,15 @@ function loss_euler_fb_bcmc_ar1!(chain, ps, st, batch, model_cfg, rng; mode = :d
         qn = β .* Rg .* uprime(cn) ./ uprime(c0)
         max_abs_q = max(max_abs_q, maximum(abs.(qn)))
 
-        residual = @. one(T) - qn - eta
-        residual_sq = residual .* residual
-        g_sum = g_sum .+ residual_sq
-        g_sumsq = g_sumsq .+ residual_sq .* residual_sq
-        r_sum = r_sum .+ residual
-        r_sumsq = r_sumsq .+ residual_sq
+        r = @. qn - eta
+        r_sq = r .* r
+        r_sum = r_sum .+ r
+        r_sumsq = r_sumsq .+ r_sq
     end
 
     denom = T(N) * (T(N) - one(T))
-    bcmc = (g_sum .* g_sum .- g_sumsq) ./ denom
+    # Unbiased estimator using all distinct pairs: average of r_i * r_j, i≠j
+    bcmc = (r_sum .* r_sum .- r_sumsq) ./ denom
 
     # Optional diagnostics: empirical variance of g across draws per state, averaged
     invN = one(T) / T(N)
@@ -698,7 +700,12 @@ function loss_euler_fb_bcmc_csvar!(chain, ps, st, batch, model_cfg, rng; mode = 
 
     Rg = one(T) + T(P.r)
     β = T(P.β)
-    v_h = isdefined(model_cfg, :v_h) ? T(model_cfg.v_h) : one(T)
+    # Use adaptive v_h if available, otherwise fall back to static value
+    v_h = if isdefined(model_cfg, :adaptive_v_h_state)
+        T(model_cfg.adaptive_v_h_state.v_h[])
+    else
+        isdefined(model_cfg, :v_h) ? T(model_cfg.v_h) : one(T)
+    end
 
     A = Matrix{T}(P.A)
     Σ = Matrix{Float64}(P.Σ)
@@ -708,8 +715,6 @@ function loss_euler_fb_bcmc_csvar!(chain, ps, st, batch, model_cfg, rng; mode = 
     fb_term = fb(a_term, eta)
     kt = @. fb_term^2
 
-    g_sum = zero.(eta)
-    g_sumsq = zero.(eta)
     r_sum = zero.(eta)
     r_sumsq = zero.(eta)
     max_abs_q = zero(T)
@@ -732,16 +737,15 @@ function loss_euler_fb_bcmc_csvar!(chain, ps, st, batch, model_cfg, rng; mode = 
         q_next = β .* Rg .* uprime(c_next) ./ uprime(c0)
         max_abs_q = max(max_abs_q, maximum(abs.(q_next)))
 
-        residual = @. one(T) - q_next - eta
-        residual_sq = residual .* residual
-        g_sum = g_sum .+ residual_sq
-        g_sumsq = g_sumsq .+ residual_sq .* residual_sq
-        r_sum = r_sum .+ residual
-        r_sumsq = r_sumsq .+ residual_sq
+        r = @. q_next - eta
+        r_sq = r .* r
+        r_sum = r_sum .+ r
+        r_sumsq = r_sumsq .+ r_sq
     end
 
     denom = T(N) * (T(N) - one(T))
-    bcmc = (g_sum .* g_sum .- g_sumsq) ./ denom
+    # Unbiased estimator using all distinct pairs: average of r_i * r_j, i≠j
+    bcmc = (r_sum .* r_sum .- r_sumsq) ./ denom
 
     invN = one(T) / T(N)
     var_vec = clamp.(r_sumsq .* invN .- (r_sum .* invN) .* (r_sum .* invN), zero(T), T(Inf))
