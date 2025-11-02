@@ -179,6 +179,12 @@ function solve(
     metadata[:objective] = settings.objective
     metadata[:bcmc_auto_N] = settings.bcmc_auto_N
     metadata[:skip_final_eval] = settings.skip_final_eval
+    if hasproperty(sol, :mc_metrics)
+        metadata[:mc_metrics] = sol.mc_metrics
+        for (k, v) in sol.mc_metrics
+            metadata[k] = v
+        end
+    end
 
     return Solution(
         policy = policy,

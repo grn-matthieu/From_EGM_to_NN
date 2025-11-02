@@ -27,6 +27,7 @@ struct NNSolverSettings
     w_min::Float32
     w_max::Float32
     samples_per_epoch::Int
+    eval_samples::Int
     sigma_shocks::Union{Nothing,Float64}
     n_mc::Int
     bcmc_budget_T::Union{Nothing,Int}
@@ -122,6 +123,8 @@ function solver_settings(
     w_min = Float32(get_option(opts, :w_min, 0.1))
     w_max = Float32(get_option(opts, :w_max, 4.0))
     samples_per_epoch = max(Int(get_option(opts, :samples_per_epoch, 64)), 1)
+    eval_samples_default = max(4 * samples_per_epoch, samples_per_epoch)
+    eval_samples = max(Int(get_option(opts, :eval_samples, eval_samples_default)), 1)
     sigma_shocks = get_option(opts, :sigma_shocks, nothing)
     n_mc = max(Int(get_option(opts, :n_mc, 16)), 1)
     bcmc_budget_T = let v = get_option(opts, :bcmc_budget_T, nothing)
@@ -204,6 +207,7 @@ function solver_settings(
         w_min,
         w_max,
         samples_per_epoch,
+        eval_samples,
         sigma_shocks,
         n_mc,
         bcmc_budget_T,

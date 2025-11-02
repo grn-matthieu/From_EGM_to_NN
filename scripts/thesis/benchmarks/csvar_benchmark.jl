@@ -5,7 +5,7 @@ CSVAR Benchmark Script
 
 Comprehensive benchmarking for CSVAR (vector-income) models. Tests solver methods
 across dimensional scaling, correlation structures, and grid sizes with detailed
-diagnostics and visualization.
+diagnostics and CSV reporting.
 
 Usage:
   julia --project scripts/thesis/benchmarks/csvar_benchmark.jl [options]
@@ -20,12 +20,10 @@ Options:
   --config=PATH         Path to base CSVAR config file (default: csvar_template.yaml)
   --output=DIR          Output directory (default: outputs/benchmarks)
   --repeats=N           Number of repetitions per variant (default: 1)
-  --no-plots            Skip generating plots
-  --summary-only        Only print summary, no CSV/JSON output
+  --summary-only        Only print summary, no CSV output
   --verbose             Enable verbose solver output
   --correlation=TYPE    Correlation structure: diagonal, single, toeplitz, dense (for correlation scenario)
   --rotation=TYPE       Rotation type: pca, cholesky (for rotation scenario)
-  --nn-modes=LIST       NN objectives to sweep (aio,bcmc_fixed,bcmc_auto,config,all)
   --nn-modes=LIST       NN objectives to sweep (aio,bcmc_fixed,bcmc_auto,config,all)
 
 Scenarios:
@@ -35,11 +33,7 @@ Scenarios:
   rotation      - Apply orthogonal rotations (PCA, Cholesky) to test solver invariance
 
 Outputs:
-  - CSV reports with convergence statistics and Euler errors per variant
-  - Policy plots (consumption surfaces) as PNG files
-  - JSON file with detailed diagnostics including RMSE histories
-  - Markdown summary report with best configurations
-  - Comparison plots for multi-variant runs
+  - CSV report with runtime, RMSE, and history metrics across variants
 """
 
 module CSVARBenchmark
@@ -53,16 +47,7 @@ using Statistics
 using LinearAlgebra
 using DataFrames
 using CSV
-using JSON3
 using ThesisProject
-
-# Try to load Plots for visualization
-const HAS_PLOTS = try
-    @eval using Plots
-    true
-catch
-    false
-end
 
 include(joinpath(@__DIR__, "..", "..", "utils", "config_helpers.jl"))
 using .ScriptConfigHelpers
@@ -86,7 +71,6 @@ struct BenchmarkConfig
     config_path::String
     output_dir::String
     repeats::Int
-    generate_plots::Bool
     summary_only::Bool
     verbose::Bool
     correlation_type::Symbol
@@ -144,7 +128,6 @@ function parse_cli_args()
     config_path = joinpath(ROOT, "config", "csvar_template.yaml")
     output_dir = joinpath(ROOT, "outputs", "benchmarks")
     repeats = 1
-    generate_plots = true
     summary_only = false
     verbose = false
     correlation_type = :diagonal
@@ -173,8 +156,6 @@ function parse_cli_args()
             output_dir = split(arg, "=")[2]
         elseif startswith(arg, "--repeats=")
             repeats = parse(Int, split(arg, "=")[2])
-        elseif arg == "--no-plots"
-            generate_plots = false
         elseif arg == "--summary-only"
             summary_only = true
         elseif arg == "--verbose"
@@ -208,7 +189,6 @@ function parse_cli_args()
         config_path,
         output_dir,
         repeats,
-        generate_plots,
         summary_only,
         verbose,
         correlation_type,
@@ -224,7 +204,7 @@ CSVAR Benchmark Script
 
 Comprehensive benchmarking for CSVAR (vector-income) models. Tests solver methods
 across dimensional scaling, correlation structures, and grid sizes with detailed
-diagnostics and visualization.
+diagnostics and CSV reporting.
 
 Usage:
   julia --project scripts/thesis/benchmarks/csvar_benchmark.jl [options]
@@ -240,7 +220,7 @@ Options:
   --output=DIR          Output directory (default: outputs/benchmarks)
   --repeats=N           Number of repetitions per variant (default: 1)
   --no-plots            Skip generating plots
-  --summary-only        Only print summary, no CSV/JSON output
+  --summary-only        Only print summary, no CSV output
   --verbose             Enable verbose solver output
   --correlation=TYPE    Correlation structure: diagonal, single, toeplitz, dense (for correlation scenario)
   --rotation=TYPE       Rotation type: pca, cholesky (for rotation scenario)
@@ -252,11 +232,7 @@ Scenarios:
   rotation      - Apply orthogonal rotations (PCA, Cholesky) to test solver invariance
 
 Outputs:
-  - CSV reports with convergence statistics and Euler errors per variant
-  - Policy plots (consumption surfaces) as PNG files
-  - JSON file with detailed diagnostics including RMSE histories
-  - Markdown summary report with best configurations
-  - Comparison plots for multi-variant runs
+  - CSV report with convergence statistics and histories per variant
         """,
     )
 end
@@ -347,7 +323,7 @@ function apply_nn_mode_overrides(cfg::NamedTuple, mode::Symbol)
 end
 
 function maybe_set_skip_eval(cfg::NamedTuple, y_dim::Int)
-    if y_dim ≥ 4
+    if y_dim ≥ 3
         nn_block = get_nested(cfg, (:solver, :nn), NamedTuple())
         new_nn = merge_config(nn_block, (; skip_final_eval = true))
         return merge_section(cfg, :solver, (nn = new_nn,))
@@ -557,6 +533,15 @@ function run_single_variant(
             haskey(meta, :rmse_history) ? Float64.(meta[:rmse_history]) : Float64[]
         N_history = haskey(meta, :N_history) ? Int.(meta[:N_history]) : Int[]
         v_h_history = haskey(meta, :v_h_history) ? Float64.(meta[:v_h_history]) : Float64[]
+        mc_mean_abs =
+            haskey(meta, :mc_mean_abs_resid) ? Float64(meta[:mc_mean_abs_resid]) : NaN
+        mc_rms = haskey(meta, :mc_rms_resid) ? Float64(meta[:mc_rms_resid]) : NaN
+        mc_max_abs =
+            haskey(meta, :mc_max_abs_resid) ? Float64(meta[:mc_max_abs_resid]) : NaN
+        mc_effective_n =
+            haskey(meta, :mc_effective_n) ? Float64(meta[:mc_effective_n]) : NaN
+        mc_sample_size =
+            haskey(meta, :mc_sample_size) ? Float64(meta[:mc_sample_size]) : NaN
         loss_history =
             haskey(meta, :loss_history) ? Float64.(meta[:loss_history]) : Float64[]
         best_loss =
@@ -585,13 +570,6 @@ function run_single_variant(
             val === nothing ? false : Bool(val)
         end
 
-        # Policy statistics
-        c_policy = solution.policy[:c].value
-        c_mean = mean(c_policy)
-        c_std = std(c_policy)
-        c_min = minimum(c_policy)
-        c_max = maximum(c_policy)
-
         # Get model info
         params = get_nested(cfg, (:params,))
         param_desc = describe_params(params)
@@ -603,16 +581,17 @@ function run_single_variant(
         rmse_history = Float64[]
         N_history = Int[]
         v_h_history = Float64[]
+        mc_mean_abs = NaN
+        mc_rms = NaN
+        mc_max_abs = NaN
+        mc_effective_n = NaN
+        mc_sample_size = NaN
         loss_history = Float64[]
         best_loss = NaN
         final_loss = NaN
         objective_sym = :unknown
         nn_mode = :unknown
         skip_final_eval = false
-        c_mean = NaN
-        c_std = NaN
-        c_min = NaN
-        c_max = NaN
         params = get_nested(cfg, (:params,))
         param_desc = describe_params(params)
     end
@@ -633,10 +612,6 @@ function run_single_variant(
         mean_ee = mean_ee,
         final_rmse = max_resid,
         converged = converged,
-        c_mean = c_mean,
-        c_std = c_std,
-        c_min = c_min,
-        c_max = c_max,
         rmse_history = rmse_history,
         N_history = N_history,
         v_h_history = v_h_history,
@@ -646,9 +621,13 @@ function run_single_variant(
         objective = objective_sym,
         nn_mode = nn_mode,
         skip_final_eval = skip_final_eval,
+        mc_mean_abs = mc_mean_abs,
+        mc_rms = mc_rms,
+        mc_max_abs = mc_max_abs,
+        mc_effective_n = mc_effective_n,
+        mc_sample_size = mc_sample_size,
         status = status,
         message = message,
-        solution = solution,
         config = cfg,
     )
 end
@@ -684,7 +663,6 @@ function run_benchmark(config::BenchmarkConfig)
         config.config_path,
         config.output_dir,
         config.repeats,
-        config.generate_plots,
         config.summary_only,
         config.verbose,
         config.correlation_type,
@@ -786,11 +764,8 @@ function aggregate_results(results)
                 iterations = res.iterations,
                 mean_ee = res.mean_ee,
                 final_rmse = res.final_rmse,
+                rmse = res.final_rmse,
                 converged = res.converged,
-                c_mean = res.c_mean,
-                c_std = res.c_std,
-                c_min = res.c_min,
-                c_max = res.c_max,
                 rmse_history = res.rmse_history,
                 objective = String(res.objective),
                 nn_mode = String(res.nn_mode),
@@ -801,6 +776,11 @@ function aggregate_results(results)
                 N_history = res.N_history,
                 v_h_history = res.v_h_history,
                 skip_final_eval = res.skip_final_eval,
+                mc_mean_abs = res.mc_mean_abs,
+                mc_rms = res.mc_rms,
+                mc_max_abs = res.mc_max_abs,
+                mc_effective_n = res.mc_effective_n,
+                mc_sample_size = res.mc_sample_size,
                 status = String(res.status),
             ),
         )
@@ -874,80 +854,8 @@ function save_results(
     output_dir::String,
 )
     ts_now = now()
-    timestamp_slug = Dates.format(ts_now, "yyyymmdd_HHMMSS")
     readable_timestamp = Dates.format(ts_now, "yyyy-mm-dd HH:MM:SS")
-    scenario_slug = String(config.scenario)
 
-    # Scenario-specific CSV files (append across runs)
-    csv_path = joinpath(output_dir, "csvar_$(scenario_slug)_runs.csv")
-    if nrow(df) > 0
-        runs_df = copy(df)
-        n = nrow(runs_df)
-        runs_df[!, :run_timestamp] = fill(readable_timestamp, n)
-        runs_df[!, :scenario] = fill(String(config.scenario), n)
-        runs_df[!, :Na] = fill(config.Na, n)
-        runs_df[!, :tol] = fill(config.tol, n)
-        runs_df[!, :epochs] = fill(config.epochs, n)
-        append_runs = isfile(csv_path)
-        open(csv_path, append_runs ? "a" : "w") do io
-            CSV.write(io, runs_df; header = !append_runs)
-        end
-    end
-
-    summary_path = joinpath(output_dir, "csvar_$(scenario_slug)_summary.csv")
-    if nrow(summary) > 0
-        summary_df = copy(summary)
-        m = nrow(summary_df)
-        summary_df[!, :run_timestamp] = fill(readable_timestamp, m)
-        summary_df[!, :scenario] = fill(String(config.scenario), m)
-        summary_df[!, :Na] = fill(config.Na, m)
-        summary_df[!, :tol] = fill(config.tol, m)
-        summary_df[!, :epochs] = fill(config.epochs, m)
-        append_summary = isfile(summary_path)
-        open(summary_path, append_summary ? "a" : "w") do io
-            CSV.write(io, summary_df; header = !append_summary)
-        end
-    end
-
-    # JSON with detailed diagnostics
-    json_path =
-        joinpath(output_dir, "csvar_$(scenario_slug)_detailed_$(timestamp_slug).json")
-    json_payload = [
-        Dict(
-            :variant => String(res.variant),
-            :method => String(res.method),
-            :repeat => res.repeat,
-            :y_dim => res.y_dim,
-            :max_eigenvalue => res.max_eigenvalue,
-            :avg_variance => res.avg_variance,
-            :off_diagonal_corr => res.off_diagonal_corr,
-            :runtime => res.runtime,
-            :iterations => res.iterations,
-            :mean_ee => res.mean_ee,
-            :final_rmse => res.final_rmse,
-            :converged => res.converged,
-            :c_mean => res.c_mean,
-            :c_std => res.c_std,
-            :c_min => res.c_min,
-            :c_max => res.c_max,
-            :objective => String(res.objective),
-            :nn_mode => String(res.nn_mode),
-            :best_loss => res.best_loss,
-            :final_loss => res.final_loss,
-            :loss_history => res.loss_history,
-            :status => String(res.status),
-            :message => res.message,
-            :rmse_history => res.rmse_history,
-            :N_history => res.N_history,
-            :v_h_history => res.v_h_history,
-            :skip_final_eval => res.skip_final_eval,
-        ) for res in results
-    ]
-    open(json_path, "w") do io
-        JSON3.write(io, json_payload; indent = 2)
-    end
-
-    # Append to consolidated runs CSV (single file accumulating all runs)
     consolidated_path = joinpath(output_dir, "csvar_benchmark_runs.csv")
     df2 = deepcopy(df)
     n = nrow(df2)
@@ -958,314 +866,17 @@ function save_results(
         df2[!, :tol] = fill(config.tol, n)
         df2[!, :epochs] = fill(config.epochs, n)
         df2[!, :base_config] = fill(basename(config.config_path), n)
-        if isfile(consolidated_path)
-            open(consolidated_path, "a") do io
-                CSV.write(io, df2; header = false)
-            end
-        else
-            CSV.write(consolidated_path, df2)
-        end
+        append_runs = isfile(consolidated_path)
+        CSV.write(consolidated_path, df2; append = append_runs, writeheader = !append_runs)
     end
 
     println("Results saved:")
-    println("  - Runs CSV:     $csv_path (appended)")
-    println("  - Summary CSV:  $summary_path (appended)")
-    println("  - Detail JSON:  $json_path")
-    println("  - Consolidated: $consolidated_path (appended)")
+    println("  - Consolidated CSV: $consolidated_path (appended)")
     println()
 
-    return csv_path, summary_path, json_path
+    return consolidated_path
 end
 
-function generate_plots(
-    config::BenchmarkConfig,
-    results,
-    summary::DataFrame,
-    output_dir::String,
-)
-    if !HAS_PLOTS
-        @warn "Plots.jl not available - skipping plot generation"
-        return String[]
-    end
-
-    if nrow(summary) == 0
-        @warn "No successful runs - skipping plot generation"
-        return String[]
-    end
-
-    timestamp = Dates.format(now(), "yyyymmdd_HHMMSS")
-    scenario_slug = String(config.scenario)
-    scenario_label = string(config.scenario)
-    plot_files = String[]
-    scatter_title = "Runtime vs Accuracy: $(scenario_label)"
-    bar_title = "RMSE by Variant: $(scenario_label)"
-    convergence_title = "Convergence Histories: $(scenario_label)"
-    scatter_path =
-        joinpath(output_dir, "csvar_$(scenario_slug)_runtime_vs_rmse_$(timestamp).png")
-    bar_path = joinpath(output_dir, "csvar_$(scenario_slug)_rmse_bar_$(timestamp).png")
-    conv_path = joinpath(output_dir, "csvar_$(scenario_slug)_convergence_$(timestamp).png")
-    scaling_path = joinpath(output_dir, "csvar_$(scenario_slug)_scaling_$(timestamp).png")
-
-    # Filter successful results
-    success_results = filter(r -> r.status == :ok, results)
-
-    if isempty(success_results)
-        return plot_files
-    end
-
-    @eval begin
-        using Plots
-        gr()
-    end
-
-    # Plot 1: Runtime vs RMSE scatter
-    if nrow(summary) > 1
-        @eval begin
-            p_scatter = scatter(
-                $summary.runtime_mean,
-                $summary.rmse_mean;
-                xlabel = "Runtime (s)",
-                ylabel = "Final Euler RMSE",
-                title = $scatter_title,
-                legend = false,
-                marker = :circle,
-                ms = 8,
-                color = :steelblue,
-                grid = true,
-                size = (800, 600),
-                dpi = 150,
-            )
-
-            # Add labels for each point
-            for i = 1:nrow($summary)
-                annotate!(
-                    p_scatter,
-                    $summary.runtime_mean[i],
-                    $summary.rmse_mean[i],
-                    text("$(String($summary.variant[i]))", 7, :bottom),
-                )
-            end
-
-            savefig(p_scatter, $scatter_path)
-            push!($plot_files, $scatter_path)
-        end
-    end
-
-    # Plot 2: RMSE bar chart by variant
-    @eval begin
-        p_bar = bar(
-            $summary.variant,
-            $summary.rmse_mean;
-            yerror = $summary.rmse_std,
-            xlabel = "Variant",
-            ylabel = "Final Euler RMSE",
-            title = $bar_title,
-            legend = false,
-            rotation = 15,
-            color = :steelblue,
-            size = (800, 600),
-            dpi = 150,
-        )
-
-        savefig(p_bar, $bar_path)
-        push!($plot_files, $bar_path)
-    end
-
-    # Plot 3: RMSE convergence histories
-    history_results = filter(r -> !isempty(r.rmse_history), success_results)
-    if !isempty(history_results)
-        @eval begin
-            p_conv = plot(;
-                xlabel = "Iteration/Epoch",
-                ylabel = "Euler RMSE",
-                title = $convergence_title,
-                yscale = :log10,
-                legend = :topright,
-                size = (800, 600),
-                dpi = 150,
-            )
-
-            # Plot up to 10 histories to avoid clutter
-            n_plot = min(10, length($history_results))
-            for (idx, res) in enumerate($history_results[1:n_plot])
-                label = "$(String(res.variant))_$(String(res.method))"
-                plot!(p_conv, res.rmse_history; label = label, alpha = 0.7, linewidth = 1.5)
-            end
-
-            # Add tolerance line
-            hline!(
-                p_conv,
-                [$(config.tol)];
-                linestyle = :dash,
-                color = :red,
-                linewidth = 1,
-                label = "Tolerance",
-            )
-
-            savefig(p_conv, $conv_path)
-            push!($plot_files, $conv_path)
-        end
-    end
-
-    # Plot 4: Dimension scaling (if applicable)
-    if config.scenario == :dimension && :y_dim in names(summary)
-        @eval begin
-            p_scaling = plot(;
-                xlabel = "State Dimension (y_dim)",
-                ylabel = "Runtime (s)",
-                title = "Dimensional Scaling",
-                legend = :topleft,
-                size = (800, 600),
-                dpi = 150,
-                yscale = :log10,
-            )
-
-            for method in unique($summary.method)
-                method_data = filter(row -> row.method == method, $summary)
-                if nrow(method_data) > 1
-                    plot!(
-                        p_scaling,
-                        method_data.y_dim,
-                        method_data.runtime_mean;
-                        label = String(method),
-                        marker = :circle,
-                        linewidth = 2,
-                        ms = 6,
-                    )
-                end
-            end
-
-            savefig(p_scaling, $scaling_path)
-            push!($plot_files, $scaling_path)
-        end
-    end
-
-    println("Plots saved:")
-    for file in plot_files
-        println("  - $(basename(file))")
-    end
-    println()
-
-    return plot_files
-end
-
-function write_report(
-    config::BenchmarkConfig,
-    summary::DataFrame,
-    plot_files::Vector{String},
-    output_dir::String,
-)
-    timestamp = Dates.format(now(), "yyyymmdd_HHMMSS")
-    scenario_slug = String(config.scenario)
-    report_path = joinpath(output_dir, "csvar_$(scenario_slug)_report_$(timestamp).md")
-
-    open(report_path, "w") do io
-        println(io, "# CSVAR Benchmark Report: $(config.scenario)")
-        println(io)
-        println(io, "**Generated:** $(Dates.format(now(), "yyyy-mm-dd HH:MM:SS"))")
-        println(io)
-
-        println(io, "## Configuration")
-        println(io)
-        println(io, "- Scenario: `$(config.scenario)`")
-        println(io, "- Method(s): `$(config.method)`")
-        println(io, "- Grid size: Na = $(config.Na)")
-        println(io, "- Tolerance: $(config.tol)")
-        println(io, "- Repeats per variant: $(config.repeats)")
-        println(io)
-
-        if nrow(summary) == 0
-            println(io, "## Results")
-            println(io)
-            println(io, "All runs failed. See detailed JSON for error messages.")
-            return
-        end
-
-        println(io, "## Summary Statistics")
-        println(io)
-        println(io, "```")
-        show(io, MIME("text/plain"), summary; allrows = true)
-        println(io)
-        println(io, "```")
-        println(io)
-
-        # Best configuration
-        best_row = first(summary)
-        println(io, "## Best Configuration")
-        println(io)
-        println(io, "- **Variant:** $(best_row.variant)")
-        println(io, "- **Method:** $(best_row.method)")
-        println(io, "- **Dimension:** $(best_row.y_dim)")
-        println(
-            io,
-            "- **Runtime:** $(format_duration(best_row.runtime_mean)) ± $(format_duration(best_row.runtime_std))",
-        )
-        println(
-            io,
-            "- **Final RMSE:** $(@sprintf("%.6e", best_row.rmse_mean)) ± $(@sprintf("%.6e", best_row.rmse_std))",
-        )
-        println(
-            io,
-            "- **Convergence Rate:** $(round(best_row.convergence_rate * 100, digits=1))%",
-        )
-        println(io)
-
-        # Key insights
-        println(io, "## Key Insights")
-        println(io)
-
-        if config.scenario == :dimension
-            println(
-                io,
-                "- **Dimensional scaling:** Testing solver performance across $(minimum(config.dims))D to $(maximum(config.dims))D state spaces",
-            )
-            if nrow(summary) > 1
-                runtime_growth = summary.runtime_mean[end] / summary.runtime_mean[1]
-                println(
-                    io,
-                    "- **Runtime growth:** $(round(runtime_growth, digits=2))× from lowest to highest dimension",
-                )
-            end
-        elseif config.scenario == :correlation
-            println(
-                io,
-                "- **Correlation structure:** Comparing solver robustness to income correlations",
-            )
-            println(
-                io,
-                "- Best structure achieved lowest RMSE while maintaining computational efficiency",
-            )
-        elseif config.scenario == :rotation
-            println(
-                io,
-                "- **Rotation invariance:** Testing solver stability under orthogonal state transformations",
-            )
-            println(
-                io,
-                "- Validates that solutions are independent of coordinate system representation",
-            )
-        end
-        println(io)
-
-        # Plots
-        if !isempty(plot_files)
-            println(io, "## Visualizations")
-            println(io)
-            for file in plot_files
-                println(io, "### $(basename(file))")
-                println(io)
-                println(io, "![]($(basename(file)))")
-                println(io)
-            end
-        end
-
-        println(io, "---")
-        println(io, "*Report generated by CSVAR Benchmark script*")
-    end
-
-    println("Report saved: $report_path")
-    return report_path
-end
 
 # ============================================================================
 # Main execution
@@ -1287,7 +898,7 @@ function main()
     df, summary = aggregate_results(results)
     print_summary(summary)
 
-    # Save and visualize
+    # Persist results
     if !config.summary_only
         println("="^70)
         println("Saving Results")
@@ -1295,11 +906,6 @@ function main()
         println()
 
         save_results(config, results, df, summary, output_dir)
-
-        if config.generate_plots
-            plot_files = generate_plots(config, results, summary, output_dir)
-            write_report(config, summary, plot_files, output_dir)
-        end
     end
 
     println("="^70)

@@ -226,6 +226,40 @@ function solve_nn(model; opts = nothing, settings = nothing, rng = nothing)
     params = state_parameters(best_state)
     states = state_states(best_state)
 
+    mc_metrics = Dict{Symbol,Float64}()
+    if settings.eval_samples > 0
+        mc_rng = derive_rng(master, :mc_residual)
+        X_mc, _ = sample_training(
+            G,
+            S;
+            mode = :rand,
+            nsamples = settings.eval_samples,
+            rng = mc_rng,
+            settings = settings,
+            P = model_cfg.P,
+        )
+        normalize_samples!(scaler, X_mc)
+        batch_mc = prepare_training_batch(X_mc)
+        loss_function = build_loss_function(G, S, scaler, settings, mc_rng, model_cfg)
+        _, _, mc_diag = loss_function(trained_model, params, states, (batch_mc,))
+        fb_diag = mc_diag.fb
+        if fb_diag !== nothing
+            if isdefined(fb_diag, :mean_abs_resid)
+                mc_metrics[:mc_mean_abs_resid] = Float64(fb_diag.mean_abs_resid)
+            end
+            if isdefined(fb_diag, :rms_resid)
+                mc_metrics[:mc_rms_resid] = Float64(fb_diag.rms_resid)
+            end
+            if isdefined(fb_diag, :max_abs_resid)
+                mc_metrics[:mc_max_abs_resid] = Float64(fb_diag.max_abs_resid)
+            end
+            if isdefined(fb_diag, :n_eff)
+                mc_metrics[:mc_effective_n] = Float64(fb_diag.n_eff)
+            end
+        end
+        mc_metrics[:mc_sample_size] = Float64(settings.eval_samples)
+    end
+
     evaluation = evaluate_solution(
         trained_model,
         params,
@@ -302,6 +336,7 @@ function solve_nn(model; opts = nothing, settings = nothing, rng = nothing)
         best_loss = training_result.best_loss,
         final_loss = isempty(training_result.loss_history) ? NaN :
                      training_result.loss_history[end],
+        mc_metrics = mc_metrics,
     )
 end
 
@@ -434,9 +469,24 @@ function loss_euler_fb_aio_ar1!(chain, ps, st, batch, model_cfg, rng)
     end
 
     loss_vec = fb_term_sq .+ v_h .* aio_pen
+    mean_abs_r1 = mean(abs.(r1))
+    mean_abs_r2 = mean(abs.(r2))
+    mean_resid_sq = 0.5 * (mean(r1 .^ 2) + mean(r2 .^ 2))
+    rms_resid = sqrt(max(mean_resid_sq, zero(T)))
+    mean_abs_resid = 0.5 * (mean_abs_r1 + mean_abs_r2)
+    max_abs_resid = max(maximum(abs.(r1)), maximum(abs.(r2)))
 
     return mean(loss_vec),
-    (st1, (; mean_fb_term_sq = mean(fb_term_sq), mean_aio = mean(aio_pen)))
+    (
+        st1,
+        (;
+            mean_fb_term_sq = mean(fb_term_sq),
+            mean_aio = mean(aio_pen),
+            mean_abs_resid = mean_abs_resid,
+            rms_resid = rms_resid,
+            max_abs_resid = max_abs_resid,
+        ),
+    )
 end
 
 function loss_euler_fb_aio_csvar!(chain, ps, st, batch, model_cfg, rng)
@@ -517,9 +567,25 @@ function loss_euler_fb_aio_csvar!(chain, ps, st, batch, model_cfg, rng)
     end
     loss_vec = kt .+ v_h .* aio_pen
     max_abs_q = maximum(abs.(vcat(q1, q2)))
+    mean_abs_r1 = mean(abs.(r1))
+    mean_abs_r2 = mean(abs.(r2))
+    mean_resid_sq = 0.5 * (mean(r1 .^ 2) + mean(r2 .^ 2))
+    rms_resid = sqrt(max(mean_resid_sq, zero(T)))
+    mean_abs_resid = 0.5 * (mean_abs_r1 + mean_abs_r2)
+    max_abs_resid = max(maximum(abs.(r1)), maximum(abs.(r2)))
 
     return mean(loss_vec),
-    (st1, (; kt_mean = mean(kt), aio_mean = mean(aio_pen), max_abs_q = max_abs_q))
+    (
+        st1,
+        (;
+            kt_mean = mean(kt),
+            aio_mean = mean(aio_pen),
+            max_abs_q = max_abs_q,
+            mean_abs_resid = mean_abs_resid,
+            rms_resid = rms_resid,
+            max_abs_resid = max_abs_resid,
+        ),
+    )
 end
 
 function loss_euler_fb_bcmc_ar1!(chain, ps, st, batch, model_cfg, rng; mode = :default)
@@ -610,7 +676,9 @@ function loss_euler_fb_bcmc_ar1!(chain, ps, st, batch, model_cfg, rng; mode = :d
     # Non-mutating accumulators (same shape as h)
     r_sum = zero.(eta)        # accumulates r across draws, r = q - eta
     r_sumsq = zero.(eta)      # accumulates r^2 across draws
+    r_abs_sum = zero.(eta)
     max_abs_q = zero(T)
+    max_abs_r = zero(T)
 
     component_levels =
         isdefined(P, :y) && P.y isa AbstractVector ? T.(exp.(collect(P.y))) : T[]
@@ -635,6 +703,8 @@ function loss_euler_fb_bcmc_ar1!(chain, ps, st, batch, model_cfg, rng; mode = :d
         r_sq = r .* r
         r_sum = r_sum .+ r
         r_sumsq = r_sumsq .+ r_sq
+        r_abs_sum = r_abs_sum .+ abs.(r)
+        max_abs_r = max(max_abs_r, maximum(abs.(r)))
     end
 
     denom = T(N) * (T(N) - one(T))
@@ -651,6 +721,9 @@ function loss_euler_fb_bcmc_ar1!(chain, ps, st, batch, model_cfg, rng; mode = :d
     A_proxy = proxy_state === nothing ? NaN : Float64(proxy_state.A[])
     B_proxy = proxy_state === nothing ? NaN : Float64(proxy_state.B[])
     ratio_proxy = isnan(B_proxy) || abs(B_proxy) ≤ EPS_VAR ? Inf : A_proxy / B_proxy
+    mean_abs_resid = mean(r_abs_sum .* invN)
+    rms_resid = sqrt(max(mean(r_sumsq .* invN), zero(T)))
+
     return mean(loss_vec),
     (
         st1,
@@ -663,6 +736,9 @@ function loss_euler_fb_bcmc_ar1!(chain, ps, st, batch, model_cfg, rng; mode = :d
             bcmc_A = A_proxy,
             bcmc_B = B_proxy,
             bcmc_ratio = ratio_proxy,
+            mean_abs_resid = mean_abs_resid,
+            rms_resid = rms_resid,
+            max_abs_resid = max_abs_r,
         ),
     )
 end
@@ -755,7 +831,9 @@ function loss_euler_fb_bcmc_csvar!(chain, ps, st, batch, model_cfg, rng; mode = 
 
     r_sum = zero.(eta)
     r_sumsq = zero.(eta)
+    r_abs_sum = zero.(eta)
     max_abs_q = zero(T)
+    max_abs_r = zero(T)
 
     for draw = 1:N
         ε = randn(rng, T, y_dim, n)
@@ -779,6 +857,8 @@ function loss_euler_fb_bcmc_csvar!(chain, ps, st, batch, model_cfg, rng; mode = 
         r_sq = r .* r
         r_sum = r_sum .+ r
         r_sumsq = r_sumsq .+ r_sq
+        r_abs_sum = r_abs_sum .+ abs.(r)
+        max_abs_r = max(max_abs_r, maximum(abs.(r)))
     end
 
     denom = T(N) * (T(N) - one(T))
@@ -794,6 +874,9 @@ function loss_euler_fb_bcmc_csvar!(chain, ps, st, batch, model_cfg, rng; mode = 
     A_proxy = proxy_state === nothing ? NaN : Float64(proxy_state.A[])
     B_proxy = proxy_state === nothing ? NaN : Float64(proxy_state.B[])
     ratio_proxy = isnan(B_proxy) || abs(B_proxy) ≤ EPS_VAR ? Inf : A_proxy / B_proxy
+    mean_abs_resid = mean(r_abs_sum .* invN)
+    rms_resid = sqrt(max(mean(r_sumsq .* invN), zero(T)))
+
     return mean(loss_vec),
     (
         st1,
@@ -806,6 +889,9 @@ function loss_euler_fb_bcmc_csvar!(chain, ps, st, batch, model_cfg, rng; mode = 
             bcmc_A = A_proxy,
             bcmc_B = B_proxy,
             bcmc_ratio = ratio_proxy,
+            mean_abs_resid = mean_abs_resid,
+            rms_resid = rms_resid,
+            max_abs_resid = max_abs_r,
         ),
     )
 end
