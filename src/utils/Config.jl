@@ -191,7 +191,15 @@ ShocksValidationState(; active::Bool = false, Nz::Int = 1) =
 
 function validate_model_section(model_cfg::NamedTuple)
     hasproperty(model_cfg, :name) || error("missing model.name")
-    return Symbol(model_cfg.name)
+    name_str = string(model_cfg.name)
+    # Normalize model names to internal symbols
+    if name_str == "ConsumerSavingVAR" || name_str == "cs_vec"
+        return :cs_vec
+    elseif name_str == "ConsumerSaving" || name_str == "cs"
+        return :cs
+    else
+        return Symbol(name_str)
+    end
 end
 
 function validate_params_section(cfg::NamedTuple, model_name::Symbol)

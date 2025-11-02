@@ -137,7 +137,23 @@ function csvar_component_log_means(params)
     y_dim = length(targets)
     σ2 = zeros(Float64, y_dim)
     if hasproperty(params, :Σ) && params.Σ !== nothing
-        Σ = Matrix{Float64}(params.Σ)
+        # Handle both Matrix and Vector{Vector} representations
+        Σ = if params.Σ isa AbstractMatrix
+            Matrix{Float64}(params.Σ)
+        elseif params.Σ isa AbstractVector &&
+               length(params.Σ) > 0 &&
+               params.Σ[1] isa AbstractVector
+            # Convert vector-of-vectors to matrix
+            rows = length(params.Σ)
+            cols = length(params.Σ[1])
+            mat = Matrix{Float64}(undef, rows, cols)
+            for (i, row) in enumerate(params.Σ)
+                mat[i, :] .= Float64.(row)
+            end
+            mat
+        else
+            error("params.Σ must be a matrix or vector of vectors")
+        end
         σ2 = diag(Σ)
     end
     μ = Vector{Float64}(undef, y_dim)

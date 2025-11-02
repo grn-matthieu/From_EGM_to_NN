@@ -77,7 +77,8 @@ function FeatureScaler(P, G, S, settings)
     mean_range = max(Float32(income_upper - income_lower), 1.0f-6)
 
     # Component-level normalization (CSVAR or multi-component models)
-    include_components = is_csvar || y_dim > 1
+    # Include component-level features only when dimension > 1
+    include_components = y_dim > 1
     y_min_vec = include_components ? Float32.(lower) : Float32[]
     y_range_vec =
         include_components ? Float32.(max.(upper - lower, fill(1e-6, y_dim))) : Float32[]
@@ -152,17 +153,28 @@ function build_feature_batch_from_states(
     y_dim = size(y_components, 1)
     n = length(w)
     y_dim > 0 || error("build_feature_batch_from_states requires positive state dimension")
-    feature_dim = y_dim + 2
+
+    # Determine whether to include component-level features (matches FeatureScaler logic)
+    include_components = y_dim > 1
+    feature_dim = include_components ? (y_dim + 2) : 2
+
     X = Matrix{Float32}(undef, feature_dim, n)
+
+    # Compute aggregate income
     if scaler.csvar_mode
         mean_vals = vec(sum(exp.(y_components); dims = 1))
     else
         mean_vals = vec(sum(y_components; dims = 1)) ./ y_dim
     end
     X[1, :] .= Float32.(mean_vals)
-    for j = 1:y_dim
-        X[1+j, :] .= Float32.(y_components[j, :])
+
+    # Add component features only if y_dim > 1
+    if include_components
+        for j = 1:y_dim
+            X[1+j, :] .= Float32.(y_components[j, :])
+        end
     end
+
     X[end, :] .= Float32.(w)
     normalize_feature_batch!(scaler, X)
     return X

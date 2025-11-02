@@ -290,9 +290,17 @@ function build_dimension_variants(base_cfg::NamedTuple, config::BenchmarkConfig)
     persistence = 0.70
     variance = 0.04
 
+    # Filter out d=1 if present with a warning
+    # TODO: Debug why CSVAR with d=1 produces NaNs in NN training from epoch 1
+    dims_to_use = filter(d -> d > 1, config.dims)
+    if length(dims_to_use) < length(config.dims)
+        excluded = filter(d -> d == 1, config.dims)
+        @warn "Excluding dimension(s) $excluded from CSVAR benchmark (known issue: NN training produces NaNs)"
+    end
+
     variants = build_dimensional_overrides(
         base_cfg;
-        dims = config.dims,
+        dims = dims_to_use,
         total_income = total_income,
         persistence = persistence,
         variance = variance,
@@ -601,7 +609,7 @@ function aggregate_results(results)
         :final_rmse => mean => :rmse_mean,
         :final_rmse => std => :rmse_std,
         :mean_ee => mean => :mean_ee_avg,
-        :converged => x -> mean(Float64.(x)) => :convergence_rate,
+        :converged => (x -> mean(Float64.(x))) => :convergence_rate,
         nrow => :n_runs,
     )
 
